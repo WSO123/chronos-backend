@@ -1,4 +1,4 @@
-# Note Backend AI - 智能笔记后端
+# Chronos Backend AI - 后端
 
 这是一个基于 **FastAPI + LangGraph** 的后端系统。
 

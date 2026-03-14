@@ -4,7 +4,7 @@ services:
   # Database: PostgreSQL with pgvector extension
   db:
     image: pgvector/pgvector:pg16
-    container_name: note_backend_db
+    container_name: chronos_db
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -18,7 +18,7 @@ services:
   # Message Broker & Cache: Redis
   redis:
     image: redis:7-alpine
-    container_name: note_backend_redis
+    container_name: chronos_redis
     restart: always
     ports:
       - "6379:6379"
@@ -26,7 +26,7 @@ services:
   # Object Storage: MinIO (S3 compatible)
   minio:
     image: minio/minio
-    container_name: note_backend_minio
+    container_name: chronos_minio
     restart: always
     command: server /data --console-address ":9001"
     environment:
