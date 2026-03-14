@@ -12,7 +12,7 @@ def health_check():
 
 @app.get("/")
 def root():
-    return {"message": "Welcome to Note Backend AI API"}
+    return {"message": "Welcome to chronos Backend AI API"}
 
 if __name__ == "__main__":
     import uvicorn
