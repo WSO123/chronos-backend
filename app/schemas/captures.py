@@ -43,3 +43,39 @@ class CaptureCreateResponse(BaseModel):
     capture: CaptureResponse
     parse_result: AIParseResultResponse
     inbox_item: InboxItemResponse
+
+
+class ExternalCaptureImportCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data_source_connection_id: uuid.UUID
+    external_item_id: str = Field(min_length=1, max_length=255)
+    external_item_type: str = Field(default="external_item", min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=255)
+    body: str | None = None
+    occurred_at: datetime | None = None
+    external_payload: dict = Field(default_factory=dict)
+
+
+class ExternalCaptureImportResponse(TimestampedResponse):
+    user_id: uuid.UUID
+    data_source_connection_id: uuid.UUID | None
+    source: CaptureSource
+    provider: str
+    external_item_id: str
+    external_item_type: str
+    title: str
+    body: str | None
+    occurred_at: datetime | None
+    normalized_text: str
+    external_payload: dict
+    capture_input_id: uuid.UUID | None
+    inbox_item_id: uuid.UUID | None
+
+
+class ExternalCaptureImportCreateResponse(BaseModel):
+    import_record: ExternalCaptureImportResponse
+    capture: CaptureResponse
+    parse_result: AIParseResultResponse
+    inbox_item: InboxItemResponse
+    created: bool

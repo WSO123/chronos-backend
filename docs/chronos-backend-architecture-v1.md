@@ -259,7 +259,7 @@ P3 扩展：
 - 语音输入
 - 图片输入
 - 邮件 / 日历来源
-- 健康或外部数据来源
+- 外部来源条目导入
 
 核心对象：
 
@@ -268,6 +268,7 @@ P3 扩展：
 
 P3 扩展对象：
 
+- ExternalCaptureImport
 - Attachment
 
 ### 7.2 Inbox Module
@@ -480,7 +481,7 @@ Data Source 是 P3 自然生长模块的权限和连接状态底座，服务日�
 
 - 不保存真实 OAuth token。
 - 不直接拉取外部数据。
-- 不把外部来源任务写入 Task，后续由专门 worker 解析并进入 Capture / Inbox。
+- 不把外部来源任务直接写入 Task；Calendar / Email 条目必须先通过 ExternalCaptureImport 进入 Capture / Inbox。
 
 核心对象：
 
@@ -571,6 +572,35 @@ DataSourceConnection {
 - 该模型只保存连接状态和非敏感元数据，不保存 OAuth token。
 - P3 后续同步 worker 应读取该表决定是否可同步。
 - 外部数据导入后应进入 Capture / Inbox，不直接绕过确认层写入正式任务。
+
+### ExternalCaptureImport
+
+```text
+ExternalCaptureImport {
+  id
+  user_id
+  data_source_connection_id
+  source                  // calendar | email
+  provider
+  external_item_id
+  external_item_type
+  title
+  body
+  occurred_at
+  normalized_text
+  external_payload
+  capture_input_id
+  inbox_item_id
+  created_at
+  updated_at
+}
+```
+
+说明：
+
+- 记录外部 Calendar / Email 条目与 Chronos Capture / Inbox 的映射。
+- 通过 `user_id + source + provider + external_item_id` 保证幂等导入。
+- Health 数据不走该模型；后续应进入 Energy / Health 专用数据模型。
 
 ### CaptureInput
 
@@ -961,6 +991,7 @@ API 采用两类接口：
 
 ```text
 POST /api/v1/captures
+POST /api/v1/captures/external-imports
 GET  /api/v1/captures/{capture_id}
 ```
 
@@ -968,6 +999,7 @@ GET  /api/v1/captures/{capture_id}
 
 - `POST /captures` 创建输入并触发解析任务。
 - P1 支持文本输入。
+- `POST /captures/external-imports` 服务 P3 Calendar / Email worker 的标准导入入口，生成 `CaptureInput(input_type=external)` 并进入 Inbox。
 - 语音和图片后续通过附件扩展。
 - 如果解析异步执行，返回 `capture_id` 和 `ai_job_id`，前端可轮询 job 状态或刷新 Inbox。
 
@@ -1386,6 +1418,7 @@ app/
 - User
 - UserSettings
 - DataSourceConnection
+- ExternalCaptureImport
 - Goal
 - Task
 - TaskStep
@@ -1509,8 +1542,8 @@ P1 不是以“接口都写完”为验收，而是以核心闭环跑通为验�
 
 - 语音输入
 - 图片输入
-- 日历接入（已支持 Data Source 连接状态底座，真实同步待后续）
-- 邮件接入（已支持 Data Source 连接状态底座，真实同步待后续）
+- 日历接入（已支持 Data Source 连接状态底座和 External Capture Import，真实第三方同步待后续）
+- 邮件接入（已支持 Data Source 连接状态底座和 External Capture Import，真实第三方同步待后续）
 - 睡眠 / 压力数据接入（已支持 Health 连接状态底座，真实数据待后续）
 - Energy Dashboard
 - 自动提醒增强

@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.enums import EntityType, InboxItemStatus, InboxItemType, TaskSource, ValueLevel
+from app.models.enums import CaptureSource, EntityType, InboxItemStatus, InboxItemType, TaskSource, ValueLevel
 from app.models.inbox import InboxItem
 from app.services.activity_event_service import activity_event_service
 from app.services.errors import InvalidStateError, NotFoundError, ValidationDomainError
@@ -82,7 +82,7 @@ class InboxService:
                 priority=item.suggested_priority or 3,
                 value_level=ValueLevel.MEDIUM,
                 deadline=item.suggested_deadline,
-                source=TaskSource.CAPTURE,
+                source=self._task_source_for(item),
                 commit=False,
             )
             item.status = InboxItemStatus.CONFIRMED
@@ -147,6 +147,14 @@ class InboxService:
         if item is None:
             raise NotFoundError("Inbox item not found")
         return item
+
+    def _task_source_for(self, item: InboxItem) -> TaskSource:
+        capture_source = item.capture_input.source
+        if capture_source == CaptureSource.EMAIL:
+            return TaskSource.EMAIL
+        if capture_source == CaptureSource.CALENDAR:
+            return TaskSource.CALENDAR
+        return TaskSource.CAPTURE
 
 
 inbox_service = InboxService()
