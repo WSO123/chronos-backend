@@ -47,6 +47,36 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(today["sections"]["pinned_tasks"][0]["title"], "Protect high value work")
         self.assertEqual(today["sections"]["low_priority_tasks"][0]["title"], "Optional cleanup")
         self.assertEqual(today["progress"]["total_count"], 2)
+        self.assertEqual(today["insights_preview"]["source"], "rule-today-insights-v1")
+        self.assertEqual(today["insights_preview"]["risk_alerts"][0]["key"], "high_value_due_today")
+        self.assertEqual(today["insights_preview"]["remaining_time_suggestion"]["key"], "remaining_time")
+        self.assertTrue(today["insights_preview"]["adjustment_suggestions"])
+
+    def test_today_insights_preview_flags_overdue_and_heavy_work(self):
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Recover overdue milestone",
+            estimated_duration_min=120,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+            deadline=self.plan_date - timedelta(days=1),
+        )
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Heavy remaining work",
+            estimated_duration_min=90,
+            priority=2,
+            value_level=ValueLevel.HIGH,
+        )
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        preview = today["insights_preview"]
+
+        self.assertEqual(preview["risk_alerts"][0]["key"], "overdue_task")
+        self.assertEqual(preview["remaining_time_suggestion"]["signal"], "risk")
+        self.assertEqual(preview["adjustment_suggestions"][0]["key"], "protect_risk_task")
 
     def test_strategy_detail_explains_current_plan_without_changing_state(self):
         task_service.create_task(

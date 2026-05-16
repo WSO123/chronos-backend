@@ -56,6 +56,21 @@ class TodayQuickActionsResponse(BaseModel):
     can_view_report: bool
 
 
+class TodayInsightMessageResponse(BaseModel):
+    key: str
+    title: str
+    message: str
+    signal: str
+    task_id: uuid.UUID | None = None
+
+
+class TodayInsightsPreviewResponse(BaseModel):
+    risk_alerts: list[TodayInsightMessageResponse] = Field(default_factory=list)
+    remaining_time_suggestion: TodayInsightMessageResponse
+    adjustment_suggestions: list[TodayInsightMessageResponse] = Field(default_factory=list)
+    source: str
+
+
 class TodayResponse(BaseModel):
     date: date
     greeting: str
@@ -64,6 +79,7 @@ class TodayResponse(BaseModel):
     strategy: TodayStrategyResponse
     progress: TodayProgressResponse
     sections: TodaySectionsResponse
+    insights_preview: TodayInsightsPreviewResponse
     quick_actions: TodayQuickActionsResponse
 
 

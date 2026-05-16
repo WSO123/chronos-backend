@@ -401,6 +401,7 @@ class PlanningService:
             },
             "progress": progress,
             "sections": self._sections_for(items),
+            "insights_preview": self._insights_preview(plan=plan, items=items, progress=progress),
             "quick_actions": {
                 "can_replan": True,
                 "can_capture": True,
@@ -511,6 +512,130 @@ class PlanningService:
             "value_level": item.task.value_level,
             "deadline": item.task.deadline,
         }
+
+    def _insights_preview(self, *, plan: DailyPlan, items: list[DailyPlanItem], progress: dict) -> dict:
+        active_items = [
+            item
+            for item in items
+            if item.section != DailyPlanItemSection.ROLLED_OVER
+            and item.status
+            not in {DailyPlanItemStatus.COMPLETED, DailyPlanItemStatus.SKIPPED, DailyPlanItemStatus.POSTPONED}
+        ]
+        remaining_minutes = sum(item.estimated_duration_min or item.task.estimated_duration_min or 25 for item in active_items)
+        risk_alerts = self._today_risk_alerts(plan=plan, items=active_items)
+        return {
+            "risk_alerts": risk_alerts,
+            "remaining_time_suggestion": self._remaining_time_suggestion(remaining_minutes=remaining_minutes),
+            "adjustment_suggestions": self._today_adjustment_suggestions(
+                items=items,
+                active_items=active_items,
+                risk_alerts=risk_alerts,
+                progress=progress,
+            ),
+            "source": "rule-today-insights-v1",
+        }
+
+    def _today_risk_alerts(self, *, plan: DailyPlan, items: list[DailyPlanItem]) -> list[dict]:
+        alerts: list[dict] = []
+        for item in items:
+            task = item.task
+            if task.deadline is None:
+                continue
+            if task.deadline < plan.plan_date:
+                alerts.append(
+                    {
+                        "key": "overdue_task",
+                        "title": "Overdue task needs protection",
+                        "message": f"{task.title} is past its deadline. Keep it near the front if it still matters.",
+                        "signal": "risk",
+                        "task_id": task.id,
+                    }
+                )
+            elif task.deadline == plan.plan_date and task.value_level == ValueLevel.HIGH:
+                alerts.append(
+                    {
+                        "key": "high_value_due_today",
+                        "title": "High-value task is due today",
+                        "message": f"{task.title} should stay protected before lighter work.",
+                        "signal": "risk",
+                        "task_id": task.id,
+                    }
+                )
+        return alerts[:3]
+
+    def _remaining_time_suggestion(self, *, remaining_minutes: int) -> dict:
+        if remaining_minutes == 0:
+            message = "No active planned work is left in the main sequence."
+            signal = "positive"
+        elif remaining_minutes <= 75:
+            message = "The remaining plan is light enough to keep a calm pace."
+            signal = "positive"
+        elif remaining_minutes >= 180:
+            message = "The remaining plan is heavy. Finish one protected task before deciding what to move."
+            signal = "risk"
+        else:
+            message = "There is a steady block of work left. Keep the current order and avoid reshuffling too early."
+            signal = "neutral"
+        return {
+            "key": "remaining_time",
+            "title": "Remaining time",
+            "message": message,
+            "signal": signal,
+            "task_id": None,
+        }
+
+    def _today_adjustment_suggestions(
+        self,
+        *,
+        items: list[DailyPlanItem],
+        active_items: list[DailyPlanItem],
+        risk_alerts: list[dict],
+        progress: dict,
+    ) -> list[dict]:
+        suggestions: list[dict] = []
+        rolled_over_count = len([item for item in items if item.section == DailyPlanItemSection.ROLLED_OVER])
+        if rolled_over_count:
+            suggestions.append(
+                {
+                    "key": "rolled_over_visible",
+                    "title": "Postponed work is visible",
+                    "message": f"{rolled_over_count} postponed tasks are visible, but they do not need to lead the day.",
+                    "signal": "neutral",
+                    "task_id": None,
+                }
+            )
+        if risk_alerts:
+            suggestions.append(
+                {
+                    "key": "protect_risk_task",
+                    "title": "Protect the risky item first",
+                    "message": "Handle the first risk item before adding new work.",
+                    "signal": "risk",
+                    "task_id": risk_alerts[0]["task_id"],
+                }
+            )
+        elif active_items and progress["completed_count"] == 0:
+            first_item = active_items[0]
+            suggestions.append(
+                {
+                    "key": "start_first_action",
+                    "title": "Start with the first action",
+                    "message": f"Begin with {first_item.task.title}; avoid replanning before one concrete step is done.",
+                    "signal": "neutral",
+                    "task_id": first_item.task_id,
+                }
+            )
+        elif progress["completion_rate"] >= 0.8:
+            suggestions.append(
+                {
+                    "key": "close_the_loop",
+                    "title": "Close the loop",
+                    "message": "Most planned work is done. Review the day before pulling in more tasks.",
+                    "signal": "positive",
+                    "task_id": None,
+                }
+            )
+        return suggestions[:3]
 
     def _progress_for(self, *, plan: DailyPlan, items: list[DailyPlanItem]) -> dict:
         counted_items = [item for item in items if item.section != DailyPlanItemSection.ROLLED_OVER]

@@ -273,6 +273,18 @@ Response shape:
     "low_priority_tasks": [],
     "rolled_over_tasks": []
   },
+  "insights_preview": {
+    "risk_alerts": [],
+    "remaining_time_suggestion": {
+      "key": "remaining_time",
+      "title": "Remaining time",
+      "message": "The remaining plan is light enough to keep a calm pace.",
+      "signal": "positive",
+      "task_id": null
+    },
+    "adjustment_suggestions": [],
+    "source": "rule-today-insights-v1"
+  },
   "quick_actions": {
     "can_replan": true,
     "can_capture": true,
@@ -304,6 +316,7 @@ Task item fields:
 Frontend notes:
 
 - Today 首页优先渲染 `strategy.summary`、`pinned_tasks`、`recommended_tasks` 和进度。
+- `insights_preview` 是 P2 轻量预览，只展示风险提醒、剩余时间建议和最多几条调整建议。
 - `recommendation_reason` 是解释文案，可在轻提示 / 展开区展示，不要让它抢占任务列表。
 - `rolled_over_tasks` 默认可以弱化或折叠。
 - Strategy Detail 不在 Today 默认首屏展开，用户主动查看时再调用 `/today/strategy`。

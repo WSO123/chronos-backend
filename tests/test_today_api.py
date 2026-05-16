@@ -38,6 +38,8 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(body["date"], "2026-05-16")
         self.assertEqual(body["plan_version"], 1)
         self.assertEqual(body["sections"]["pinned_tasks"][0]["title"], "Do the important thing")
+        self.assertEqual(body["insights_preview"]["source"], "rule-today-insights-v1")
+        self.assertEqual(body["insights_preview"]["remaining_time_suggestion"]["key"], "remaining_time")
         self.assertEqual(body["quick_actions"]["can_replan"], True)
 
     def test_get_strategy_detail_uses_current_user_only(self):

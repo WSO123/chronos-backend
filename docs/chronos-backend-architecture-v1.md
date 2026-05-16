@@ -945,7 +945,7 @@ PATCH /api/v1/today/items/{item_id}
 说明：
 
 - `GET /today` 返回今日页面聚合数据。
-- 包含 strategy summary、推荐任务序列、今日进度、快速操作状态。
+- 包含 strategy summary、推荐任务序列、今日进度、Today Insights Preview、快速操作状态。
 - 不默认返回完整 AI 评分细节。
 - `GET /today/strategy` 返回 Strategy Detail，解释当前策略、PlanRevision、轻量 factors 和任务推荐理由。
 - `replan` 生成新的 PlanRevision；若异步执行，返回 `ai_job_id`。
