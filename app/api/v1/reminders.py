@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user_id
 from app.core.db import get_db
 from app.schemas.reminders import (
+    ReminderBulkSeenRequest,
+    ReminderBulkSeenResponse,
     ReminderCreate,
     ReminderListResponse,
     ReminderResponse,
@@ -69,6 +71,24 @@ def create_reminder(
         payload=payload.model_dump(),
     )
     return reminder_service.to_response(reminder)
+
+
+@router.post("/seen", response_model=ReminderBulkSeenResponse)
+def mark_reminders_seen(
+    payload: ReminderBulkSeenRequest,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    result = reminder_service.mark_reminders_seen(
+        db,
+        reminder_ids=payload.reminder_ids,
+        user_id=user_id,
+    )
+    return {
+        "updated_count": result["updated_count"],
+        "already_seen_count": result["already_seen_count"],
+        "reminders": [reminder_service.to_response(reminder) for reminder in result["reminders"]],
+    }
 
 
 @router.post("/{reminder_id}/seen", response_model=ReminderResponse)

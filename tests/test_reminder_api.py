@@ -105,6 +105,38 @@ class ReminderAPITests(unittest.TestCase):
         self.assertIsNotNone(seen_response.json()["seen_at"])
         self.assertEqual(other_seen_response.status_code, 404)
 
+    def test_mark_reminders_seen_batch(self):
+        first = self.client.post(
+            "/api/v1/reminders",
+            json={
+                "title": "Batch seen API 1",
+                "scheduled_for": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            },
+            headers=self.headers,
+        ).json()
+        second = self.client.post(
+            "/api/v1/reminders",
+            json={
+                "title": "Batch seen API 2",
+                "scheduled_for": (datetime.now(UTC) + timedelta(hours=2)).isoformat(),
+            },
+            headers=self.headers,
+        ).json()
+        self.client.post(f"/api/v1/reminders/{second['id']}/seen", headers=self.headers)
+
+        response = self.client.post(
+            "/api/v1/reminders/seen",
+            json={"reminder_ids": [first["id"], second["id"], first["id"]]},
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["updated_count"], 1)
+        self.assertEqual(body["already_seen_count"], 1)
+        self.assertEqual(len(body["reminders"]), 2)
+        self.assertTrue(all(reminder["seen_at"] for reminder in body["reminders"]))
+
     def test_summary_returns_lightweight_header_counts(self):
         now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)
         due_response = self.client.post(

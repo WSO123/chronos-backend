@@ -41,6 +41,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Reminder Center | `GET /api/v1/reminders` | Ready |
 | Create Manual Reminder | `POST /api/v1/reminders` | Ready |
 | Mark Reminder Seen | `POST /api/v1/reminders/{id}/seen` | Ready |
+| Mark Reminders Seen Batch | `POST /api/v1/reminders/seen` | Ready |
 | Dismiss Reminder | `POST /api/v1/reminders/{id}/dismiss` | Ready |
 | Reminder Scheduler Plan | `GET /api/v1/scheduler/reminders` | Ready |
 | Reminder Celery Beat Proposal | `GET /api/v1/scheduler/reminders/celery-beat` | Ready |
@@ -688,6 +689,34 @@ Rules:
 - seen 和 dismiss 是两种不同动作。
 - `seen_at` 可用于 Reminder Center 或 Today Header 清除未看数量。
 - 重复调用保持幂等。
+
+### POST `/api/v1/reminders/seen`
+
+批量标记 reminders 已看过，用于 Reminder Center 打开时清理未看数字。
+
+Request:
+
+```json
+{
+  "reminder_ids": ["uuid-1", "uuid-2"]
+}
+```
+
+Response:
+
+```json
+{
+  "updated_count": 1,
+  "already_seen_count": 1,
+  "reminders": []
+}
+```
+
+Rules:
+
+- `reminder_ids` 最少 1 个，最多 100 个。
+- 重复 id 会被去重。
+- 任意 reminder 不属于当前用户时返回 `NOT_FOUND`，不暴露跨用户数据。
 
 Frontend notes:
 

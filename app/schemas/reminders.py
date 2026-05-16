@@ -50,3 +50,15 @@ class ReminderSummaryResponse(BaseModel):
     execution_count: int
     deadline_count: int
     next_reminder: ReminderResponse | None
+
+
+class ReminderBulkSeenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reminder_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+
+
+class ReminderBulkSeenResponse(BaseModel):
+    updated_count: int
+    already_seen_count: int
+    reminders: list[ReminderResponse]

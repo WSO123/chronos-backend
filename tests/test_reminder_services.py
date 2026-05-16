@@ -169,6 +169,41 @@ class ReminderServiceTests(unittest.TestCase):
         with self.assertRaises(NotFoundError):
             reminder_service.mark_reminder_seen(self.db, reminder_id=reminder.id, user_id=self.other_user.id)
 
+    def test_mark_reminders_seen_updates_batch_and_rejects_cross_user_ids(self):
+        first = reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={"title": "Batch seen 1", "scheduled_for": datetime.now(UTC)},
+        )
+        second = reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={"title": "Batch seen 2", "scheduled_for": datetime.now(UTC)},
+        )
+        other = reminder_service.create_reminder(
+            self.db,
+            user_id=self.other_user.id,
+            payload={"title": "Other batch seen", "scheduled_for": datetime.now(UTC)},
+        )
+        reminder_service.mark_reminder_seen(self.db, reminder_id=second.id, user_id=self.user.id)
+
+        result = reminder_service.mark_reminders_seen(
+            self.db,
+            user_id=self.user.id,
+            reminder_ids=[first.id, second.id, first.id],
+        )
+
+        self.assertEqual(result["updated_count"], 1)
+        self.assertEqual(result["already_seen_count"], 1)
+        self.assertEqual(len(result["reminders"]), 2)
+        self.assertTrue(all(reminder.seen_at is not None for reminder in result["reminders"]))
+        with self.assertRaises(NotFoundError):
+            reminder_service.mark_reminders_seen(
+                self.db,
+                user_id=self.user.id,
+                reminder_ids=[other.id],
+            )
+
     def test_dispatch_due_reminders_marks_due_as_sent(self):
         now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)
         due = reminder_service.create_reminder(

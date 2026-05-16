@@ -136,6 +136,43 @@ class ReminderService:
             db.refresh(reminder)
         return reminder
 
+    def mark_reminders_seen(
+        self,
+        db: Session,
+        *,
+        reminder_ids: list[uuid.UUID],
+        user_id: uuid.UUID,
+    ) -> dict:
+        unique_ids = list(dict.fromkeys(reminder_ids))
+        stmt = (
+            select(Reminder)
+            .where(
+                Reminder.user_id == user_id,
+                Reminder.id.in_(unique_ids),
+            )
+            .order_by(Reminder.scheduled_for, Reminder.created_at)
+        )
+        reminders = list(db.scalars(stmt).all())
+        if len(reminders) != len(unique_ids):
+            raise NotFoundError("Reminder not found")
+        now = datetime.now(UTC)
+        updated_count = 0
+        already_seen_count = 0
+        for reminder in reminders:
+            if reminder.seen_at is None:
+                reminder.seen_at = now
+                updated_count += 1
+            else:
+                already_seen_count += 1
+        db.commit()
+        for reminder in reminders:
+            db.refresh(reminder)
+        return {
+            "updated_count": updated_count,
+            "already_seen_count": already_seen_count,
+            "reminders": reminders,
+        }
+
     def dismiss_reminder(self, db: Session, *, reminder_id: uuid.UUID, user_id: uuid.UUID) -> Reminder:
         reminder = self._get_user_reminder(db, reminder_id=reminder_id, user_id=user_id)
         if reminder.status in {"dismissed", "canceled"}:
