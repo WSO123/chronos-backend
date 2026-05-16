@@ -7,7 +7,7 @@ from app.models.reminder import Reminder
 from app.models.reminder_delivery import ReminderDeliveryAttempt
 from app.models.enums import TaskStatus
 from app.models.user import UserSettings
-from app.services.errors import NotFoundError, ValidationDomainError
+from app.services.errors import InvalidStateError, NotFoundError, ValidationDomainError
 from app.services.goal_service import goal_service
 from app.services.planning_service import planning_service
 from app.services.reminder_service import reminder_service
@@ -202,6 +202,53 @@ class ReminderServiceTests(unittest.TestCase):
                 self.db,
                 user_id=self.user.id,
                 reminder_ids=[other.id],
+            )
+
+    def test_snooze_reminder_reschedules_pending_reminder(self):
+        now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)
+        reminder = reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={
+                "title": "Snooze reminder",
+                "scheduled_for": now - timedelta(minutes=1),
+            },
+        )
+
+        snoozed = reminder_service.snooze_reminder(
+            self.db,
+            reminder_id=reminder.id,
+            user_id=self.user.id,
+            minutes=20,
+            now=now,
+        )
+
+        self.assertEqual(snoozed.status, "scheduled")
+        self.assertEqual(snoozed.scheduled_for.replace(tzinfo=UTC), now + timedelta(minutes=20))
+        self.assertEqual(snoozed.reminder_metadata["snoozed_count"], 1)
+        self.assertEqual(snoozed.reminder_metadata["last_snooze_minutes"], 20)
+        self.assertIsNotNone(snoozed.seen_at)
+
+    def test_snooze_reminder_rejects_sent_and_cross_user(self):
+        reminder = reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={"title": "Sent snooze", "scheduled_for": datetime.now(UTC)},
+        )
+        reminder.status = "sent"
+        self.db.commit()
+
+        with self.assertRaises(InvalidStateError):
+            reminder_service.snooze_reminder(
+                self.db,
+                reminder_id=reminder.id,
+                user_id=self.user.id,
+            )
+        with self.assertRaises(NotFoundError):
+            reminder_service.snooze_reminder(
+                self.db,
+                reminder_id=reminder.id,
+                user_id=self.other_user.id,
             )
 
     def test_dispatch_due_reminders_marks_due_as_sent(self):

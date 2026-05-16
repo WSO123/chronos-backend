@@ -137,6 +137,36 @@ class ReminderAPITests(unittest.TestCase):
         self.assertEqual(len(body["reminders"]), 2)
         self.assertTrue(all(reminder["seen_at"] for reminder in body["reminders"]))
 
+    def test_snooze_reminder(self):
+        now = datetime.now(UTC)
+        create_response = self.client.post(
+            "/api/v1/reminders",
+            json={
+                "title": "Snooze API reminder",
+                "scheduled_for": (now - timedelta(minutes=1)).isoformat(),
+            },
+            headers=self.headers,
+        )
+
+        response = self.client.post(
+            f"/api/v1/reminders/{create_response.json()['id']}/snooze",
+            json={"minutes": 30},
+            headers=self.headers,
+        )
+        other_response = self.client.post(
+            f"/api/v1/reminders/{create_response.json()['id']}/snooze",
+            json={"minutes": 30},
+            headers=self.other_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "scheduled")
+        self.assertIsNotNone(body["seen_at"])
+        self.assertEqual(body["reminder_metadata"]["snoozed_count"], 1)
+        self.assertEqual(body["reminder_metadata"]["last_snooze_minutes"], 30)
+        self.assertEqual(other_response.status_code, 404)
+
     def test_summary_returns_lightweight_header_counts(self):
         now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)
         due_response = self.client.post(

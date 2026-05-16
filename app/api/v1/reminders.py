@@ -12,6 +12,7 @@ from app.schemas.reminders import (
     ReminderCreate,
     ReminderListResponse,
     ReminderResponse,
+    ReminderSnoozeRequest,
     ReminderSummaryResponse,
 )
 from app.services.reminder_service import reminder_service
@@ -98,6 +99,22 @@ def mark_reminder_seen(
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
     reminder = reminder_service.mark_reminder_seen(db, reminder_id=reminder_id, user_id=user_id)
+    return reminder_service.to_response(reminder)
+
+
+@router.post("/{reminder_id}/snooze", response_model=ReminderResponse)
+def snooze_reminder(
+    reminder_id: uuid.UUID,
+    payload: ReminderSnoozeRequest,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    reminder = reminder_service.snooze_reminder(
+        db,
+        reminder_id=reminder_id,
+        user_id=user_id,
+        minutes=payload.minutes,
+    )
     return reminder_service.to_response(reminder)
 
 

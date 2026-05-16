@@ -62,3 +62,9 @@ class ReminderBulkSeenResponse(BaseModel):
     updated_count: int
     already_seen_count: int
     reminders: list[ReminderResponse]
+
+
+class ReminderSnoozeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    minutes: int = Field(default=15, ge=5, le=1440)

@@ -185,6 +185,35 @@ class ReminderService:
         db.refresh(reminder)
         return reminder
 
+    def snooze_reminder(
+        self,
+        db: Session,
+        *,
+        reminder_id: uuid.UUID,
+        user_id: uuid.UUID,
+        minutes: int = 15,
+        now: datetime | None = None,
+    ) -> Reminder:
+        reminder = self._get_user_reminder(db, reminder_id=reminder_id, user_id=user_id)
+        if reminder.status != "scheduled":
+            raise InvalidStateError(f"{reminder.status} reminders cannot be snoozed")
+        if minutes < 5 or minutes > 1440:
+            raise ValidationDomainError("Snooze minutes must be between 5 and 1440")
+        resolved_now = self._normalize_datetime(now or datetime.now(UTC))
+        previous_scheduled_for = self._normalize_datetime(reminder.scheduled_for)
+        reminder.scheduled_for = resolved_now + timedelta(minutes=minutes)
+        metadata = dict(reminder.reminder_metadata or {})
+        metadata["snoozed_count"] = int(metadata.get("snoozed_count") or 0) + 1
+        metadata["last_snoozed_at"] = resolved_now.isoformat()
+        metadata["last_snooze_minutes"] = minutes
+        metadata["previous_scheduled_for"] = previous_scheduled_for.isoformat()
+        reminder.reminder_metadata = metadata
+        if reminder.seen_at is None:
+            reminder.seen_at = resolved_now
+        db.commit()
+        db.refresh(reminder)
+        return reminder
+
     def dispatch_due_reminders(
         self,
         db: Session,

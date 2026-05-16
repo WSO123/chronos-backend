@@ -46,6 +46,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Create Manual Reminder | `POST /api/v1/reminders` | Ready |
 | Mark Reminder Seen | `POST /api/v1/reminders/{id}/seen` | Ready |
 | Mark Reminders Seen Batch | `POST /api/v1/reminders/seen` | Ready |
+| Snooze Reminder | `POST /api/v1/reminders/{id}/snooze` | Ready |
 | Dismiss Reminder | `POST /api/v1/reminders/{id}/dismiss` | Ready |
 | Scheduler Overview | `GET /api/v1/scheduler/overview` | Ready |
 | Reminder Scheduler Plan | `GET /api/v1/scheduler/reminders` | Ready |
@@ -835,6 +836,43 @@ Rules:
 - `reminder.generate_execution_for_active_users` 负责 fanout，只处理已有 Today active plan 的 active users；无 plan 用户计入 `no_plan_count`，不会创建 Today。
 - deadline / execution generator 会读取 `/me/settings` 的通知开关、类型开关、channel 和默认提醒参数；worker 参数可覆盖默认时间参数。
 - `reminder.cleanup_delivery_attempts` 只删除旧 delivery attempts，不删除 Reminder 主记录；`retention_days` 默认 30 天。
+
+### POST `/api/v1/reminders/{id}/snooze`
+
+用于 Reminder Center 的“稍后提醒”。只允许 `scheduled` reminder。
+
+Request:
+
+```json
+{
+  "minutes": 15
+}
+```
+
+Response key fields:
+
+```json
+{
+  "id": "uuid",
+  "status": "scheduled",
+  "scheduled_for": "2026-05-17T09:15:00Z",
+  "seen_at": "2026-05-17T09:00:00Z",
+  "reminder_metadata": {
+    "snoozed_count": 1,
+    "last_snoozed_at": "2026-05-17T09:00:00Z",
+    "last_snooze_minutes": 15,
+    "previous_scheduled_for": "2026-05-17T08:59:00Z"
+  }
+}
+```
+
+Rules:
+
+- `minutes` 范围为 5..1440，默认 15。
+- 只修改 reminder 的 `scheduled_for` 和 snooze metadata。
+- 如果 reminder 未读，会设置 `seen_at`。
+- `sent` / `dismissed` / `canceled` reminder 不能 snooze。
+- Snooze 不修改 Task / Goal / Today。
 
 ## 10. Reminder Scheduler Plan
 
