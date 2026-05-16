@@ -40,6 +40,32 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(body["sections"]["pinned_tasks"][0]["title"], "Do the important thing")
         self.assertEqual(body["quick_actions"]["can_replan"], True)
 
+    def test_get_strategy_detail_uses_current_user_only(self):
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Private strategy task", "priority": 1, "value_level": "high"},
+            headers=self.headers,
+        )
+        other_task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Other strategy task", "priority": 1, "value_level": "high"},
+            headers=self.other_headers,
+        )
+        self.assertEqual(task_response.status_code, 201)
+        self.assertEqual(other_task_response.status_code, 201)
+
+        response = self.client.get("/api/v1/today/strategy?plan_date=2026-05-16", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["date"], "2026-05-16")
+        self.assertEqual(body["plan_version"], 1)
+        self.assertEqual(body["factors"]["task_count"], 1)
+        self.assertEqual(body["task_rationales"][0]["title"], "Private strategy task")
+        self.assertNotIn("Other strategy task", {item["title"] for item in body["task_rationales"]})
+        self.assertTrue(body["explanation"])
+        self.assertEqual(body["source"]["model_name"], "rule-planner")
+
     def test_replan_and_complete_today_item(self):
         self.client.post("/api/v1/tasks", json={"title": "First task"}, headers=self.headers)
         today_response = self.client.get("/api/v1/today?plan_date=2026-05-16", headers=self.headers)

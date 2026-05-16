@@ -910,6 +910,7 @@ POST /api/v1/inbox/{item_id}/discard
 
 ```text
 GET  /api/v1/today
+GET  /api/v1/today/strategy
 POST /api/v1/today/replan
 PATCH /api/v1/today/items/{item_id}
 ```
@@ -919,6 +920,7 @@ PATCH /api/v1/today/items/{item_id}
 - `GET /today` 返回今日页面聚合数据。
 - 包含 strategy summary、推荐任务序列、今日进度、快速操作状态。
 - 不默认返回完整 AI 评分细节。
+- `GET /today/strategy` 返回 Strategy Detail，解释当前策略、PlanRevision、轻量 factors 和任务推荐理由。
 - `replan` 生成新的 PlanRevision；若异步执行，返回 `ai_job_id`。
 
 ### Tasks
@@ -1053,10 +1055,50 @@ TodayResponse {
 }
 ```
 
+`GET /api/v1/today/strategy` 推荐返回：
+
+```text
+StrategyDetailResponse {
+  date
+  daily_plan_id
+  plan_version
+  summary
+  mode
+  primary_reason
+  revision {
+    plan_revision_id
+    version
+    trigger
+    reason
+    created_at
+  }
+  factors {
+    task_count
+    high_value_task_count
+    pinned_count
+    recommended_count
+    low_priority_count
+    rolled_over_count
+    total_estimated_minutes
+    completed_count
+    focus_minutes
+  }
+  explanation[]
+  task_rationales[]
+  source {
+    strategy_snapshot_id
+    model_name
+    prompt_version
+    generated_at
+  }
+}
+```
+
 注意：
 
 - Today 默认不展示复杂 score factors。
 - 如果用户进入 Strategy Detail，再调用单独接口获取解释。
+- Strategy Detail 只能解释当前 plan，不直接重新排序或改变 Task / Goal 状态；无 plan 时与 `GET /today` 一致 lazy create。
 - Today 要像每日执行入口，不要像数据驾驶舱。
 
 ---
@@ -1336,7 +1378,7 @@ P1 不是以“接口都写完”为验收，而是以核心闭环跑通为验�
 - Weekly Report（已支持轻量聚合）
 - Monthly Report
 - Insight Detail
-- Strategy Detail
+- Strategy Detail（已支持当前 Today 策略解释）
 - 滚动策略解释
 - 高价值任务分析
 

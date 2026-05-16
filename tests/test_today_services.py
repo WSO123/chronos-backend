@@ -48,6 +48,41 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(today["sections"]["low_priority_tasks"][0]["title"], "Optional cleanup")
         self.assertEqual(today["progress"]["total_count"], 2)
 
+    def test_strategy_detail_explains_current_plan_without_changing_state(self):
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Protect strategy task",
+            estimated_duration_min=45,
+            priority=2,
+            value_level=ValueLevel.HIGH,
+            deadline=self.plan_date,
+        )
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Keep lightweight admin visible",
+            estimated_duration_min=20,
+            priority=5,
+            value_level=ValueLevel.LOW,
+        )
+
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        same_today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        self.assertEqual(strategy["daily_plan_id"], same_today["daily_plan_id"])
+        self.assertEqual(strategy["plan_version"], 1)
+        self.assertEqual(strategy["revision"]["version"], 1)
+        self.assertEqual(strategy["factors"]["task_count"], 2)
+        self.assertEqual(strategy["factors"]["high_value_task_count"], 1)
+        self.assertEqual(strategy["factors"]["pinned_count"], 1)
+        self.assertEqual(strategy["factors"]["low_priority_count"], 1)
+        self.assertEqual(strategy["factors"]["total_estimated_minutes"], 65)
+        self.assertEqual(len(strategy["task_rationales"]), 2)
+        self.assertEqual(strategy["task_rationales"][0]["title"], "Protect strategy task")
+        self.assertTrue(strategy["explanation"])
+        self.assertEqual(strategy["source"]["model_name"], "rule-planner")
+
     def test_replan_creates_new_revision_and_keeps_same_plan(self):
         task_service.create_task(self.db, user_id=self.user.id, title="First task")
         today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)

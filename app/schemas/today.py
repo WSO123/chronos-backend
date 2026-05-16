@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -7,6 +7,7 @@ from app.models.enums import (
     DailyPlanItemSection,
     DailyPlanItemStatus,
     PlanningPreference,
+    PlanRevisionTrigger,
     TaskStatus,
     ValueLevel,
 )
@@ -64,6 +65,47 @@ class TodayResponse(BaseModel):
     progress: TodayProgressResponse
     sections: TodaySectionsResponse
     quick_actions: TodayQuickActionsResponse
+
+
+class StrategyDetailRevisionResponse(BaseModel):
+    plan_revision_id: uuid.UUID
+    version: int
+    trigger: PlanRevisionTrigger
+    reason: str | None
+    created_at: datetime
+
+
+class StrategyDetailFactorsResponse(BaseModel):
+    task_count: int
+    high_value_task_count: int
+    pinned_count: int
+    recommended_count: int
+    low_priority_count: int
+    rolled_over_count: int
+    total_estimated_minutes: int
+    completed_count: int
+    focus_minutes: int
+
+
+class StrategyDetailSourceResponse(BaseModel):
+    strategy_snapshot_id: uuid.UUID
+    model_name: str | None
+    prompt_version: str | None
+    generated_at: datetime
+
+
+class StrategyDetailResponse(BaseModel):
+    date: date
+    daily_plan_id: uuid.UUID
+    plan_version: int
+    summary: str
+    mode: PlanningPreference
+    primary_reason: str
+    revision: StrategyDetailRevisionResponse
+    factors: StrategyDetailFactorsResponse
+    explanation: list[str]
+    task_rationales: list[TodayTaskResponse]
+    source: StrategyDetailSourceResponse
 
 
 class TodayReplanRequest(BaseModel):

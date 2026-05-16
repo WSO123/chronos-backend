@@ -91,7 +91,7 @@ uv run python scripts/dev_seed_demo.py
 | --- | --- | --- |
 | Global Capture | `POST /captures` | Ready |
 | Inbox | `GET /inbox`, `PATCH /inbox/{id}`, `POST /inbox/{id}/confirm` | Ready |
-| Today | `GET /today`, `POST /today/replan`, `PATCH /today/items/{id}` | Ready |
+| Today | `GET /today`, `GET /today/strategy`, `POST /today/replan`, `PATCH /today/items/{id}` | Ready, Strategy Detail P2 Ready |
 | Task Detail | `GET /tasks/{id}`, `POST /tasks/{id}/breakdown`, steps / complete / postpone | Ready |
 | Focus | `POST /focus-sessions`, complete / interrupt / postpone | Ready |
 | Reports | `GET /reports/daily`, `POST /reports/daily/generate`, `GET /reports/weekly` | Daily Ready, Weekly P2 Ready |
@@ -305,6 +305,64 @@ Frontend notes:
 - Today 首页优先渲染 `strategy.summary`、`pinned_tasks`、`recommended_tasks` 和进度。
 - `recommendation_reason` 是解释文案，可在轻提示 / 展开区展示，不要让它抢占任务列表。
 - `rolled_over_tasks` 默认可以弱化或折叠。
+- Strategy Detail 不在 Today 默认首屏展开，用户主动查看时再调用 `/today/strategy`。
+
+### GET `/today/strategy`
+
+Query:
+
+```text
+plan_date=YYYY-MM-DD  // optional
+```
+
+用于 P2 Strategy Detail。它解释当前 Today 策略，不重新排序、不修改 Task / Goal 状态；如果当天还没有 plan，会与 `GET /today` 一致 lazy create。
+
+Response key fields:
+
+```json
+{
+  "date": "2026-05-16",
+  "daily_plan_id": "uuid",
+  "plan_version": 1,
+  "summary": "Use a steady order...",
+  "mode": "normal",
+  "primary_reason": "The sequence balances value, priority, and deadlines.",
+  "revision": {
+    "plan_revision_id": "uuid",
+    "version": 1,
+    "trigger": "initial",
+    "reason": "Initial Today plan",
+    "created_at": "2026-05-16T09:00:00Z"
+  },
+  "factors": {
+    "task_count": 3,
+    "high_value_task_count": 1,
+    "pinned_count": 1,
+    "recommended_count": 1,
+    "low_priority_count": 1,
+    "rolled_over_count": 0,
+    "total_estimated_minutes": 95,
+    "completed_count": 0,
+    "focus_minutes": 0
+  },
+  "explanation": [
+    "今天会平衡价值、截止时间和任务大小，不把 Today 变成复杂驾驶舱。"
+  ],
+  "task_rationales": [],
+  "source": {
+    "strategy_snapshot_id": "uuid",
+    "model_name": "rule-planner",
+    "prompt_version": "p1-rule-v1",
+    "generated_at": "2026-05-16T09:00:00Z"
+  }
+}
+```
+
+Frontend notes:
+
+- 默认展示 `summary`、`primary_reason`、`explanation` 和少量 `factors`。
+- `task_rationales` 复用 Today item 字段，可用于解释为什么某个任务被放在当前位置。
+- 不要把完整 factors 做成复杂驾驶舱；它是信任解释，不是操作中心。
 
 ### POST `/today/replan`
 

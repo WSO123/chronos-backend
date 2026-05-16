@@ -54,6 +54,22 @@ class PlanningService:
             db.commit()
         return self._build_today_response(db, plan=plan)
 
+    def get_strategy_detail(self, db: Session, *, user_id: uuid.UUID, plan_date: date | None = None) -> dict:
+        resolved_date = self._resolve_plan_date(db, user_id=user_id, plan_date=plan_date)
+        plan = self._get_active_plan(db, user_id=user_id, plan_date=resolved_date)
+        if plan is None:
+            plan = self._create_plan(
+                db,
+                user_id=user_id,
+                plan_date=resolved_date,
+                trigger=PlanRevisionTrigger.INITIAL,
+                reason="Initial Today plan",
+            )
+        else:
+            self._sync_current_items(db, plan=plan)
+            db.commit()
+        return self._build_strategy_detail_response(db, plan=plan)
+
     def replan_today(
         self,
         db: Session,
@@ -392,6 +408,76 @@ class PlanningService:
             },
         }
 
+    def _build_strategy_detail_response(self, db: Session, *, plan: DailyPlan) -> dict:
+        items = self._current_items(db, plan=plan)
+        strategy = self._current_strategy(db, plan=plan)
+        revision = self._current_revision(db, plan=plan)
+        factors = self._strategy_factors(plan=plan, items=items, score_factors=strategy.score_factors)
+        return {
+            "date": plan.plan_date,
+            "daily_plan_id": plan.id,
+            "plan_version": plan.current_version,
+            "summary": strategy.summary,
+            "mode": strategy.mode,
+            "primary_reason": strategy.primary_reason,
+            "revision": {
+                "plan_revision_id": revision.id,
+                "version": revision.version,
+                "trigger": revision.trigger,
+                "reason": revision.reason,
+                "created_at": revision.created_at,
+            },
+            "factors": factors,
+            "explanation": self._strategy_explanation(strategy=strategy, factors=factors),
+            "task_rationales": [self._item_response(item) for item in items],
+            "source": {
+                "strategy_snapshot_id": strategy.id,
+                "model_name": strategy.model_name,
+                "prompt_version": strategy.prompt_version,
+                "generated_at": strategy.created_at,
+            },
+        }
+
+    def _strategy_factors(self, *, plan: DailyPlan, items: list[DailyPlanItem], score_factors: dict) -> dict:
+        counted_items = [item for item in items if item.section != DailyPlanItemSection.ROLLED_OVER]
+        return {
+            "task_count": int(score_factors.get("task_count", len(counted_items)) or 0),
+            "high_value_task_count": len(
+                [item for item in counted_items if item.task.value_level == ValueLevel.HIGH]
+            ),
+            "pinned_count": int(
+                score_factors.get(
+                    "pinned_count",
+                    len([item for item in counted_items if item.section == DailyPlanItemSection.PINNED]),
+                )
+                or 0
+            ),
+            "recommended_count": len(
+                [item for item in counted_items if item.section == DailyPlanItemSection.RECOMMENDED]
+            ),
+            "low_priority_count": len(
+                [item for item in counted_items if item.section == DailyPlanItemSection.LOW_PRIORITY]
+            ),
+            "rolled_over_count": len([item for item in items if item.section == DailyPlanItemSection.ROLLED_OVER]),
+            "total_estimated_minutes": int(score_factors.get("total_minutes", plan.total_estimated_minutes) or 0),
+            "completed_count": plan.completed_count,
+            "focus_minutes": plan.focus_minutes,
+        }
+
+    def _strategy_explanation(self, *, strategy: StrategySnapshot, factors: dict) -> list[str]:
+        explanation = [strategy.primary_reason]
+        if factors["pinned_count"]:
+            explanation.append(f"{factors['pinned_count']} 个任务被保护在前面，因为它们更重要或更紧急。")
+        if factors["rolled_over_count"]:
+            explanation.append(f"{factors['rolled_over_count']} 个延后任务保留可见，但不会挤占主执行序列。")
+        if strategy.mode == PlanningPreference.LIGHT:
+            explanation.append("今天保持轻量，让第一个动作更容易开始。")
+        elif strategy.mode == PlanningPreference.SPRINT:
+            explanation.append("今天使用冲刺模式，因为重要任务较多，需要更明确的顺序。")
+        else:
+            explanation.append("今天会平衡价值、截止时间和任务大小，不把 Today 变成复杂驾驶舱。")
+        return explanation[:4]
+
     def _sections_for(self, items: list[DailyPlanItem]) -> dict:
         sections = {
             "pinned_tasks": [],
@@ -536,6 +622,14 @@ class PlanningService:
         if strategy is None:
             raise InvalidStateError("Daily plan is missing strategy snapshot")
         return strategy
+
+    def _current_revision(self, db: Session, *, plan: DailyPlan) -> PlanRevision:
+        if plan.current_revision_id is None:
+            raise InvalidStateError("Daily plan is missing current revision")
+        revision = db.get(PlanRevision, plan.current_revision_id)
+        if revision is None:
+            raise InvalidStateError("Daily plan is missing current revision")
+        return revision
 
     def _get_current_item_for_update(self, db: Session, *, item_id: uuid.UUID, user_id: uuid.UUID) -> DailyPlanItem:
         stmt = (

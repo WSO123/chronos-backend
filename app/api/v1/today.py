@@ -6,7 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_id
 from app.core.db import get_db
-from app.schemas.today import TodayItemUpdate, TodayReplanRequest, TodayResponse, TodayTaskResponse
+from app.schemas.today import (
+    StrategyDetailResponse,
+    TodayItemUpdate,
+    TodayReplanRequest,
+    TodayResponse,
+    TodayTaskResponse,
+)
 from app.services.planning_service import planning_service
 
 router = APIRouter(prefix="/today", tags=["today"])
@@ -19,6 +25,15 @@ def get_today(
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
     return planning_service.get_today(db, user_id=user_id, plan_date=plan_date)
+
+
+@router.get("/strategy", response_model=StrategyDetailResponse)
+def get_strategy_detail(
+    plan_date: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return planning_service.get_strategy_detail(db, user_id=user_id, plan_date=plan_date)
 
 
 @router.post("/replan", response_model=TodayResponse)
