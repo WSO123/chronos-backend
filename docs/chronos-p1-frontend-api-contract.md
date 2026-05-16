@@ -96,6 +96,7 @@ uv run python scripts/dev_seed_demo.py
 | Focus | `POST /focus-sessions`, complete / interrupt / postpone | Ready |
 | Reports | `GET /reports/daily`, `POST /reports/daily/generate`, `GET /reports/weekly` | Daily Ready, Weekly P2 Ready |
 | Me Overview | `GET /me/overview` | Ready |
+| Insights | `GET /insights/detail` | P2 Ready |
 | Goals | `GET /goals/home`, `GET /goals`, `POST /goals`, `GET /goals/{id}`, `GET /goals/{id}/detail` | Backend Ready, P2 UI |
 | AIJob Status | `GET /ai-jobs/{id}` | Backend Ready, mostly debug / future UI |
 
@@ -667,7 +668,7 @@ Frontend notes:
 - Weekly Report 是 P2 趋势反馈入口，不要替代 Today 的执行决策。
 - 默认展示 summary、daily trends、focus summary 和最多 5 个 lagging tasks。
 - `ai_suggestions` 仍是规则建议，不代表真实 LLM 洞察。
-- Monthly Report 和 Insight Detail 仍未实现。
+- Monthly Report 仍未实现。
 
 ---
 
@@ -726,7 +727,75 @@ Response:
 Frontend notes:
 
 - P1 Me 是数据收敛页，不是完整洞察中心。
-- Insights、Energy、Social 入口可以保留占位，但不要调用不存在的 P2/P3/P4 API。
+- Insights 入口已可调用 `/insights/detail`；Energy、Social 入口仍保留占位。
+
+### GET `/insights/detail`
+
+Query:
+
+```text
+anchor_date=YYYY-MM-DD  // optional；后端按该日期所在周聚合
+```
+
+用于 P2 Insight Detail。它是 Me -> Insights 的二级页，只读聚合，不修改任务或目标。
+
+Response key fields:
+
+```json
+{
+  "anchor_date": "2026-05-16",
+  "period_start": "2026-05-11",
+  "period_end": "2026-05-17",
+  "overview": {
+    "average_completion_rate": 0.63,
+    "total_completed_task_count": 5,
+    "high_value_completed_task_count": 2,
+    "total_focus_minutes": 180,
+    "overdue_task_count": 1,
+    "at_risk_goal_count": 1
+  },
+  "behavior_patterns": [
+    {
+      "key": "high_value_progress",
+      "title": "高价值任务有推进",
+      "signal": "positive",
+      "evidence": "本周完成了 2 个高价值任务。",
+      "suggestion": "下周继续把高价值任务放在 Today 的前段。"
+    }
+  ],
+  "efficiency_windows": [
+    {
+      "label": "morning",
+      "start_hour": 5,
+      "end_hour": 12,
+      "focus_minutes": 90,
+      "completed_focus_count": 2,
+      "signal": "strong"
+    }
+  ],
+  "recommendations": [
+    {
+      "category": "schedule",
+      "title": "把难任务放到优势时段",
+      "suggestion": "下周优先在上午开始一个高价值任务。",
+      "rationale": "这是本周 Focus 时长最集中的时段。"
+    }
+  ],
+  "strategy_notes": ["下周 Today 编排需要继续保护有风险的 Goal，避免被轻任务挤掉。"],
+  "source": {
+    "generated_by": "rule-insight-v1",
+    "period_days": 7,
+    "data_points": 5
+  }
+}
+```
+
+Frontend notes:
+
+- 默认展示 `overview`、1-3 条 `behavior_patterns`、1-3 条 `recommendations`。
+- `efficiency_windows` 是轻量时段判断，不是健康 / 精力模型。
+- `strategy_notes` 可作为 Today 调度解释的补充，不要替代 Today 的行动序列。
+- 该接口当前是规则洞察，不代表真实 LLM 分析。
 
 ---
 
@@ -848,8 +917,7 @@ GET /me/overview
 
 - Voice / Image capture。
 - Calendar / Email / Health 数据接入。
-- Weekly / Monthly report。
-- Insight detail。
+- Monthly report。
 - Energy dashboard。
 - Social / Groups / Friends。
 - Goal detail aggregate。

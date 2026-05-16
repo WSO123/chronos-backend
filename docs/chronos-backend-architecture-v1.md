@@ -1003,7 +1003,19 @@ PATCH /api/v1/me/settings
 说明：
 
 - P1 返回基础数据总览。
-- Insights、Energy、Social 作为后续入口。
+- Insights 已支持 P2 轻量详情；Energy、Social 作为后续入口。
+
+### Insights
+
+```text
+GET /api/v1/insights/detail
+```
+
+说明：
+
+- P2 返回行为模式、高低效时段、任务安排建议和滚动策略补充说明。
+- 当前是规则聚合，不持久化 Insight，不接真实 LLM。
+- 只读接口，不改变 Task / Goal / Today 状态。
 
 ### AI Jobs
 
@@ -1377,7 +1389,7 @@ P1 不是以“接口都写完”为验收，而是以核心闭环跑通为验�
 - Dependency
 - Weekly Report（已支持轻量聚合）
 - Monthly Report
-- Insight Detail
+- Insight Detail（已支持轻量规则聚合）
 - Strategy Detail（已支持当前 Today 策略解释）
 - 滚动策略解释
 - 高价值任务分析
