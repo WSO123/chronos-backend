@@ -19,6 +19,7 @@ from app.models.goal import Goal
 from app.models.reminder import Reminder
 from app.models.task import Task
 from app.models.user import User, UserSettings
+from app.providers.notifications import NotificationDeliveryRequest, notification_delivery_registry
 from app.services.errors import InvalidStateError, NotFoundError, ValidationDomainError
 
 
@@ -121,18 +122,29 @@ class ReminderService:
         if channel is not None:
             stmt = stmt.where(Reminder.channel == channel)
         due_reminders = list(db.scalars(stmt).all())
+        sent_reminders: list[Reminder] = []
+        delivery_results: list[dict] = []
+        skipped_count = 0
         for reminder in due_reminders:
+            delivery_result = notification_delivery_registry.deliver(self._delivery_request_for(reminder))
+            delivery_results.append(self._delivery_result_to_dict(delivery_result))
+            if delivery_result.status != "sent":
+                skipped_count += 1
+                continue
             reminder.status = "sent"
             reminder.sent_at = resolved_now
+            sent_reminders.append(reminder)
         db.commit()
-        for reminder in due_reminders:
+        for reminder in sent_reminders:
             db.refresh(reminder)
         return {
             "status": "dispatched",
-            "sent_count": len(due_reminders),
+            "sent_count": len(sent_reminders),
+            "skipped_count": skipped_count,
             "channel": channel,
             "sent_at": resolved_now,
-            "reminders": due_reminders,
+            "reminders": sent_reminders,
+            "delivery_results": delivery_results,
         }
 
     def generate_deadline_reminders(
@@ -345,6 +357,26 @@ class ReminderService:
     def _active_users(self, db: Session) -> list[User]:
         stmt = select(User).where(User.is_active.is_(True)).order_by(User.created_at)
         return list(db.scalars(stmt).all())
+
+    def _delivery_request_for(self, reminder: Reminder) -> NotificationDeliveryRequest:
+        return NotificationDeliveryRequest(
+            reminder_id=reminder.id,
+            user_id=reminder.user_id,
+            channel=reminder.channel,
+            title=reminder.title,
+            message=reminder.message,
+            scheduled_for=reminder.scheduled_for,
+            metadata=reminder.reminder_metadata,
+        )
+
+    def _delivery_result_to_dict(self, result) -> dict:
+        return {
+            "reminder_id": result.reminder_id,
+            "channel": result.channel,
+            "status": result.status,
+            "provider": result.provider,
+            "reason": result.reason,
+        }
 
     def _settings_for_user(self, db: Session, *, user_id: uuid.UUID) -> UserSettings:
         stmt = select(UserSettings).where(UserSettings.user_id == user_id)

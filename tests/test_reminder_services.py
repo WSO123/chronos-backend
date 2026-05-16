@@ -131,7 +131,9 @@ class ReminderServiceTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "dispatched")
         self.assertEqual(result["sent_count"], 1)
+        self.assertEqual(result["skipped_count"], 0)
         self.assertEqual(result["reminders"][0].id, due.id)
+        self.assertEqual(result["delivery_results"][0]["provider"], "reminder_center")
         self.assertEqual(due.status, "sent")
         self.assertEqual(due.sent_at.replace(tzinfo=UTC), now)
         self.assertEqual(
@@ -152,8 +154,32 @@ class ReminderServiceTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "dispatched")
         self.assertEqual(result["sent_count"], 1)
+        self.assertEqual(result["skipped_count"], 0)
         self.assertEqual(result["reminders"][0]["id"], str(reminder.id))
         self.assertEqual(result["reminders"][0]["status"], "sent")
+        self.assertEqual(result["delivery_results"][0]["provider"], "reminder_center")
+
+    def test_dispatch_due_reminders_skips_unconfigured_external_channel(self):
+        now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)
+        email_reminder = reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={
+                "title": "Email due reminder",
+                "scheduled_for": now - timedelta(minutes=1),
+                "channel": "email",
+            },
+        )
+
+        result = reminder_service.dispatch_due_reminders(self.db, now=now)
+        self.db.refresh(email_reminder)
+
+        self.assertEqual(result["sent_count"], 0)
+        self.assertEqual(result["skipped_count"], 1)
+        self.assertEqual(result["delivery_results"][0]["status"], "skipped")
+        self.assertEqual(result["delivery_results"][0]["reason"], "provider_not_configured")
+        self.assertEqual(email_reminder.status, "scheduled")
+        self.assertEqual(email_reminder.sent_at, None)
 
     def test_generate_deadline_reminders_creates_task_and_goal_reminders_once(self):
         target_date = datetime(2026, 5, 17, tzinfo=UTC).date()

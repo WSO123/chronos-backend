@@ -640,7 +640,7 @@ Frontend notes:
 
 - Reminder Center 可放在 Today Header 的提醒入口或 Me / Settings。
 - Today 首屏只展示提醒入口和必要数量，不展开完整列表。
-- 真实 push/email 发送在后续 delivery provider 迭代实现。
+- `in_app` 可由内置 delivery provider 送达 Reminder Center；真实 push/email 发送待后续 provider 接入。
 
 ### Reminder workers
 
@@ -656,8 +656,11 @@ Rules:
 
 - 扫描 `status=scheduled` 且 `scheduled_for <= now` 的 reminders。
 - 可用 `channel` 限定 `in_app` / `push` / `email`。
-- 当前只把 due reminder 标记为 `sent` 并返回 reminder payload，不调用真实推送服务。
+- 当前通过 notification delivery provider 决定是否标记 `sent`。
+- `in_app` provider 代表送达 Reminder Center，会标记 `sent` 并返回 reminder payload。
+- `push` / `email` provider 当前未配置，会返回 `skipped`，reminder 保持 `scheduled`，不会假装发送成功。
 - `dismissed` / `canceled` / 已 `sent` 的 reminder 不会再次进入发送结果。
+- dispatch payload 会返回 `sent_count`、`skipped_count`、`reminders` 和 `delivery_results`。
 - `reminder.generate_deadline` 基于 Task / Goal deadline 生成 `deadline` reminders，并避免重复生成。
 - `reminder.generate_deadline` 当前只创建 scheduled reminders，不发送。
 - `reminder.generate_execution` 只读取已有 Today active plan，不 lazy create Today，也不触发 replan。
