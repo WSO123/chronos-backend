@@ -74,6 +74,50 @@ class ReminderServiceTests(unittest.TestCase):
         self.assertEqual(result["scheduled_count"], 1)
         self.assertEqual(result["overdue_count"], 1)
 
+    def test_list_reminders_filters_type_due_and_unseen(self):
+        now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)
+        due_execution = reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={
+                "title": "Due execution",
+                "scheduled_for": now - timedelta(minutes=1),
+                "reminder_type": "execution",
+            },
+        )
+        seen_deadline = reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={
+                "title": "Seen deadline",
+                "scheduled_for": now - timedelta(minutes=2),
+                "reminder_type": "deadline",
+            },
+        )
+        reminder_service.mark_reminder_seen(self.db, reminder_id=seen_deadline.id, user_id=self.user.id)
+        reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={
+                "title": "Future execution",
+                "scheduled_for": now + timedelta(hours=1),
+                "reminder_type": "execution",
+            },
+        )
+
+        result = reminder_service.list_reminders(
+            self.db,
+            user_id=self.user.id,
+            reminder_type="execution",
+            due_only=True,
+            unseen_only=True,
+            now=now,
+        )
+
+        self.assertEqual([reminder.id for reminder in result["reminders"]], [due_execution.id])
+        self.assertEqual(result["scheduled_count"], 3)
+        self.assertEqual(result["overdue_count"], 2)
+
     def test_create_reminder_validates_owner_and_single_target(self):
         task = task_service.create_task(self.db, user_id=self.user.id, title="Owned task")
         other_task = task_service.create_task(self.db, user_id=self.other_user.id, title="Other task")

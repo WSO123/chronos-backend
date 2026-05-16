@@ -64,15 +64,27 @@ class ReminderService:
         *,
         user_id: uuid.UUID,
         status: str | None = None,
+        reminder_type: str | None = None,
+        due_only: bool = False,
+        unseen_only: bool = False,
+        now: datetime | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> dict:
         self._ensure_user(db, user_id=user_id)
         if status is not None and status not in self.allowed_statuses:
             raise ValidationDomainError(f"Reminder status {status} is not supported")
+        if reminder_type is not None and reminder_type not in self.allowed_types:
+            raise ValidationDomainError(f"Reminder type {reminder_type} is not supported")
         stmt = select(Reminder).where(Reminder.user_id == user_id)
         if status is not None:
             stmt = stmt.where(Reminder.status == status)
+        if reminder_type is not None:
+            stmt = stmt.where(Reminder.reminder_type == reminder_type)
+        if unseen_only:
+            stmt = stmt.where(Reminder.seen_at.is_(None))
+        if due_only:
+            stmt = stmt.where(Reminder.scheduled_for <= self._normalize_datetime(now or datetime.now(UTC)))
         reminders = list(
             db.scalars(
                 stmt.order_by(Reminder.scheduled_for, Reminder.created_at)
@@ -81,7 +93,7 @@ class ReminderService:
             ).all()
         )
         scheduled_count = self._count_by_status(db, user_id=user_id, status="scheduled")
-        overdue_count = self._overdue_count(db, user_id=user_id)
+        overdue_count = self._overdue_count(db, user_id=user_id, now=now)
         return {
             "reminders": reminders,
             "scheduled_count": scheduled_count,
@@ -725,11 +737,12 @@ class ReminderService:
         stmt = select(Reminder.id).where(Reminder.user_id == user_id, Reminder.status == status)
         return len(list(db.scalars(stmt).all()))
 
-    def _overdue_count(self, db: Session, *, user_id: uuid.UUID) -> int:
+    def _overdue_count(self, db: Session, *, user_id: uuid.UUID, now: datetime | None = None) -> int:
+        resolved_now = self._normalize_datetime(now or datetime.now(UTC))
         stmt = select(Reminder.id).where(
             Reminder.user_id == user_id,
             Reminder.status == "scheduled",
-            Reminder.scheduled_for < datetime.now(UTC),
+            Reminder.scheduled_for < resolved_now,
         )
         return len(list(db.scalars(stmt).all()))
 

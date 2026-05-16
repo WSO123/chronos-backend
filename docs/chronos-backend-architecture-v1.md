@@ -1308,6 +1308,7 @@ GET  /api/v1/scheduler/reminders/celery-beat
 
 - P3 已支持 Reminder Center 的基础读取、手动创建和 dismiss。
 - P3 已支持 `GET /api/v1/reminders/summary`，为 Today Header 提供轻量 pending / due count 和下一条提醒。
+- P3 已支持 `GET /api/v1/reminders` 的 `reminder_type` / `due_only` / `unseen_only` 轻量过滤，服务 Reminder Center 扫描，不改变全局 count 语义。
 - P3 已支持 `POST /api/v1/reminders/{id}/seen`，标记用户已看过 reminder，但不改变 scheduled / sent / dismissed 主状态。
 - P3 已支持 `POST /api/v1/reminders/seen`，批量标记 reminders 已看过，供 Reminder Center 清除未看数。
 - P3 已支持 `POST /api/v1/reminders/{id}/snooze`，只对 scheduled reminders 推迟 `scheduled_for` 并记录 snooze metadata，不改变 Task / Goal / Today。

@@ -700,6 +700,10 @@ Query:
 
 ```text
 status=scheduled
+reminder_type=execution
+due_only=true
+unseen_only=true
+now=2026-05-17T09:00:00Z
 limit=50
 offset=0
 ```
@@ -730,6 +734,14 @@ Response:
   "overdue_count": 0
 }
 ```
+
+Rules:
+
+- `status` 仍支持 `scheduled` / `sent` / `dismissed` / `canceled`。
+- `reminder_type` 可为 `execution` / `deadline` / `system` / `team`。
+- `due_only=true` 时只返回 `scheduled_for <= now` 的 reminders；不传 `now` 时使用服务端当前 UTC 时间。
+- `unseen_only=true` 时只返回 `seen_at=null` 的 reminders。
+- `scheduled_count` / `overdue_count` 是当前用户全局计数，不受列表过滤条件影响；`overdue_count` 会复用传入的 `now`。
 
 ### POST `/api/v1/reminders`
 

@@ -60,6 +60,54 @@ class ReminderAPITests(unittest.TestCase):
         self.assertEqual(dismiss_response.status_code, 200)
         self.assertEqual(dismiss_response.json()["status"], "dismissed")
 
+    def test_list_reminders_filters_type_due_and_unseen(self):
+        now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)
+        due_execution = self.client.post(
+            "/api/v1/reminders",
+            json={
+                "title": "Due API execution",
+                "scheduled_for": (now - timedelta(minutes=1)).isoformat(),
+                "reminder_type": "execution",
+            },
+            headers=self.headers,
+        ).json()
+        seen_deadline = self.client.post(
+            "/api/v1/reminders",
+            json={
+                "title": "Seen API deadline",
+                "scheduled_for": (now - timedelta(minutes=2)).isoformat(),
+                "reminder_type": "deadline",
+            },
+            headers=self.headers,
+        ).json()
+        self.client.post(f"/api/v1/reminders/{seen_deadline['id']}/seen", headers=self.headers)
+        self.client.post(
+            "/api/v1/reminders",
+            json={
+                "title": "Future API execution",
+                "scheduled_for": (now + timedelta(hours=1)).isoformat(),
+                "reminder_type": "execution",
+            },
+            headers=self.headers,
+        )
+
+        response = self.client.get(
+            "/api/v1/reminders",
+            params={
+                "reminder_type": "execution",
+                "due_only": True,
+                "unseen_only": True,
+                "now": now.isoformat(),
+            },
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual([reminder["id"] for reminder in body["reminders"]], [due_execution["id"]])
+        self.assertEqual(body["scheduled_count"], 3)
+        self.assertEqual(body["overdue_count"], 2)
+
     def test_reminder_user_isolation(self):
         create_response = self.client.post(
             "/api/v1/reminders",

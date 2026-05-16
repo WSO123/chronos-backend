@@ -23,6 +23,10 @@ router = APIRouter(prefix="/reminders", tags=["reminders"])
 @router.get("", response_model=ReminderListResponse)
 def list_reminders(
     status: str | None = Query(default=None),
+    reminder_type: str | None = Query(default=None),
+    due_only: bool = Query(default=False),
+    unseen_only: bool = Query(default=False),
+    now: datetime | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -32,6 +36,10 @@ def list_reminders(
         db,
         user_id=user_id,
         status=status,
+        reminder_type=reminder_type,
+        due_only=due_only,
+        unseen_only=unseen_only,
+        now=now,
         limit=limit,
         offset=offset,
     )
