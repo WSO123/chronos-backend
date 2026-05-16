@@ -983,14 +983,15 @@ GET  /api/v1/reports/daily
 POST /api/v1/reports/daily/generate
 GET  /api/v1/reports/daily/{date}
 GET  /api/v1/reports/weekly
+GET  /api/v1/reports/monthly
 ```
 
 说明：
 
 - P1 已支持 Daily Report。
 - P2 已支持 Weekly Report 轻量聚合，不单独持久化，不抢 Today 的执行决策。
+- P2 已支持 Monthly Report 轻量聚合，不单独持久化，用于长期趋势回看。
 - `daily/generate` 可以异步执行，返回 `ai_job_id`；生成结果落到 DailyReport。
-- Monthly Report 延后到后续 P2。
 
 ### Me
 
@@ -1388,7 +1389,7 @@ P1 不是以“接口都写完”为验收，而是以核心闭环跑通为验�
 - Goal Progress
 - Dependency
 - Weekly Report（已支持轻量聚合）
-- Monthly Report
+- Monthly Report（已支持轻量聚合）
 - Insight Detail（已支持轻量规则聚合）
 - Strategy Detail（已支持当前 Today 策略解释）
 - 滚动策略解释

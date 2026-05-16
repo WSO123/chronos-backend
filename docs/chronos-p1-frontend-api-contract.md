@@ -94,7 +94,7 @@ uv run python scripts/dev_seed_demo.py
 | Today | `GET /today`, `GET /today/strategy`, `POST /today/replan`, `PATCH /today/items/{id}` | Ready, Strategy Detail P2 Ready |
 | Task Detail | `GET /tasks/{id}`, `POST /tasks/{id}/breakdown`, steps / complete / postpone | Ready |
 | Focus | `POST /focus-sessions`, complete / interrupt / postpone | Ready |
-| Reports | `GET /reports/daily`, `POST /reports/daily/generate`, `GET /reports/weekly` | Daily Ready, Weekly P2 Ready |
+| Reports | `GET /reports/daily`, `POST /reports/daily/generate`, `GET /reports/weekly`, `GET /reports/monthly` | Daily Ready, Weekly / Monthly P2 Ready |
 | Me Overview | `GET /me/overview` | Ready |
 | Insights | `GET /insights/detail` | P2 Ready |
 | Goals | `GET /goals/home`, `GET /goals`, `POST /goals`, `GET /goals/{id}`, `GET /goals/{id}/detail` | Backend Ready, P2 UI |
@@ -668,7 +668,7 @@ Frontend notes:
 - Weekly Report 是 P2 趋势反馈入口，不要替代 Today 的执行决策。
 - 默认展示 summary、daily trends、focus summary 和最多 5 个 lagging tasks。
 - `ai_suggestions` 仍是规则建议，不代表真实 LLM 洞察。
-- Monthly Report 仍未实现。
+- Monthly Report 已提供独立 `/reports/monthly` 聚合接口。
 
 ---
 
@@ -799,6 +799,44 @@ Frontend notes:
 
 ---
 
+### GET `/reports/monthly`
+
+Query:
+
+```text
+month=YYYY-MM-DD  // optional；后端会归一到该日期所在月份
+```
+
+用于 P2 Monthly Report。该接口不生成持久化 report，只基于已有执行数据做月度轻量聚合。
+
+Response key fields:
+
+```json
+{
+  "month_start": "2026-05-01",
+  "month_end": "2026-05-31",
+  "summary": {
+    "total_planned_task_count": 22,
+    "total_completed_task_count": 14,
+    "high_value_completed_task_count": 4,
+    "total_focus_minutes": 620,
+    "average_completion_rate": 0.64,
+    "active_goal_count": 3,
+    "at_risk_goal_count": 1,
+    "overdue_task_count": 1
+  },
+  "weekly_trends": [],
+  "daily_trends": [],
+  "ai_suggestions": ["下月开始前先清理滞后任务，避免它们持续挤占 Today。"]
+}
+```
+
+Frontend notes:
+
+- Monthly Report 是长期趋势入口，不要替代 Today 的每日执行顺序。
+- 默认展示 summary 和 weekly trends；daily trends 可用于图表，不一定全量铺开。
+- 该接口当前是规则聚合，不代表真实 LLM 月度分析。
+
 ## 11. Goals
 
 Goals 是 P2 一级 Tab，但 P1 后端已经提供轻量 Goal API，主要用于 Task 归属和后续 Goals 页面。
@@ -917,7 +955,6 @@ GET /me/overview
 
 - Voice / Image capture。
 - Calendar / Email / Health 数据接入。
-- Monthly report。
 - Energy dashboard。
 - Social / Groups / Friends。
 - Goal detail aggregate。

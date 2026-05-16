@@ -120,6 +120,73 @@ class ReportAndMeAPITests(unittest.TestCase):
         self.assertEqual(body["lagging_tasks"][0]["id"], lagging_task_id)
         self.assertTrue(body["ai_suggestions"])
 
+    def test_monthly_report_returns_month_summary(self):
+        report_date = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        goal_response = self.client.post(
+            "/api/v1/goals",
+            json={
+                "title": "API monthly goal",
+                "deadline": report_date.isoformat(),
+                "value_level": "high",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(goal_response.status_code, 201)
+        high_task_response = self.client.post(
+            "/api/v1/tasks",
+            json={
+                "title": "API monthly high task",
+                "goal_id": goal_response.json()["id"],
+                "value_level": "high",
+                "deadline": report_date.isoformat(),
+            },
+            headers=self.headers,
+        )
+        self.client.post(
+            "/api/v1/tasks",
+            json={
+                "title": "API monthly overdue task",
+                "goal_id": goal_response.json()["id"],
+                "value_level": "high",
+                "deadline": (report_date - timedelta(days=2)).isoformat(),
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(high_task_response.status_code, 201)
+        today_response = self.client.get(f"/api/v1/today?plan_date={report_date.isoformat()}", headers=self.headers)
+        high_item = self._item_for_task(today_response.json(), high_task_response.json()["id"])
+        start_response = self.client.post(
+            "/api/v1/focus-sessions",
+            json={
+                "task_id": high_task_response.json()["id"],
+                "daily_plan_item_id": high_item["daily_plan_item_id"],
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(start_response.status_code, 201)
+        complete_response = self.client.post(
+            f"/api/v1/focus-sessions/{start_response.json()['id']}/complete",
+            json={"actual_duration_min": 35},
+            headers=self.headers,
+        )
+        self.assertEqual(complete_response.status_code, 200)
+
+        response = self.client.get(
+            f"/api/v1/reports/monthly?month={report_date.isoformat()}",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["month_start"], report_date.replace(day=1).isoformat())
+        self.assertEqual(body["summary"]["total_completed_task_count"], 1)
+        self.assertEqual(body["summary"]["high_value_completed_task_count"], 1)
+        self.assertEqual(body["summary"]["total_focus_minutes"], 35)
+        self.assertEqual(body["summary"]["overdue_task_count"], 1)
+        self.assertTrue(body["weekly_trends"])
+        self.assertTrue(body["daily_trends"])
+        self.assertTrue(body["ai_suggestions"])
+
     def test_generate_and_get_daily_report(self):
         task_response = self.client.post("/api/v1/tasks", json={"title": "API report task"}, headers=self.headers)
         self.assertEqual(task_response.status_code, 201)

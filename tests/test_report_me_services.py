@@ -99,6 +99,58 @@ class ReportAndMeServiceTests(unittest.TestCase):
         self.assertEqual(report["lagging_tasks"][0]["id"], lagging_task.id)
         self.assertTrue(report["ai_suggestions"])
 
+    def test_monthly_report_aggregates_daily_and_weekly_trends(self):
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Monthly goal",
+            deadline=self.report_date,
+            value_level=ValueLevel.HIGH,
+        )
+        high_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Monthly high-value task",
+            value_level=ValueLevel.HIGH,
+            deadline=self.report_date,
+        )
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Monthly overdue task",
+            value_level=ValueLevel.HIGH,
+            deadline=self.report_date - timedelta(days=2),
+        )
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.report_date)
+        high_item = self._item_for_task(self._today_items(today), high_task.id)
+        focus_session = focus_service.start_session(
+            self.db,
+            user_id=self.user.id,
+            task_id=high_task.id,
+            daily_plan_item_id=high_item["daily_plan_item_id"],
+        )
+        focus_service.complete_session(
+            self.db,
+            session_id=focus_session.id,
+            user_id=self.user.id,
+            actual_duration_min=40,
+        )
+
+        report = report_service.get_monthly_report(self.db, user_id=self.user.id, month=self.report_date)
+        today_trend = next(day for day in report["daily_trends"] if day["report_date"] == self.report_date)
+
+        self.assertEqual(report["month_start"], self.report_date.replace(day=1))
+        self.assertEqual(report["summary"]["total_completed_task_count"], 1)
+        self.assertEqual(report["summary"]["high_value_completed_task_count"], 1)
+        self.assertEqual(report["summary"]["total_focus_minutes"], 40)
+        self.assertEqual(report["summary"]["overdue_task_count"], 1)
+        self.assertEqual(today_trend["completed_task_count"], 1)
+        self.assertEqual(today_trend["high_value_completed_task_count"], 1)
+        self.assertTrue(report["weekly_trends"])
+        self.assertTrue(report["ai_suggestions"])
+
     def test_generate_daily_report_summarizes_today_focus_and_events(self):
         task_service.create_task(self.db, user_id=self.user.id, title="Finish important work")
         task_service.create_task(self.db, user_id=self.user.id, title="Interruptible work")

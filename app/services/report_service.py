@@ -95,6 +95,28 @@ class ReportService:
             "ai_suggestions": self._weekly_suggestions(summary),
         }
 
+    def get_monthly_report(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        month: date | None = None,
+    ) -> dict:
+        month_start, month_end = self._month_bounds(db, user_id=user_id, month=month)
+        daily_trends = [
+            self._monthly_day_trend(db, user_id=user_id, report_date=month_start + timedelta(days=offset))
+            for offset in range((month_end - month_start).days + 1)
+        ]
+        summary = self._monthly_summary(db, user_id=user_id, month_end=month_end, daily_trends=daily_trends)
+        return {
+            "month_start": month_start,
+            "month_end": month_end,
+            "summary": summary,
+            "weekly_trends": self._monthly_weekly_trends(daily_trends),
+            "daily_trends": daily_trends,
+            "ai_suggestions": self._monthly_suggestions(summary),
+        }
+
     def get_or_generate_daily_report(
         self,
         db: Session,
@@ -317,6 +339,84 @@ class ReportService:
             ),
         }
 
+    def _monthly_day_trend(self, db: Session, *, user_id: uuid.UUID, report_date: date) -> dict:
+        metrics = self.daily_metrics(db, user_id=user_id, report_date=report_date)
+        start_at, end_at = self._date_bounds(db, user_id=user_id, target_date=report_date)
+        return {
+            "report_date": report_date,
+            "planned_task_count": metrics.planned_task_count,
+            "completed_task_count": metrics.completed_task_count,
+            "focus_minutes": metrics.focus_minutes,
+            "completion_rate": metrics.completion_rate,
+            "high_value_completed_task_count": self._completed_task_count_by_value(
+                db,
+                user_id=user_id,
+                value_level=ValueLevel.HIGH,
+                start_at=start_at,
+                end_at=end_at,
+            ),
+        }
+
+    def _monthly_summary(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        month_end: date,
+        daily_trends: list[dict],
+    ) -> dict:
+        planned_rates = [day["completion_rate"] for day in daily_trends if day["planned_task_count"] > 0]
+        as_of_date = self._weekly_as_of_date(db, user_id=user_id, week_end=month_end)
+        return {
+            "total_planned_task_count": sum(day["planned_task_count"] for day in daily_trends),
+            "total_completed_task_count": sum(day["completed_task_count"] for day in daily_trends),
+            "high_value_completed_task_count": sum(day["high_value_completed_task_count"] for day in daily_trends),
+            "total_focus_minutes": sum(day["focus_minutes"] for day in daily_trends),
+            "average_completion_rate": round(sum(planned_rates) / len(planned_rates), 2) if planned_rates else 0.0,
+            "active_goal_count": self._active_goal_count(db, user_id=user_id),
+            "at_risk_goal_count": self._at_risk_goal_count(db, user_id=user_id, week_end=month_end),
+            "overdue_task_count": self._overdue_task_count(db, user_id=user_id, as_of_date=as_of_date),
+        }
+
+    def _monthly_weekly_trends(self, daily_trends: list[dict]) -> list[dict]:
+        weekly_trends: list[dict] = []
+        cursor = 0
+        while cursor < len(daily_trends):
+            week_start = daily_trends[cursor]["report_date"]
+            week_end = min(week_start + timedelta(days=6), daily_trends[-1]["report_date"])
+            week_days = [
+                day for day in daily_trends if week_start <= day["report_date"] <= week_end
+            ]
+            planned_rates = [day["completion_rate"] for day in week_days if day["planned_task_count"] > 0]
+            weekly_trends.append(
+                {
+                    "week_start": week_start,
+                    "week_end": week_end,
+                    "completed_task_count": sum(day["completed_task_count"] for day in week_days),
+                    "focus_minutes": sum(day["focus_minutes"] for day in week_days),
+                    "high_value_completed_task_count": sum(
+                        day["high_value_completed_task_count"] for day in week_days
+                    ),
+                    "average_completion_rate": round(sum(planned_rates) / len(planned_rates), 2)
+                    if planned_rates
+                    else 0.0,
+                }
+            )
+            cursor += len(week_days)
+        return weekly_trends
+
+    def _monthly_suggestions(self, summary: dict) -> list[str]:
+        suggestions: list[str] = []
+        if summary["high_value_completed_task_count"] == 0 and summary["total_completed_task_count"] > 0:
+            suggestions.append("这个月有完成动作，但高价值任务没有形成闭环，下月先保护一个核心目标。")
+        if summary["overdue_task_count"]:
+            suggestions.append("下月开始前先清理滞后任务，避免它们持续挤占 Today。")
+        if summary["total_focus_minutes"] == 0:
+            suggestions.append("本月缺少 Focus 数据，下月先完成一次短专注闭环。")
+        if not suggestions:
+            suggestions.append("继续保持轻量节奏，下月仍然先从最重要的一件事开始。")
+        return suggestions[:3]
+
     def _weekly_summary(
         self,
         db: Session,
@@ -483,6 +583,15 @@ class ReportService:
     def _resolve_week_start(self, db: Session, *, user_id: uuid.UUID, week_start: date | None) -> date:
         anchor_date = week_start or self._resolve_report_date(db, user_id=user_id, report_date=None)
         return anchor_date - timedelta(days=anchor_date.weekday())
+
+    def _month_bounds(self, db: Session, *, user_id: uuid.UUID, month: date | None) -> tuple[date, date]:
+        anchor_date = month or self._resolve_report_date(db, user_id=user_id, report_date=None)
+        month_start = anchor_date.replace(day=1)
+        if month_start.month == 12:
+            next_month = month_start.replace(year=month_start.year + 1, month=1)
+        else:
+            next_month = month_start.replace(month=month_start.month + 1)
+        return month_start, next_month - timedelta(days=1)
 
     def _report_copy(self, metrics: DailyReportMetrics) -> tuple[str, list[str]]:
         if metrics.planned_task_count == 0 and metrics.focus_minutes == 0:

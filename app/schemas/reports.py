@@ -72,3 +72,41 @@ class WeeklyReportResponse(BaseModel):
     focus: WeeklyReportFocusResponse
     lagging_tasks: list[WeeklyReportLaggingTaskResponse]
     ai_suggestions: list[str]
+
+
+class MonthlyReportDailyTrendResponse(BaseModel):
+    report_date: date
+    planned_task_count: int
+    completed_task_count: int
+    focus_minutes: int
+    completion_rate: float
+    high_value_completed_task_count: int
+
+
+class MonthlyReportWeeklyTrendResponse(BaseModel):
+    week_start: date
+    week_end: date
+    completed_task_count: int
+    focus_minutes: int
+    high_value_completed_task_count: int
+    average_completion_rate: float
+
+
+class MonthlyReportSummaryResponse(BaseModel):
+    total_planned_task_count: int
+    total_completed_task_count: int
+    high_value_completed_task_count: int
+    total_focus_minutes: int
+    average_completion_rate: float
+    active_goal_count: int
+    at_risk_goal_count: int
+    overdue_task_count: int
+
+
+class MonthlyReportResponse(BaseModel):
+    month_start: date
+    month_end: date
+    summary: MonthlyReportSummaryResponse
+    weekly_trends: list[MonthlyReportWeeklyTrendResponse]
+    daily_trends: list[MonthlyReportDailyTrendResponse]
+    ai_suggestions: list[str]
