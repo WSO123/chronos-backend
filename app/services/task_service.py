@@ -24,6 +24,7 @@ from app.models.enums import (
 from app.models.focus_session import FocusSession
 from app.models.goal import Goal
 from app.models.task import Task
+from app.models.task_dependency import TaskDependency
 from app.models.task_step import TaskStep
 from app.models.user import User
 from app.models.mixins import utc_now
@@ -127,6 +128,7 @@ class TaskService:
                 "actual_duration_min": task.actual_duration_min,
             },
             "today_context": self._today_context(today_item),
+            "dependency_info": self.get_task_dependencies(db, task_id=task.id, user_id=user_id),
             "focus_state": {
                 "active_focus_session_id": active_focus.id if active_focus else None,
                 "is_currently_focusing_this_task": active_focus is not None and active_focus.task_id == task.id,
@@ -463,11 +465,192 @@ class TaskService:
         )
         return list(db.scalars(stmt).all())
 
+    def get_task_dependencies(self, db: Session, *, task_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+        task = self._get_user_task(db, task_id=task_id, user_id=user_id)
+        prerequisites = self._dependency_edges(db, user_id=user_id, dependent_task_id=task.id)
+        dependents = self._dependency_edges(db, user_id=user_id, prerequisite_task_id=task.id)
+        return {
+            "task_id": task.id,
+            "prerequisites": [self._dependency_response(edge) for edge in prerequisites],
+            "dependents": [self._dependency_response(edge) for edge in dependents],
+        }
+
+    def add_task_dependency(
+        self,
+        db: Session,
+        *,
+        task_id: uuid.UUID,
+        user_id: uuid.UUID,
+        prerequisite_task_id: uuid.UUID,
+        reason: str | None = None,
+    ) -> dict:
+        dependent_task = self._get_user_task(db, task_id=task_id, user_id=user_id)
+        prerequisite_task = self._get_user_task(db, task_id=prerequisite_task_id, user_id=user_id)
+        if dependent_task.id == prerequisite_task.id:
+            raise ValidationDomainError("Task cannot depend on itself")
+        existing = self._get_dependency_edge(
+            db,
+            user_id=user_id,
+            dependent_task_id=dependent_task.id,
+            prerequisite_task_id=prerequisite_task.id,
+        )
+        if existing is not None:
+            return self._dependency_response(existing)
+        if self._would_create_dependency_cycle(
+            db,
+            user_id=user_id,
+            dependent_task_id=dependent_task.id,
+            prerequisite_task_id=prerequisite_task.id,
+        ):
+            raise InvalidStateError("Task dependency would create a cycle")
+        edge = TaskDependency(
+            user_id=user_id,
+            dependent_task_id=dependent_task.id,
+            prerequisite_task_id=prerequisite_task.id,
+            reason=reason,
+        )
+        db.add(edge)
+        db.flush()
+        activity_event_service.add_event(
+            db,
+            user_id=user_id,
+            entity_type=EntityType.TASK,
+            entity_id=dependent_task.id,
+            event_type="TASK_DEPENDENCY_CREATED",
+            related_task_id=dependent_task.id,
+            payload={
+                "dependency_id": str(edge.id),
+                "prerequisite_task_id": str(prerequisite_task.id),
+                "reason": reason,
+            },
+        )
+        db.commit()
+        db.refresh(edge)
+        return self._dependency_response(edge)
+
+    def delete_task_dependency(
+        self,
+        db: Session,
+        *,
+        task_id: uuid.UUID,
+        user_id: uuid.UUID,
+        prerequisite_task_id: uuid.UUID,
+    ) -> dict:
+        dependent_task = self._get_user_task(db, task_id=task_id, user_id=user_id)
+        prerequisite_task = self._get_user_task(db, task_id=prerequisite_task_id, user_id=user_id)
+        edge = self._get_dependency_edge(
+            db,
+            user_id=user_id,
+            dependent_task_id=dependent_task.id,
+            prerequisite_task_id=prerequisite_task.id,
+        )
+        if edge is None:
+            raise NotFoundError("Task dependency not found")
+        db.delete(edge)
+        activity_event_service.add_event(
+            db,
+            user_id=user_id,
+            entity_type=EntityType.TASK,
+            entity_id=dependent_task.id,
+            event_type="TASK_DEPENDENCY_DELETED",
+            related_task_id=dependent_task.id,
+            payload={"prerequisite_task_id": str(prerequisite_task.id)},
+        )
+        db.commit()
+        return self.get_task_dependencies(db, task_id=dependent_task.id, user_id=user_id)
+
     def _get_user_task(self, db: Session, *, task_id: uuid.UUID, user_id: uuid.UUID) -> Task:
         task = db.get(Task, task_id)
         if task is None or task.user_id != user_id:
             raise NotFoundError("Task not found")
         return task
+
+    def _dependency_edges(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        dependent_task_id: uuid.UUID | None = None,
+        prerequisite_task_id: uuid.UUID | None = None,
+    ) -> list[TaskDependency]:
+        stmt = (
+            select(TaskDependency)
+            .options(
+                selectinload(TaskDependency.dependent_task),
+                selectinload(TaskDependency.prerequisite_task),
+            )
+            .where(TaskDependency.user_id == user_id)
+        )
+        if dependent_task_id is not None:
+            stmt = stmt.where(TaskDependency.dependent_task_id == dependent_task_id)
+        if prerequisite_task_id is not None:
+            stmt = stmt.where(TaskDependency.prerequisite_task_id == prerequisite_task_id)
+        return list(db.scalars(stmt.order_by(TaskDependency.created_at)).all())
+
+    def _get_dependency_edge(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        dependent_task_id: uuid.UUID,
+        prerequisite_task_id: uuid.UUID,
+    ) -> TaskDependency | None:
+        stmt = (
+            select(TaskDependency)
+            .options(
+                selectinload(TaskDependency.dependent_task),
+                selectinload(TaskDependency.prerequisite_task),
+            )
+            .where(
+                TaskDependency.user_id == user_id,
+                TaskDependency.dependent_task_id == dependent_task_id,
+                TaskDependency.prerequisite_task_id == prerequisite_task_id,
+            )
+        )
+        return db.scalars(stmt).first()
+
+    def _would_create_dependency_cycle(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        dependent_task_id: uuid.UUID,
+        prerequisite_task_id: uuid.UUID,
+    ) -> bool:
+        stmt = select(TaskDependency).where(TaskDependency.user_id == user_id)
+        outgoing: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for edge in db.scalars(stmt).all():
+            outgoing.setdefault(edge.prerequisite_task_id, []).append(edge.dependent_task_id)
+        outgoing.setdefault(prerequisite_task_id, []).append(dependent_task_id)
+
+        visited: set[uuid.UUID] = set()
+        stack = [dependent_task_id]
+        while stack:
+            current_id = stack.pop()
+            if current_id == prerequisite_task_id:
+                return True
+            if current_id in visited:
+                continue
+            visited.add(current_id)
+            stack.extend(outgoing.get(current_id, []))
+        return False
+
+    def _dependency_response(self, edge: TaskDependency) -> dict:
+        return {
+            "id": edge.id,
+            "prerequisite_task": self._dependency_node(edge.prerequisite_task),
+            "dependent_task": self._dependency_node(edge.dependent_task),
+            "reason": edge.reason,
+        }
+
+    def _dependency_node(self, task: Task) -> dict:
+        return {
+            "task_id": task.id,
+            "title": task.title,
+            "status": task.status,
+            "value_level": task.value_level,
+            "deadline": task.deadline,
+        }
 
     def _create_breakdown_steps(self, db: Session, *, task: Task, user_id: uuid.UUID) -> list[TaskStep]:
         titles = self._breakdown_step_titles(task)

@@ -7,6 +7,7 @@ from app.models.goal import Goal
 from app.models.inbox import InboxItem
 from app.models.report import DailyReport
 from app.models.task import Task
+from app.models.task_dependency import TaskDependency
 from app.models.task_step import TaskStep
 from app.models.user import User, UserSettings
 
@@ -24,6 +25,7 @@ __all__ = [
     "PlanRevision",
     "StrategySnapshot",
     "Task",
+    "TaskDependency",
     "TaskStep",
     "User",
     "UserSettings",

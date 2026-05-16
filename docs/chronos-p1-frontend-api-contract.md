@@ -92,7 +92,7 @@ uv run python scripts/dev_seed_demo.py
 | Global Capture | `POST /captures` | Ready |
 | Inbox | `GET /inbox`, `PATCH /inbox/{id}`, `POST /inbox/{id}/confirm` | Ready |
 | Today | `GET /today`, `GET /today/strategy`, `POST /today/replan`, `PATCH /today/items/{id}` | Ready, Strategy Detail P2 Ready |
-| Task Detail | `GET /tasks/{id}`, `POST /tasks/{id}/breakdown`, steps / complete / postpone | Ready |
+| Task Detail | `GET /tasks/{id}`, `POST /tasks/{id}/breakdown`, dependencies / steps / complete / postpone | Ready, Dependency P2 Ready |
 | Focus | `POST /focus-sessions`, complete / interrupt / postpone | Ready |
 | Reports | `GET /reports/daily`, `POST /reports/daily/generate`, `GET /reports/weekly`, `GET /reports/monthly` | Daily Ready, Weekly / Monthly P2 Ready |
 | Me Overview | `GET /me/overview` | Ready |
@@ -444,6 +444,11 @@ Response key fields:
     "sort_order": 1,
     "recommendation_reason": "High-value task protected..."
   },
+  "dependency_info": {
+    "task_id": "uuid",
+    "prerequisites": [],
+    "dependents": []
+  },
   "focus_state": {
     "active_focus_session_id": null,
     "is_currently_focusing_this_task": false
@@ -461,7 +466,66 @@ Frontend notes:
 
 - 操作按钮以 `actions` 为准，不要只靠 `status` 自己推断。
 - `today_context.daily_plan_item_id` 用于 Start Focus 时绑定 Today item。
+- `dependency_info` 用于 P2 Dependency 区块，默认可折叠，不要让 Task Detail 变成信息仓库。
 - `ai_info.execution_suggestion` 是轻量建议，不要做成大段解释。
+
+### Task dependencies
+
+用于 P2 Task Detail / Goal Detail 的 Dependency View。依赖方向统一为：
+
+```text
+prerequisite_task -> dependent_task
+```
+
+| Method | Path | 用途 |
+| --- | --- | --- |
+| `GET` | `/tasks/{task_id}/dependencies` | 获取当前任务的前置任务和后续任务 |
+| `POST` | `/tasks/{task_id}/dependencies` | 为当前任务添加前置任务 |
+| `DELETE` | `/tasks/{task_id}/dependencies/{prerequisite_task_id}` | 删除当前任务的一条前置依赖 |
+
+POST request:
+
+```json
+{
+  "prerequisite_task_id": "uuid",
+  "reason": "Do this first"
+}
+```
+
+Response key fields:
+
+```json
+{
+  "task_id": "uuid",
+  "prerequisites": [
+    {
+      "id": "uuid",
+      "prerequisite_task": {
+        "task_id": "uuid",
+        "title": "Prepare context",
+        "status": "active",
+        "value_level": "high",
+        "deadline": "2026-05-16"
+      },
+      "dependent_task": {
+        "task_id": "uuid",
+        "title": "Write final draft",
+        "status": "active",
+        "value_level": "high",
+        "deadline": "2026-05-17"
+      },
+      "reason": "Do this first"
+    }
+  ],
+  "dependents": []
+}
+```
+
+Frontend notes:
+
+- 自依赖、跨用户依赖会被拒绝。
+- 形成环时返回 `400 INVALID_STATE`。
+- Dependency View 默认展示少量边，复杂依赖图放到专门二级页，不压垮 Task Detail。
 
 ### POST `/tasks/{task_id}/breakdown`
 
@@ -510,6 +574,9 @@ Frontend notes:
 | `PATCH` | `/tasks/{task_id}` | 编辑任务基础字段 |
 | `POST` | `/tasks/{task_id}/complete` | 直接完成任务 |
 | `POST` | `/tasks/{task_id}/postpone` | 直接延后任务 |
+| `GET` | `/tasks/{task_id}/dependencies` | 获取任务依赖 |
+| `POST` | `/tasks/{task_id}/dependencies` | 添加任务依赖 |
+| `DELETE` | `/tasks/{task_id}/dependencies/{prerequisite_task_id}` | 删除任务依赖 |
 | `POST` | `/tasks/{task_id}/steps` | 手动添加步骤 |
 | `POST` | `/tasks/{task_id}/steps/{step_id}/complete` | 完成步骤 |
 | `GET` | `/tasks/{task_id}/events` | 调试 / 活动历史 |
@@ -872,12 +939,11 @@ P2 Goals 已提供：
 - Goal Progress。
 - Goal Task List。
 - 规则版 AI Suggestion。
-- Dependency Map 节点顺序。
+- Dependency Map 节点顺序和真实依赖边。
 
 尚未实现：
 
 - Goal progress timeline。
-- 真实任务依赖边。
 - 深度 Goal 洞察。
 
 ---
@@ -957,8 +1023,6 @@ GET /me/overview
 - Calendar / Email / Health 数据接入。
 - Energy dashboard。
 - Social / Groups / Friends。
-- Goal detail aggregate。
-- Dependency view。
 - Notification center。
 - AIJob list / cancel / retry。
 - 真实 LLM planning / task breakdown。

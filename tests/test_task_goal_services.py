@@ -173,6 +173,80 @@ class TaskGoalServiceTests(unittest.TestCase):
         self.assertEqual(detail["ai_suggestion"]["next_action_task_id"], next_task.id)
         self.assertFalse(detail["actions"]["can_mark_complete"])
 
+    def test_task_dependencies_create_edges_and_goal_dependency_map(self):
+        goal = goal_service.create_goal(self.db, user_id=self.user.id, title="Dependency goal")
+        prerequisite = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Prepare context",
+        )
+        dependent = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Write final draft",
+        )
+
+        edge = task_service.add_task_dependency(
+            self.db,
+            task_id=dependent.id,
+            user_id=self.user.id,
+            prerequisite_task_id=prerequisite.id,
+            reason="Context first",
+        )
+        dependencies = task_service.get_task_dependencies(self.db, task_id=dependent.id, user_id=self.user.id)
+        task_detail = task_service.get_task_detail(self.db, task_id=dependent.id, user_id=self.user.id)
+        goal_detail = goal_service.get_goal_detail(self.db, goal_id=goal.id, user_id=self.user.id)
+
+        self.assertEqual(edge["prerequisite_task"]["task_id"], prerequisite.id)
+        self.assertEqual(edge["dependent_task"]["task_id"], dependent.id)
+        self.assertEqual(dependencies["prerequisites"][0]["reason"], "Context first")
+        self.assertEqual(task_detail["dependency_info"]["prerequisites"][0]["id"], edge["id"])
+        self.assertEqual(goal_detail["dependency_map"]["edges"][0]["from_task_id"], prerequisite.id)
+        self.assertEqual(goal_detail["dependency_map"]["edges"][0]["to_task_id"], dependent.id)
+
+    def test_task_dependency_rejects_cycles(self):
+        first = task_service.create_task(self.db, user_id=self.user.id, title="First")
+        second = task_service.create_task(self.db, user_id=self.user.id, title="Second")
+        task_service.add_task_dependency(
+            self.db,
+            task_id=second.id,
+            user_id=self.user.id,
+            prerequisite_task_id=first.id,
+        )
+
+        with self.assertRaises(InvalidStateError):
+            task_service.add_task_dependency(
+                self.db,
+                task_id=first.id,
+                user_id=self.user.id,
+                prerequisite_task_id=second.id,
+            )
+
+    def test_task_dependency_delete_returns_updated_dependency_state(self):
+        prerequisite = task_service.create_task(self.db, user_id=self.user.id, title="Read brief")
+        dependent = task_service.create_task(self.db, user_id=self.user.id, title="Write answer")
+        edge = task_service.add_task_dependency(
+            self.db,
+            task_id=dependent.id,
+            user_id=self.user.id,
+            prerequisite_task_id=prerequisite.id,
+        )
+
+        updated = task_service.delete_task_dependency(
+            self.db,
+            task_id=dependent.id,
+            user_id=self.user.id,
+            prerequisite_task_id=prerequisite.id,
+        )
+        events = task_service.list_task_events(self.db, task_id=dependent.id, user_id=self.user.id)
+
+        self.assertEqual(updated["task_id"], dependent.id)
+        self.assertEqual(updated["prerequisites"], [])
+        self.assertIn("TASK_DEPENDENCY_DELETED", [event.event_type for event in events])
+        self.assertEqual(edge["dependent_task"]["task_id"], dependent.id)
+
     def test_completed_goal_detail_has_no_next_action(self):
         goal = goal_service.create_goal(self.db, user_id=self.user.id, title="Completed goal")
         task_service.create_task(self.db, user_id=self.user.id, goal_id=goal.id, title="Leftover task")

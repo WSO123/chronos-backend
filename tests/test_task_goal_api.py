@@ -141,6 +141,75 @@ class TaskGoalAPITests(unittest.TestCase):
         self.assertEqual(body["dependency_map"]["edges"], [])
         self.assertFalse(body["actions"]["can_mark_complete"])
 
+    def test_task_dependency_api_and_goal_detail_edges(self):
+        goal_response = self.client.post("/api/v1/goals", json={"title": "API dependency goal"}, headers=self.headers)
+        self.assertEqual(goal_response.status_code, 201)
+        prerequisite_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "API prerequisite", "goal_id": goal_response.json()["id"]},
+            headers=self.headers,
+        )
+        dependent_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "API dependent", "goal_id": goal_response.json()["id"]},
+            headers=self.headers,
+        )
+        self.assertEqual(prerequisite_response.status_code, 201)
+        self.assertEqual(dependent_response.status_code, 201)
+        prerequisite_id = prerequisite_response.json()["id"]
+        dependent_id = dependent_response.json()["id"]
+
+        create_response = self.client.post(
+            f"/api/v1/tasks/{dependent_id}/dependencies",
+            json={"prerequisite_task_id": prerequisite_id, "reason": "Do first"},
+            headers=self.headers,
+        )
+        dependencies_response = self.client.get(f"/api/v1/tasks/{dependent_id}/dependencies", headers=self.headers)
+        detail_response = self.client.get(f"/api/v1/goals/{goal_response.json()['id']}/detail", headers=self.headers)
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(create_response.json()["prerequisite_task"]["task_id"], prerequisite_id)
+        self.assertEqual(dependencies_response.status_code, 200)
+        self.assertEqual(dependencies_response.json()["prerequisites"][0]["reason"], "Do first")
+        self.assertEqual(detail_response.json()["dependency_map"]["edges"][0]["from_task_id"], prerequisite_id)
+        self.assertEqual(detail_response.json()["dependency_map"]["edges"][0]["to_task_id"], dependent_id)
+
+        cycle_response = self.client.post(
+            f"/api/v1/tasks/{prerequisite_id}/dependencies",
+            json={"prerequisite_task_id": dependent_id},
+            headers=self.headers,
+        )
+        self.assertEqual(cycle_response.status_code, 400)
+        self.assertEqual(cycle_response.json()["error"]["code"], "INVALID_STATE")
+
+        delete_response = self.client.delete(
+            f"/api/v1/tasks/{dependent_id}/dependencies/{prerequisite_id}",
+            headers=self.headers,
+        )
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(delete_response.json()["prerequisites"], [])
+
+    def test_task_dependency_api_keeps_user_isolation(self):
+        own_task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Private dependent"},
+            headers=self.headers,
+        )
+        other_task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Other prerequisite"},
+            headers=self.other_headers,
+        )
+
+        response = self.client.post(
+            f"/api/v1/tasks/{own_task_response.json()['id']}/dependencies",
+            json={"prerequisite_task_id": other_task_response.json()["id"]},
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "NOT_FOUND")
+
     def test_goal_detail_user_isolation(self):
         goal_response = self.client.post(
             "/api/v1/goals",

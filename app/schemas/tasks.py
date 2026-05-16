@@ -117,11 +117,40 @@ class TaskDetailActionsResponse(BaseModel):
     can_edit: bool
 
 
+class TaskDependencyCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prerequisite_task_id: uuid.UUID
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class TaskDependencyNodeResponse(BaseModel):
+    task_id: uuid.UUID
+    title: str
+    status: TaskStatus
+    value_level: ValueLevel
+    deadline: date | None
+
+
+class TaskDependencyEdgeResponse(BaseModel):
+    id: uuid.UUID
+    prerequisite_task: TaskDependencyNodeResponse
+    dependent_task: TaskDependencyNodeResponse
+    reason: str | None
+
+
+class TaskDependenciesResponse(BaseModel):
+    task_id: uuid.UUID
+    prerequisites: list[TaskDependencyEdgeResponse] = Field(default_factory=list)
+    dependents: list[TaskDependencyEdgeResponse] = Field(default_factory=list)
+
+
 class TaskDetailResponse(TaskResponse):
     goal: TaskDetailGoalResponse | None
     ai_info: TaskDetailAIInfoResponse
     progress_info: TaskDetailProgressResponse
     today_context: TaskDetailTodayContextResponse | None
+    dependency_info: TaskDependenciesResponse
     focus_state: TaskDetailFocusStateResponse
     actions: TaskDetailActionsResponse
 

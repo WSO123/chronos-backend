@@ -298,6 +298,7 @@ P3 扩展对象：
 - 管理任务步骤。
 - 管理任务状态。
 - 支持快速完成、延后、拆解、编辑。
+- 支持 P2 任务依赖边，表达“前置任务 -> 后续任务”的执行顺序关系。
 
 核心动作：
 
@@ -308,16 +309,18 @@ P3 扩展对象：
 - 拆解任务
 - 勾选步骤
 - 关联 Goal
+- 添加 / 删除任务依赖
 
 核心对象：
 
 - Task
 - TaskStep
+- TaskDependency
 - ActivityEvent
 
 ### 7.4 Goal Module
 
-P1 只做轻量 Goal。
+P1 只做轻量 Goal，P2 逐步补齐 Goals 首页、Goal Detail 和 Dependency Map。
 
 职责：
 
@@ -333,12 +336,15 @@ P1 不做：
 - Dependency Map
 - 目标洞察
 
-P2 再扩展：
+P2 已扩展：
 
 - Goal Detail
 - Goal Progress
-- Dependency Map
+- Dependency Map：已支持目标内真实任务依赖边
 - Goal AI Suggestion
+
+P2 后续继续扩展：
+
 - 高价值目标分析
 
 核心对象：
@@ -414,7 +420,7 @@ Focus 是执行场景。
 
 ### 7.8 Report Module
 
-P1 做 Daily Report；P2 先补 Weekly Report 轻量聚合。
+P1 做 Daily Report；P2 已补 Weekly / Monthly Report 轻量聚合和 Insight Detail。
 
 职责：
 
@@ -428,8 +434,8 @@ P1 做 Daily Report；P2 先补 Weekly Report 轻量聚合。
 P2 扩展：
 
 - Weekly Report：已支持轻量聚合，不持久化。
-- Monthly Report
-- Insight Detail
+- Monthly Report：已支持轻量聚合，不持久化。
+- Insight Detail：已支持轻量规则洞察。
 
 核心对象：
 
@@ -619,6 +625,26 @@ TaskStep {
   updated_at
 }
 ```
+
+### TaskDependency
+
+```text
+TaskDependency {
+  id
+  user_id
+  prerequisite_task_id    // 前置任务
+  dependent_task_id       // 后续任务
+  reason
+  created_at
+  updated_at
+}
+```
+
+说明：
+
+- 依赖方向统一为 `prerequisite_task -> dependent_task`。
+- 同一用户下不允许重复边，不允许自依赖，不允许形成环。
+- Task Detail 返回当前任务的前置任务和后续任务；Goal Detail 只返回同一目标内的依赖边。
 
 ### ActivityEvent
 
@@ -932,6 +958,9 @@ PATCH /api/v1/tasks/{task_id}
 POST  /api/v1/tasks/{task_id}/complete
 POST  /api/v1/tasks/{task_id}/postpone
 POST  /api/v1/tasks/{task_id}/breakdown
+GET   /api/v1/tasks/{task_id}/dependencies
+POST  /api/v1/tasks/{task_id}/dependencies
+DELETE /api/v1/tasks/{task_id}/dependencies/{prerequisite_task_id}
 POST  /api/v1/tasks/{task_id}/steps/{step_id}/complete
 GET   /api/v1/tasks/{task_id}/events
 ```
@@ -939,6 +968,7 @@ GET   /api/v1/tasks/{task_id}/events
 说明：
 
 - `GET /tasks/{id}` 服务 Task Detail。
+- `/dependencies` 服务 P2 Task Detail 的 Dependency 区块，返回当前任务的前置任务和后续任务。
 - 任务历史通过 `/events` 单独获取，避免 Task Detail 变成信息仓库。
 - `breakdown` 可以异步执行，返回 `ai_job_id`；AI 输出步骤后需用户可编辑或确认。
 
@@ -958,8 +988,8 @@ PATCH /api/v1/goals/{goal_id}
 - P1 只做轻量目标，服务创建、选择器和任务归属。
 - `GET /goals/{goal_id}` 保持基础信息接口，服务轻量详情和 selector。
 - `GET /goals/home` 服务 P2 Goals 首页聚合，返回 summary、filter counts、goal cards、progress、risk、关联任务数和推荐下一步任务 id。
-- `GET /goals/{goal_id}/detail` 服务 P2 Goal Detail 聚合，返回 overview、progress、task list、规则建议和 dependency nodes。
-- 当前 Dependency Map 只返回节点顺序和空 edges，不伪造真实依赖边；深度目标洞察仍留到后续 P2 迭代。
+- `GET /goals/{goal_id}/detail` 服务 P2 Goal Detail 聚合，返回 overview、progress、task list、规则建议和 dependency map。
+- Dependency Map 已支持真实依赖边，边方向统一为 `from_task_id` 前置任务指向 `to_task_id` 后续任务；深度目标洞察仍留到后续 P2 迭代。
 
 ### Focus
 
@@ -1387,7 +1417,7 @@ P1 不是以“接口都写完”为验收，而是以核心闭环跑通为验�
 
 - Goal Detail
 - Goal Progress
-- Dependency
+- Dependency（已支持任务依赖边和 Goal Detail 依赖图）
 - Weekly Report（已支持轻量聚合）
 - Monthly Report（已支持轻量聚合）
 - Insight Detail（已支持轻量规则聚合）

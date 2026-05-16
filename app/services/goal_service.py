@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.enums import EntityType, GoalHomeFilter, GoalStatus, TaskStatus, ValueLevel
 from app.models.goal import Goal
 from app.models.task import Task
+from app.models.task_dependency import TaskDependency
 from app.models.user import User
 from app.services.activity_event_service import activity_event_service
 from app.services.errors import NotFoundError
@@ -115,7 +116,7 @@ class GoalService:
                 "completed_tasks": [task_summaries[task.id] for task in completed_tasks],
                 "recommended_next_task": task_summaries[recommended_next_task.id] if recommended_next_task else None,
             },
-            "dependency_map": self._dependency_map(sorted_tasks),
+            "dependency_map": self._dependency_map(db, sorted_tasks),
             "ai_suggestion": self._ai_suggestion(
                 goal=goal,
                 tasks=visible_tasks,
@@ -318,7 +319,13 @@ class GoalService:
             "completed_step_count": len([step for step in task.steps if step.is_completed]),
         }
 
-    def _dependency_map(self, tasks: list[Task]) -> dict:
+    def _dependency_map(self, db: Session, tasks: list[Task]) -> dict:
+        task_ids = {task.id for task in tasks}
+        stmt = select(TaskDependency).where(
+            TaskDependency.dependent_task_id.in_(task_ids),
+            TaskDependency.prerequisite_task_id.in_(task_ids),
+        ).order_by(TaskDependency.created_at)
+        edges = list(db.scalars(stmt).all())
         return {
             "nodes": [
                 {
@@ -329,8 +336,19 @@ class GoalService:
                 }
                 for index, task in enumerate(tasks, start=1)
             ],
-            "edges": [],
-            "note": "Task dependency edges are not modeled yet; nodes follow the current recommended stage order.",
+            "edges": [
+                {
+                    "from_task_id": edge.prerequisite_task_id,
+                    "to_task_id": edge.dependent_task_id,
+                    "reason": edge.reason,
+                }
+                for edge in edges
+            ],
+            "note": (
+                "Task dependency edges are modeled from prerequisite task to dependent task."
+                if edges
+                else "No dependency edges are linked inside this goal yet."
+            ),
         }
 
     def _ai_suggestion(

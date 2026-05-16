@@ -9,6 +9,9 @@ from app.schemas.tasks import (
     ActivityEventResponse,
     TaskCreate,
     TaskBreakdownResponse,
+    TaskDependenciesResponse,
+    TaskDependencyCreate,
+    TaskDependencyEdgeResponse,
     TaskDetailResponse,
     TaskResponse,
     TaskStepCreate,
@@ -88,6 +91,46 @@ def breakdown_task(
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
     return task_service.breakdown_task(db, task_id=task_id, user_id=user_id)
+
+
+@router.get("/{task_id}/dependencies", response_model=TaskDependenciesResponse)
+def get_task_dependencies(
+    task_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return task_service.get_task_dependencies(db, task_id=task_id, user_id=user_id)
+
+
+@router.post("/{task_id}/dependencies", response_model=TaskDependencyEdgeResponse, status_code=status.HTTP_201_CREATED)
+def add_task_dependency(
+    task_id: uuid.UUID,
+    payload: TaskDependencyCreate,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return task_service.add_task_dependency(
+        db,
+        task_id=task_id,
+        user_id=user_id,
+        prerequisite_task_id=payload.prerequisite_task_id,
+        reason=payload.reason,
+    )
+
+
+@router.delete("/{task_id}/dependencies/{prerequisite_task_id}", response_model=TaskDependenciesResponse)
+def delete_task_dependency(
+    task_id: uuid.UUID,
+    prerequisite_task_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return task_service.delete_task_dependency(
+        db,
+        task_id=task_id,
+        user_id=user_id,
+        prerequisite_task_id=prerequisite_task_id,
+    )
 
 
 @router.post("/{task_id}/steps", response_model=TaskStepResponse, status_code=status.HTTP_201_CREATED)
