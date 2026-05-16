@@ -22,6 +22,7 @@ class GoalService:
         description: str | None = None,
         deadline: date | None = None,
         value_level: ValueLevel = ValueLevel.MEDIUM,
+        commit: bool = True,
     ) -> Goal:
         goal = Goal(
             user_id=user_id,
@@ -41,8 +42,9 @@ class GoalService:
             event_type="GOAL_CREATED",
             payload={"title": title, "value_level": value_level.value},
         )
-        db.commit()
-        db.refresh(goal)
+        if commit:
+            db.commit()
+            db.refresh(goal)
         return goal
 
     def list_goals(

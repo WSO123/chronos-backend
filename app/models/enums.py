@@ -41,6 +41,51 @@ class TaskSource(StrEnum):
     CALENDAR = "calendar"
 
 
+class CaptureInputType(StrEnum):
+    TEXT = "text"
+    VOICE = "voice"
+    IMAGE = "image"
+    EXTERNAL = "external"
+
+
+class CaptureSource(StrEnum):
+    MANUAL = "manual"
+    VOICE = "voice"
+    IMAGE = "image"
+    EMAIL = "email"
+    CALENDAR = "calendar"
+
+
+class CaptureStatus(StrEnum):
+    RECEIVED = "received"
+    PARSING = "parsing"
+    PARSED = "parsed"
+    FAILED = "failed"
+    ARCHIVED = "archived"
+
+
+class ParseResultType(StrEnum):
+    TASK = "task"
+    GOAL = "goal"
+    IDEA = "idea"
+    CALENDAR_ITEM = "calendar_item"
+    UNKNOWN = "unknown"
+
+
+class InboxItemType(StrEnum):
+    TASK = "task"
+    GOAL = "goal"
+    IDEA = "idea"
+    UNKNOWN = "unknown"
+
+
+class InboxItemStatus(StrEnum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    EDITED = "edited"
+    DISCARDED = "discarded"
+
+
 class EntityType(StrEnum):
     TASK = "task"
     GOAL = "goal"

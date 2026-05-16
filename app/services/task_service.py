@@ -31,6 +31,7 @@ class TaskService:
         value_level: ValueLevel = ValueLevel.MEDIUM,
         deadline: date | None = None,
         source: TaskSource = TaskSource.MANUAL,
+        commit: bool = True,
     ) -> Task:
         if goal_id is not None:
             self._validate_user_goal(db, goal_id=goal_id, user_id=user_id)
@@ -59,9 +60,11 @@ class TaskService:
             related_task_id=task.id,
             payload={"title": title, "source": source.value},
         )
-        db.commit()
-        db.refresh(task)
-        return self.get_task(db, task_id=task.id, user_id=user_id)
+        if commit:
+            db.commit()
+            db.refresh(task)
+            return self.get_task(db, task_id=task.id, user_id=user_id)
+        return task
 
     def get_task(self, db: Session, *, task_id: uuid.UUID, user_id: uuid.UUID) -> Task:
         stmt = (
