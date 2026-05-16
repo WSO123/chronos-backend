@@ -4,6 +4,20 @@ from app.services.scheduler_service import scheduler_service
 
 
 class SchedulerServiceTests(unittest.TestCase):
+    def test_scheduler_overview_summarizes_domains(self):
+        overview = scheduler_service.scheduler_overview()
+        domains = {domain["domain"]: domain for domain in overview["domains"]}
+
+        self.assertEqual(overview["timezone"], "UTC")
+        self.assertIn("data_sources", domains)
+        self.assertIn("reminders", domains)
+        self.assertEqual(domains["data_sources"]["plan_path"], "/api/v1/scheduler/data-sources")
+        self.assertEqual(domains["reminders"]["plan_path"], "/api/v1/scheduler/reminders")
+        self.assertIn("data_source.sync_ready_connections", domains["data_sources"]["task_names"])
+        self.assertIn("reminder.dispatch_due", domains["reminders"]["task_names"])
+        self.assertGreater(domains["reminders"]["guardrail_count"], 0)
+        self.assertTrue(overview["notes"])
+
     def test_data_source_schedule_plan_documents_required_workers(self):
         plan = scheduler_service.data_source_schedule_plan()
         entries = {entry["task_name"]: entry for entry in plan["entries"]}

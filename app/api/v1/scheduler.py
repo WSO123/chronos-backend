@@ -8,10 +8,20 @@ from app.schemas.scheduler import (
     DataSourceSchedulerPlanResponse,
     ReminderCeleryBeatScheduleResponse,
     ReminderSchedulerPlanResponse,
+    SchedulerOverviewResponse,
 )
 from app.services.scheduler_service import scheduler_service
 
 router = APIRouter(prefix="/scheduler", tags=["scheduler"])
+
+
+@router.get("/overview", response_model=SchedulerOverviewResponse)
+def get_scheduler_overview(
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    # Read-only overview. It does not mutate celery_app.conf or trigger workers.
+    _ = user_id
+    return scheduler_service.scheduler_overview()
 
 
 @router.get("/data-sources", response_model=DataSourceSchedulerPlanResponse)

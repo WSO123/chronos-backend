@@ -1,6 +1,27 @@
 from pydantic import BaseModel
 
 
+class SchedulerOverviewDomainResponse(BaseModel):
+    domain: str
+    display_name: str
+    plan_path: str
+    beat_path: str
+    entry_count: int
+    enabled_entry_count: int
+    beat_entry_count: int
+    excluded_entry_count: int
+    task_names: list[str]
+    beat_task_names: list[str]
+    excluded_task_names: list[str]
+    guardrail_count: int
+
+
+class SchedulerOverviewResponse(BaseModel):
+    timezone: str
+    domains: list[SchedulerOverviewDomainResponse]
+    notes: list[str]
+
+
 class SchedulerEntryResponse(BaseModel):
     task_name: str
     cadence: str

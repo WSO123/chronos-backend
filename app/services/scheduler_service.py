@@ -2,6 +2,39 @@ from __future__ import annotations
 
 
 class SchedulerService:
+    def scheduler_overview(self) -> dict:
+        data_source_plan = self.data_source_schedule_plan()
+        data_source_beat = self.data_source_celery_beat_schedule()
+        reminder_plan = self.reminder_schedule_plan()
+        reminder_beat = self.reminder_celery_beat_schedule()
+
+        return {
+            "timezone": "UTC",
+            "domains": [
+                self._overview_domain(
+                    domain="data_sources",
+                    display_name="Data Sources",
+                    plan_path="/api/v1/scheduler/data-sources",
+                    beat_path="/api/v1/scheduler/data-sources/celery-beat",
+                    plan=data_source_plan,
+                    beat=data_source_beat,
+                ),
+                self._overview_domain(
+                    domain="reminders",
+                    display_name="Reminders",
+                    plan_path="/api/v1/scheduler/reminders",
+                    beat_path="/api/v1/scheduler/reminders/celery-beat",
+                    plan=reminder_plan,
+                    beat=reminder_beat,
+                ),
+            ],
+            "notes": [
+                "This is a read-only scheduler overview, not a running scheduler.",
+                "Domain plans remain the source of truth for guardrails and payload templates.",
+                "Celery Beat proposals are JSON-friendly deployment hints and do not mutate celery_app.conf.",
+            ],
+        }
+
     def data_source_schedule_plan(self) -> dict:
         return {
             "timezone": "UTC",
@@ -244,6 +277,34 @@ class SchedulerService:
                 "Crontab entries are expressed in UTC.",
                 "Execution reminder fanout should be implemented as a separate worker before Beat wiring.",
             ],
+        }
+
+    def _overview_domain(
+        self,
+        *,
+        domain: str,
+        display_name: str,
+        plan_path: str,
+        beat_path: str,
+        plan: dict,
+        beat: dict,
+    ) -> dict:
+        entries = plan["entries"]
+        beat_entries = beat["entries"]
+        excluded_entries = beat.get("excluded_entries", [])
+        return {
+            "domain": domain,
+            "display_name": display_name,
+            "plan_path": plan_path,
+            "beat_path": beat_path,
+            "entry_count": len(entries),
+            "enabled_entry_count": len([entry for entry in entries if entry["enabled"]]),
+            "beat_entry_count": len(beat_entries),
+            "excluded_entry_count": len(excluded_entries),
+            "task_names": [entry["task_name"] for entry in entries],
+            "beat_task_names": [entry["task"] for entry in beat_entries],
+            "excluded_task_names": [entry["task_name"] for entry in excluded_entries],
+            "guardrail_count": sum(len(entry["guardrails"]) for entry in entries),
         }
 
 

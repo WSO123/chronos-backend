@@ -45,6 +45,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Mark Reminder Seen | `POST /api/v1/reminders/{id}/seen` | Ready |
 | Mark Reminders Seen Batch | `POST /api/v1/reminders/seen` | Ready |
 | Dismiss Reminder | `POST /api/v1/reminders/{id}/dismiss` | Ready |
+| Scheduler Overview | `GET /api/v1/scheduler/overview` | Ready |
 | Reminder Scheduler Plan | `GET /api/v1/scheduler/reminders` | Ready |
 | Reminder Celery Beat Proposal | `GET /api/v1/scheduler/reminders/celery-beat` | Ready |
 
@@ -902,7 +903,79 @@ Rules:
 - 当前包含 deadline generation、execution fanout、due dispatch、delivery attempt cleanup。
 - 单用户 `reminder.generate_execution` 不直接进入 Beat；Beat 只使用安全 fanout worker。
 
-## 11. Data Source Scheduler Plan
+## 11. Scheduler Overview
+
+### GET `/api/v1/scheduler/overview`
+
+返回 scheduler domain 摘要，帮助开发和部署确认当前有哪些调度域、各自 plan / beat proposal 入口、entry count、task names 和 excluded task names。该接口不返回完整 payload template，不触发 worker，不修改 Celery 配置。
+
+Response:
+
+```json
+{
+  "timezone": "UTC",
+  "domains": [
+    {
+      "domain": "data_sources",
+      "display_name": "Data Sources",
+      "plan_path": "/api/v1/scheduler/data-sources",
+      "beat_path": "/api/v1/scheduler/data-sources/celery-beat",
+      "entry_count": 2,
+      "enabled_entry_count": 2,
+      "beat_entry_count": 2,
+      "excluded_entry_count": 2,
+      "task_names": [
+        "data_source.sync_ready_connections",
+        "health.sync_ready_energy_connections"
+      ],
+      "beat_task_names": [
+        "data_source.sync_ready_connections",
+        "health.sync_ready_energy_connections"
+      ],
+      "excluded_task_names": [
+        "data_source.sync_connection",
+        "health.sync_energy_connection"
+      ],
+      "guardrail_count": 6
+    },
+    {
+      "domain": "reminders",
+      "display_name": "Reminders",
+      "plan_path": "/api/v1/scheduler/reminders",
+      "beat_path": "/api/v1/scheduler/reminders/celery-beat",
+      "entry_count": 4,
+      "enabled_entry_count": 4,
+      "beat_entry_count": 4,
+      "excluded_entry_count": 1,
+      "task_names": [
+        "reminder.generate_deadline",
+        "reminder.generate_execution_for_active_users",
+        "reminder.dispatch_due",
+        "reminder.cleanup_delivery_attempts"
+      ],
+      "beat_task_names": [
+        "reminder.generate_deadline",
+        "reminder.generate_execution_for_active_users",
+        "reminder.dispatch_due",
+        "reminder.cleanup_delivery_attempts"
+      ],
+      "excluded_task_names": [
+        "reminder.generate_execution"
+      ],
+      "guardrail_count": 12
+    }
+  ],
+  "notes": []
+}
+```
+
+Rules:
+
+- Overview 是摘要入口，不替代各 domain 的 scheduler plan。
+- 完整 guardrails 和 payload template 仍从 `/scheduler/data-sources`、`/scheduler/reminders` 读取。
+- Overview 不写数据库、不启动 worker、不修改 `celery_app.conf`。
+
+## 12. Data Source Scheduler Plan
 
 ### GET `/api/v1/scheduler/data-sources`
 
@@ -1002,14 +1075,14 @@ Rules:
 - 当前只包含 ready fanout worker。
 - 单连接 worker 不直接进入 Beat，必须由明确的连接级操作触发。
 
-## 12. 当前安全边界
+## 13. 当前安全边界
 
 - 仍使用开发态 `X-User-Id` 用户上下文。
 - 不保存外部平台 access token / refresh token。
 - 当前不接真实第三方 API。
 - 外部来源任务只进入 Capture / Inbox，由用户确认后再生成 Task / Goal。
 
-## 13. 后续 P3
+## 14. 后续 P3
 
 - 真实 Calendar / Email provider adapter。
 - 定时调度与失败重试策略。

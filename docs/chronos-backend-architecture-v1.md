@@ -1298,6 +1298,7 @@ POST /api/v1/reminders
 POST /api/v1/reminders/seen
 POST /api/v1/reminders/{reminder_id}/seen
 POST /api/v1/reminders/{reminder_id}/dismiss
+GET  /api/v1/scheduler/overview
 GET  /api/v1/scheduler/reminders
 GET  /api/v1/scheduler/reminders/celery-beat
 ```
@@ -1308,6 +1309,7 @@ GET  /api/v1/scheduler/reminders/celery-beat
 - P3 已支持 `GET /api/v1/reminders/summary`，为 Today Header 提供轻量 pending / due count 和下一条提醒。
 - P3 已支持 `POST /api/v1/reminders/{id}/seen`，标记用户已看过 reminder，但不改变 scheduled / sent / dismissed 主状态。
 - P3 已支持 `POST /api/v1/reminders/seen`，批量标记 reminders 已看过，供 Reminder Center 清除未看数。
+- P3 已支持 `GET /api/v1/scheduler/overview`，输出 data source / reminder scheduler domain 摘要，不返回完整 payload template，也不触发 worker。
 - P3 已支持 `GET /api/v1/scheduler/reminders`，输出 reminder worker 的只读调度计划契约，不直接启动 Celery Beat。
 - P3 已支持 `GET /api/v1/scheduler/reminders/celery-beat`，输出 JSON-friendly Celery Beat 配置草案，但不修改运行时配置。
 - P3 已支持 `reminder.dispatch_due` worker，扫描 due reminders，通过 notification delivery provider 和 delivery attempt cooldown 后再决定是否标记 `sent`。

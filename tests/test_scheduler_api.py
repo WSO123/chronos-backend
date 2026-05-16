@@ -21,6 +21,19 @@ class SchedulerAPITests(unittest.TestCase):
         self.db.close()
         app.dependency_overrides.clear()
 
+    def test_get_scheduler_overview(self):
+        response = self.client.get("/api/v1/scheduler/overview", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        domains = {domain["domain"]: domain for domain in body["domains"]}
+        self.assertEqual(body["timezone"], "UTC")
+        self.assertIn("data_sources", domains)
+        self.assertIn("reminders", domains)
+        self.assertIn("data_source.sync_ready_connections", domains["data_sources"]["task_names"])
+        self.assertIn("reminder.dispatch_due", domains["reminders"]["task_names"])
+        self.assertTrue(body["notes"])
+
     def test_get_data_source_scheduler_plan(self):
         response = self.client.get("/api/v1/scheduler/data-sources", headers=self.headers)
 

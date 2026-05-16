@@ -230,6 +230,11 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
         200,
         "get data source celery beat proposal",
     )
+    scheduler_overview = _expect(
+        client.get("/api/v1/scheduler/overview", headers=headers),
+        200,
+        "get scheduler overview",
+    )
     expected_scheduler_tasks = {
         "reminder.generate_deadline",
         "reminder.generate_execution_for_active_users",
@@ -254,6 +259,9 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
     if not expected_data_source_tasks.issubset(data_source_beat_tasks):
         missing = expected_data_source_tasks - data_source_beat_tasks
         raise RuntimeError(f"data source beat proposal missing entries: {missing}")
+    overview_domains = {domain["domain"]: domain for domain in scheduler_overview["domains"]}
+    if set(overview_domains) != {"data_sources", "reminders"}:
+        raise RuntimeError(f"scheduler overview returned unexpected domains: {overview_domains}")
 
     return {
         "status": "ok",
@@ -274,6 +282,7 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
         "beat_entries": sorted(beat_tasks),
         "data_source_scheduler_entries": sorted(data_source_scheduler_tasks),
         "data_source_beat_entries": sorted(data_source_beat_tasks),
+        "scheduler_overview_domains": sorted(overview_domains),
     }
 
 
