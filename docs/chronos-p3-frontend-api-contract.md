@@ -41,6 +41,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Reminder Center | `GET /api/v1/reminders` | Ready |
 | Create Manual Reminder | `POST /api/v1/reminders` | Ready |
 | Dismiss Reminder | `POST /api/v1/reminders/{id}/dismiss` | Ready |
+| Reminder Scheduler Plan | `GET /api/v1/scheduler/reminders` | Ready |
 
 ## 3. Data Sources
 
@@ -707,14 +708,76 @@ Rules:
 - `reminder.generate_execution` 使用 task + scheduled_for 幂等检查，重复运行不会重复生成。
 - deadline / execution generator 会读取 `/me/settings` 的通知开关、类型开关、channel 和默认提醒参数；worker 参数可覆盖默认时间参数。
 
-## 10. 当前安全边界
+## 10. Reminder Scheduler Plan
+
+### GET `/api/v1/scheduler/reminders`
+
+返回 reminder workers 的只读调度计划契约。该接口不启动 Celery Beat、不触发 worker，只帮助开发、部署和前端理解 P3 自动提醒能力如何被安排。
+
+Response:
+
+```json
+{
+  "timezone": "UTC",
+  "entries": [
+    {
+      "task_name": "reminder.generate_deadline",
+      "cadence": "daily",
+      "scope": "all_active_users",
+      "enabled": true,
+      "payload_template": {
+        "user_id": null,
+        "target_date": "<today>",
+        "window_days": 1,
+        "reminder_hour": null
+      },
+      "guardrails": []
+    },
+    {
+      "task_name": "reminder.generate_execution",
+      "cadence": "daily_after_today_plan",
+      "scope": "per_user_with_active_today_plan",
+      "enabled": true,
+      "payload_template": {
+        "user_id": "<user_id>",
+        "plan_date": "<today>",
+        "limit": null,
+        "start_hour": null,
+        "spacing_minutes": null
+      },
+      "guardrails": []
+    },
+    {
+      "task_name": "reminder.dispatch_due",
+      "cadence": "every_5_minutes",
+      "scope": "scheduled_due_reminders",
+      "enabled": true,
+      "payload_template": {
+        "limit": 50,
+        "channel": null,
+        "now": null
+      },
+      "guardrails": []
+    }
+  ],
+  "notes": []
+}
+```
+
+Rules:
+
+- 这是 scheduler contract，不是 active scheduler。
+- `reminder.generate_execution` 必须在 Today active plan 已存在后 fanout，不能创建 Today 或 replan。
+- `reminder.dispatch_due` 必须保留 delivery provider 和 delivery attempt cooldown 语义。
+
+## 11. 当前安全边界
 
 - 仍使用开发态 `X-User-Id` 用户上下文。
 - 不保存外部平台 access token / refresh token。
 - 当前不接真实第三方 API。
 - 外部来源任务只进入 Capture / Inbox，由用户确认后再生成 Task / Goal。
 
-## 11. 后续 P3
+## 12. 后续 P3
 
 - 真实 Calendar / Email provider adapter。
 - 定时调度与失败重试策略。

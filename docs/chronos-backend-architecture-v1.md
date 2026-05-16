@@ -1295,12 +1295,14 @@ GET  /api/v1/reminders/summary
 GET  /api/v1/reminders
 POST /api/v1/reminders
 POST /api/v1/reminders/{reminder_id}/dismiss
+GET  /api/v1/scheduler/reminders
 ```
 
 说明：
 
 - P3 已支持 Reminder Center 的基础读取、手动创建和 dismiss。
 - P3 已支持 `GET /api/v1/reminders/summary`，为 Today Header 提供轻量 pending / due count 和下一条提醒。
+- P3 已支持 `GET /api/v1/scheduler/reminders`，输出 reminder worker 的只读调度计划契约，不直接启动 Celery Beat。
 - P3 已支持 `reminder.dispatch_due` worker，扫描 due reminders，通过 notification delivery provider 和 delivery attempt cooldown 后再决定是否标记 `sent`。
 - P3 已支持 `reminder.generate_deadline` worker，基于 Task / Goal deadline 生成 `deadline` reminders，并避免重复生成。
 - P3 已支持 `reminder.generate_execution` worker，基于已有 Today active plan 的 pinned / recommended planned items 生成 `execution` reminders，并避免重复生成。
