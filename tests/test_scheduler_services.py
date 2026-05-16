@@ -10,14 +10,17 @@ class SchedulerServiceTests(unittest.TestCase):
 
         self.assertEqual(plan["timezone"], "UTC")
         self.assertIn("reminder.generate_deadline", entries)
-        self.assertIn("reminder.generate_execution", entries)
+        self.assertIn("reminder.generate_execution_for_active_users", entries)
         self.assertIn("reminder.dispatch_due", entries)
         self.assertIn("reminder.cleanup_delivery_attempts", entries)
-        self.assertEqual(entries["reminder.generate_execution"]["scope"], "per_user_with_active_today_plan")
+        self.assertEqual(
+            entries["reminder.generate_execution_for_active_users"]["scope"],
+            "per_user_with_active_today_plan",
+        )
         self.assertTrue(
             any(
                 "Does not lazy create Today plan" in guardrail
-                for guardrail in entries["reminder.generate_execution"]["guardrails"]
+                for guardrail in entries["reminder.generate_execution_for_active_users"]["guardrails"]
             )
         )
         self.assertTrue(
@@ -40,11 +43,12 @@ class SchedulerServiceTests(unittest.TestCase):
 
         self.assertEqual(schedule["timezone"], "UTC")
         self.assertIn("reminder.generate_deadline", tasks)
+        self.assertIn("reminder.generate_execution_for_active_users", tasks)
         self.assertIn("reminder.dispatch_due", tasks)
         self.assertIn("reminder.cleanup_delivery_attempts", tasks)
         self.assertNotIn("reminder.generate_execution", tasks)
         self.assertIn("reminder.generate_execution", excluded)
-        self.assertIn("active Today plan", excluded["reminder.generate_execution"]["reason"])
+        self.assertIn("safe fanout", excluded["reminder.generate_execution"]["reason"])
 
 
 if __name__ == "__main__":

@@ -391,6 +391,66 @@ class ReminderService:
             "reminders": created,
         }
 
+    def generate_execution_reminders_for_active_users(
+        self,
+        db: Session,
+        *,
+        plan_date: date,
+        max_users: int = 100,
+        limit: int | None = None,
+        start_hour: int | None = None,
+        spacing_minutes: int | None = None,
+    ) -> dict:
+        max_users = min(max(max_users, 1), 1000)
+        users = self._active_users(db)[:max_users]
+        user_results = []
+        created_count = 0
+        skipped_existing_count = 0
+        no_plan_count = 0
+        disabled_count = 0
+        for user in users:
+            if self._active_plan_for_date(db, user_id=user.id, plan_date=plan_date) is None:
+                no_plan_count += 1
+                user_results.append(
+                    {
+                        "user_id": user.id,
+                        "status": "no_plan",
+                        "created_count": 0,
+                        "skipped_existing_count": 0,
+                    }
+                )
+                continue
+            result = self.generate_execution_reminders(
+                db,
+                user_id=user.id,
+                plan_date=plan_date,
+                limit=limit,
+                start_hour=start_hour,
+                spacing_minutes=spacing_minutes,
+            )
+            created_count += result["created_count"]
+            skipped_existing_count += result["skipped_existing_count"]
+            if result["status"] == "disabled":
+                disabled_count += 1
+            user_results.append(
+                {
+                    "user_id": user.id,
+                    "status": result["status"],
+                    "created_count": result["created_count"],
+                    "skipped_existing_count": result["skipped_existing_count"],
+                }
+            )
+        return {
+            "status": "generated",
+            "plan_date": plan_date,
+            "processed_user_count": len(users),
+            "created_count": created_count,
+            "skipped_existing_count": skipped_existing_count,
+            "no_plan_count": no_plan_count,
+            "disabled_count": disabled_count,
+            "user_results": user_results,
+        }
+
     def cleanup_delivery_attempts(
         self,
         db: Session,

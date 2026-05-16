@@ -25,20 +25,20 @@ class SchedulerService:
                     ],
                 },
                 {
-                    "task_name": "reminder.generate_execution",
-                    "cadence": "daily_after_today_plan",
-                    "schedule_hint": "Fan out per active user after Today active plan exists.",
+                    "task_name": "reminder.generate_execution_for_active_users",
+                    "cadence": "hourly_morning_window",
+                    "schedule_hint": "Fan out over active users and skip users without active Today plans.",
                     "scope": "per_user_with_active_today_plan",
                     "enabled": True,
                     "payload_template": {
-                        "user_id": "<user_id>",
                         "plan_date": "<today>",
+                        "max_users": 100,
                         "limit": None,
                         "start_hour": None,
                         "spacing_minutes": None,
                     },
                     "guardrails": [
-                        "Reads existing Today active plan only.",
+                        "Skips users without an existing Today active plan.",
                         "Does not lazy create Today plan and does not replan.",
                         "Uses UserSettings execution defaults when params are null.",
                     ],
@@ -105,6 +105,21 @@ class SchedulerService:
                     },
                 },
                 {
+                    "name": "reminder-generate-execution-fanout-hourly",
+                    "task": "reminder.generate_execution_for_active_users",
+                    "schedule": {
+                        "type": "interval",
+                        "seconds": 3600,
+                    },
+                    "kwargs": {
+                        "plan_date": "<today>",
+                        "max_users": 100,
+                        "limit": None,
+                        "start_hour": None,
+                        "spacing_minutes": None,
+                    },
+                },
+                {
                     "name": "reminder-dispatch-due-every-5-minutes",
                     "task": "reminder.dispatch_due",
                     "schedule": {
@@ -135,7 +150,7 @@ class SchedulerService:
             "excluded_entries": [
                 {
                     "task_name": "reminder.generate_execution",
-                    "reason": "Requires per-user fanout after an active Today plan exists.",
+                    "reason": "Use reminder.generate_execution_for_active_users for safe fanout.",
                 }
             ],
             "notes": [

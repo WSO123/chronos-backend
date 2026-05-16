@@ -17,6 +17,7 @@ from app.workers.tasks import (
     dispatch_due_reminders,
     generate_deadline_reminders,
     generate_execution_reminders,
+    generate_execution_reminders_for_active_users,
 )
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
@@ -483,6 +484,77 @@ class ReminderServiceTests(unittest.TestCase):
         self.assertEqual(result["created_count"], 1)
         self.assertEqual(result["reminders"][0]["reminder_type"], "execution")
         self.assertTrue(result["reminders"][0]["task_id"])
+
+    def test_generate_execution_reminders_for_active_users_skips_no_plan(self):
+        plan_date = datetime(2026, 5, 17, tzinfo=UTC).date()
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Fanout execution task",
+            priority=1,
+        )
+        planning_service.get_today(self.db, user_id=self.user.id, plan_date=plan_date)
+
+        result = reminder_service.generate_execution_reminders_for_active_users(
+            self.db,
+            plan_date=plan_date,
+            max_users=10,
+            limit=1,
+        )
+
+        self.assertEqual(result["status"], "generated")
+        self.assertEqual(result["processed_user_count"], 2)
+        self.assertEqual(result["created_count"], 1)
+        self.assertEqual(result["no_plan_count"], 1)
+        self.assertEqual(result["disabled_count"], 0)
+        self.assertEqual(
+            self.db.query(Reminder).filter(Reminder.reminder_type == "execution").count(),
+            1,
+        )
+
+    def test_generate_execution_reminders_for_active_users_tracks_disabled_users(self):
+        plan_date = datetime(2026, 5, 17, tzinfo=UTC).date()
+        self.db.add(UserSettings(user_id=self.user.id, reminder_execution_enabled=False))
+        self.db.commit()
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Disabled fanout task",
+            priority=1,
+        )
+        planning_service.get_today(self.db, user_id=self.user.id, plan_date=plan_date)
+
+        result = reminder_service.generate_execution_reminders_for_active_users(
+            self.db,
+            plan_date=plan_date,
+            max_users=1,
+        )
+
+        self.assertEqual(result["created_count"], 0)
+        self.assertEqual(result["disabled_count"], 1)
+        self.assertEqual(result["user_results"][0]["status"], "disabled")
+
+    def test_generate_execution_reminders_for_active_users_worker_returns_json_ready_payload(self):
+        plan_date = datetime(2026, 5, 17, tzinfo=UTC).date()
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Worker fanout execution task",
+            priority=1,
+        )
+        planning_service.get_today(self.db, user_id=self.user.id, plan_date=plan_date)
+
+        with patch("app.workers.tasks.SessionLocal", TestingSessionLocal):
+            result = generate_execution_reminders_for_active_users.run(
+                plan_date=plan_date.isoformat(),
+                max_users=10,
+                limit=1,
+            )
+
+        self.assertEqual(result["status"], "generated")
+        self.assertEqual(result["created_count"], 1)
+        self.assertEqual(result["no_plan_count"], 1)
+        self.assertTrue(result["user_results"][0]["user_id"])
 
     def test_generate_execution_reminders_respects_disabled_preference(self):
         plan_date = datetime(2026, 5, 17, tzinfo=UTC).date()

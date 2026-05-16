@@ -1309,6 +1309,7 @@ GET  /api/v1/scheduler/reminders/celery-beat
 - P3 已支持 `reminder.cleanup_delivery_attempts` worker，按 retention window 清理旧 delivery attempts，不删除 Reminder 主记录。
 - P3 已支持 `reminder.generate_deadline` worker，基于 Task / Goal deadline 生成 `deadline` reminders，并避免重复生成。
 - P3 已支持 `reminder.generate_execution` worker，基于已有 Today active plan 的 pinned / recommended planned items 生成 `execution` reminders，并避免重复生成。
+- P3 已支持 `reminder.generate_execution_for_active_users` fanout worker，只处理已有 Today active plan 的 active users，并跳过 no-plan 用户。
 - P3 已支持 `/api/v1/me/settings` 读写提醒偏好，deadline / execution generator 会遵守全局通知开关、类型开关、channel 和默认提醒参数。
 - 当前只有 `in_app` delivery provider 会送达 Reminder Center 并标记 sent；`push` / `email` 在 provider 未配置时返回 skipped，保持 scheduled，并通过 `ReminderDeliveryAttempt.next_retry_at` 避免短时间重复尝试。
 - Reminder 可关联 Task 或 Goal，但不会改变 Task / Goal 状态。

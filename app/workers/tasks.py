@@ -138,6 +138,29 @@ def generate_execution_reminders(
         db.close()
 
 
+@celery_app.task(name="reminder.generate_execution_for_active_users")
+def generate_execution_reminders_for_active_users(
+    plan_date: str,
+    max_users: int = 100,
+    limit: int | None = None,
+    start_hour: int | None = None,
+    spacing_minutes: int | None = None,
+) -> dict:
+    db = SessionLocal()
+    try:
+        result = reminder_service.generate_execution_reminders_for_active_users(
+            db,
+            plan_date=date.fromisoformat(plan_date),
+            max_users=max_users,
+            limit=limit,
+            start_hour=start_hour,
+            spacing_minutes=spacing_minutes,
+        )
+        return _json_ready(result)
+    finally:
+        db.close()
+
+
 @celery_app.task(name="reminder.cleanup_delivery_attempts")
 def cleanup_delivery_attempts(
     retention_days: int = 30,

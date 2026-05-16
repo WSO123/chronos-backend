@@ -29,7 +29,7 @@ class SchedulerAPITests(unittest.TestCase):
         task_names = {entry["task_name"] for entry in body["entries"]}
         self.assertEqual(body["timezone"], "UTC")
         self.assertIn("reminder.generate_deadline", task_names)
-        self.assertIn("reminder.generate_execution", task_names)
+        self.assertIn("reminder.generate_execution_for_active_users", task_names)
         self.assertIn("reminder.dispatch_due", task_names)
         self.assertIn("reminder.cleanup_delivery_attempts", task_names)
         self.assertTrue(body["notes"])
@@ -43,6 +43,7 @@ class SchedulerAPITests(unittest.TestCase):
         excluded = {entry["task_name"] for entry in body["excluded_entries"]}
         self.assertEqual(body["timezone"], "UTC")
         self.assertIn("reminder.generate_deadline", tasks)
+        self.assertIn("reminder.generate_execution_for_active_users", tasks)
         self.assertIn("reminder.dispatch_due", tasks)
         self.assertIn("reminder.cleanup_delivery_attempts", tasks)
         self.assertIn("reminder.generate_execution", excluded)

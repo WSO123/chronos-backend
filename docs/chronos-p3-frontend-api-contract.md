@@ -689,6 +689,7 @@ Celery task:
 reminder.dispatch_due(limit=50, channel=null, now=null)
 reminder.generate_deadline(user_id=null, target_date=null, window_days=1, reminder_hour=9)
 reminder.generate_execution(user_id, plan_date, limit=3, start_hour=9, spacing_minutes=45)
+reminder.generate_execution_for_active_users(plan_date, max_users=100, limit=null, start_hour=null, spacing_minutes=null)
 reminder.cleanup_delivery_attempts(retention_days=30, now=null, limit=500)
 ```
 
@@ -708,6 +709,7 @@ Rules:
 - `reminder.generate_execution` 基于 pinned / recommended 且仍为 planned 的 DailyPlanItem 生成 `execution` reminders。
 - `reminder.generate_execution` 按用户时区从 `plan_date + start_hour` 开始，以 `spacing_minutes` 间隔生成 scheduled reminders，默认最多 3 条。
 - `reminder.generate_execution` 使用 task + scheduled_for 幂等检查，重复运行不会重复生成。
+- `reminder.generate_execution_for_active_users` 负责 fanout，只处理已有 Today active plan 的 active users；无 plan 用户计入 `no_plan_count`，不会创建 Today。
 - deadline / execution generator 会读取 `/me/settings` 的通知开关、类型开关、channel 和默认提醒参数；worker 参数可覆盖默认时间参数。
 - `reminder.cleanup_delivery_attempts` 只删除旧 delivery attempts，不删除 Reminder 主记录；`retention_days` 默认 30 天。
 
@@ -737,13 +739,13 @@ Response:
       "guardrails": []
     },
     {
-      "task_name": "reminder.generate_execution",
-      "cadence": "daily_after_today_plan",
+      "task_name": "reminder.generate_execution_for_active_users",
+      "cadence": "hourly_morning_window",
       "scope": "per_user_with_active_today_plan",
       "enabled": true,
       "payload_template": {
-        "user_id": "<user_id>",
         "plan_date": "<today>",
+        "max_users": 100,
         "limit": null,
         "start_hour": null,
         "spacing_minutes": null
@@ -782,7 +784,7 @@ Response:
 Rules:
 
 - 这是 scheduler contract，不是 active scheduler。
-- `reminder.generate_execution` 必须在 Today active plan 已存在后 fanout，不能创建 Today 或 replan。
+- `reminder.generate_execution_for_active_users` 只对已有 Today active plan 的用户生成 execution reminders，不能创建 Today 或 replan。
 - `reminder.dispatch_due` 必须保留 delivery provider 和 delivery attempt cooldown 语义。
 
 ### GET `/api/v1/scheduler/reminders/celery-beat`
@@ -811,6 +813,21 @@ Response:
       }
     },
     {
+      "name": "reminder-generate-execution-fanout-hourly",
+      "task": "reminder.generate_execution_for_active_users",
+      "schedule": {
+        "type": "interval",
+        "seconds": 3600
+      },
+      "kwargs": {
+        "plan_date": "<today>",
+        "max_users": 100,
+        "limit": null,
+        "start_hour": null,
+        "spacing_minutes": null
+      }
+    },
+    {
       "name": "reminder-dispatch-due-every-5-minutes",
       "task": "reminder.dispatch_due",
       "schedule": {
@@ -827,7 +844,7 @@ Response:
   "excluded_entries": [
     {
       "task_name": "reminder.generate_execution",
-      "reason": "Requires per-user fanout after an active Today plan exists."
+      "reason": "Use reminder.generate_execution_for_active_users for safe fanout."
     }
   ],
   "notes": []
@@ -837,8 +854,8 @@ Response:
 Rules:
 
 - Crontab 时间为 UTC。
-- 当前包含 deadline generation、due dispatch、delivery attempt cleanup。
-- Execution reminder generation 不直接进入 Beat，因为它需要 per-user fanout 且必须依赖已有 Today active plan。
+- 当前包含 deadline generation、execution fanout、due dispatch、delivery attempt cleanup。
+- 单用户 `reminder.generate_execution` 不直接进入 Beat；Beat 只使用安全 fanout worker。
 
 ## 11. 当前安全边界
 
