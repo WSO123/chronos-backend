@@ -77,6 +77,38 @@ class TaskGoalAPITests(unittest.TestCase):
         self.assertIn("TASK_STEP_COMPLETED", event_types)
         self.assertIn("TASK_COMPLETED", event_types)
 
+    def test_get_task_returns_task_detail_execution_context(self):
+        goal_response = self.client.post(
+            "/api/v1/goals",
+            json={"title": "Detail Goal", "value_level": "high"},
+            headers=self.headers,
+        )
+        goal_id = goal_response.json()["id"]
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Open Task Detail", "goal_id": goal_id, "priority": 1, "value_level": "high"},
+            headers=self.headers,
+        )
+        task_id = task_response.json()["id"]
+        self.client.post(
+            f"/api/v1/tasks/{task_id}/steps",
+            json={"title": "Check context"},
+            headers=self.headers,
+        )
+        today_response = self.client.get("/api/v1/today", headers=self.headers)
+        self.assertEqual(today_response.status_code, 200)
+
+        detail_response = self.client.get(f"/api/v1/tasks/{task_id}", headers=self.headers)
+
+        self.assertEqual(detail_response.status_code, 200)
+        body = detail_response.json()
+        self.assertEqual(body["title"], "Open Task Detail")
+        self.assertEqual(body["goal"]["title"], "Detail Goal")
+        self.assertEqual(body["ai_info"]["execution_suggestion"], "Continue with: Check context")
+        self.assertIsNotNone(body["today_context"])
+        self.assertTrue(body["actions"]["can_start_focus"])
+        self.assertFalse(body["focus_state"]["is_currently_focusing_this_task"])
+
     def test_user_id_isolation(self):
         task_response = self.client.post(
             "/api/v1/tasks",

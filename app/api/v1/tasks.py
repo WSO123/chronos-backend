@@ -8,6 +8,7 @@ from app.core.db import get_db
 from app.schemas.tasks import (
     ActivityEventResponse,
     TaskCreate,
+    TaskDetailResponse,
     TaskResponse,
     TaskStepCreate,
     TaskStepResponse,
@@ -37,13 +38,13 @@ def create_task(
     )
 
 
-@router.get("/{task_id}", response_model=TaskResponse)
+@router.get("/{task_id}", response_model=TaskDetailResponse)
 def get_task(
     task_id: uuid.UUID,
     db: Session = Depends(get_db),
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
-    return task_service.get_task(db, task_id=task_id, user_id=user_id)
+    return task_service.get_task_detail(db, task_id=task_id, user_id=user_id)
 
 
 @router.patch("/{task_id}", response_model=TaskResponse)

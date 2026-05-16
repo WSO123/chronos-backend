@@ -4,7 +4,16 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import ActorType, EntityType, EventSource, TaskSource, TaskStatus, ValueLevel
+from app.models.enums import (
+    ActorType,
+    DailyPlanItemSection,
+    DailyPlanItemStatus,
+    EntityType,
+    EventSource,
+    TaskSource,
+    TaskStatus,
+    ValueLevel,
+)
 from app.schemas.common import ORMModel, TimestampedResponse
 
 
@@ -61,6 +70,58 @@ class TaskResponse(TimestampedResponse):
     status: TaskStatus
     source: TaskSource
     steps: list[TaskStepResponse] = Field(default_factory=list)
+
+
+class TaskDetailGoalResponse(BaseModel):
+    id: uuid.UUID
+    title: str
+    deadline: date | None
+    value_level: ValueLevel
+
+
+class TaskDetailAIInfoResponse(BaseModel):
+    recommended_duration_min: int
+    priority: int
+    value_level: ValueLevel
+    execution_suggestion: str
+
+
+class TaskDetailProgressResponse(BaseModel):
+    progress: Decimal
+    status: TaskStatus
+    actual_duration_min: int
+
+
+class TaskDetailTodayContextResponse(BaseModel):
+    daily_plan_id: uuid.UUID
+    daily_plan_item_id: uuid.UUID
+    plan_date: date
+    plan_version: int
+    section: DailyPlanItemSection
+    item_status: DailyPlanItemStatus
+    sort_order: int
+    recommendation_reason: str
+
+
+class TaskDetailFocusStateResponse(BaseModel):
+    active_focus_session_id: uuid.UUID | None
+    is_currently_focusing_this_task: bool
+
+
+class TaskDetailActionsResponse(BaseModel):
+    can_start_focus: bool
+    can_complete: bool
+    can_postpone: bool
+    can_edit: bool
+
+
+class TaskDetailResponse(TaskResponse):
+    goal: TaskDetailGoalResponse | None
+    ai_info: TaskDetailAIInfoResponse
+    progress_info: TaskDetailProgressResponse
+    today_context: TaskDetailTodayContextResponse | None
+    focus_state: TaskDetailFocusStateResponse
+    actions: TaskDetailActionsResponse
 
 
 class ActivityEventResponse(ORMModel):
