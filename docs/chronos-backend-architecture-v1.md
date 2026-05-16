@@ -306,6 +306,7 @@ P3 扩展对象：
 - 编辑任务
 - 完成任务
 - 延后任务
+- 调整优先级 / 价值等级
 - 拆解任务
 - 勾选步骤
 - 关联 Goal
@@ -957,6 +958,7 @@ GET   /api/v1/tasks/{task_id}
 PATCH /api/v1/tasks/{task_id}
 POST  /api/v1/tasks/{task_id}/complete
 POST  /api/v1/tasks/{task_id}/postpone
+PATCH /api/v1/tasks/{task_id}/priority
 POST  /api/v1/tasks/{task_id}/breakdown
 GET   /api/v1/tasks/{task_id}/dependencies
 POST  /api/v1/tasks/{task_id}/dependencies
@@ -968,6 +970,7 @@ GET   /api/v1/tasks/{task_id}/events
 说明：
 
 - `GET /tasks/{id}` 服务 Task Detail。
+- `PATCH /tasks/{id}/priority` 服务 P2 用户修正 AI 判断，只允许调整 `priority` 和 `value_level`，并记录 `TASK_PRIORITY_ADJUSTED`。
 - `/dependencies` 服务 P2 Task Detail 的 Dependency 区块，返回当前任务的前置任务和后续任务。
 - 任务历史通过 `/events` 单独获取，避免 Task Detail 变成信息仓库。
 - `breakdown` 可以异步执行，返回 `ai_job_id`；AI 输出步骤后需用户可编辑或确认。

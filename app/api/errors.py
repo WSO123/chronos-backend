@@ -24,6 +24,16 @@ def error_payload(code: str, message: str, details: dict | None = None) -> dict:
     }
 
 
+def _json_safe(value):
+    if isinstance(value, Exception):
+        return str(value)
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    return value
+
+
 async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
@@ -44,7 +54,7 @@ async def request_validation_error_handler(request: Request, exc: RequestValidat
         content=error_payload(
             "REQUEST_VALIDATION_ERROR",
             "Request validation failed",
-            {"errors": exc.errors()},
+            {"errors": _json_safe(exc.errors())},
         ),
     )
 

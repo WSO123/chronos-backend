@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 import uuid
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.enums import (
     AIJobStatus,
@@ -43,6 +43,20 @@ class TaskUpdate(BaseModel):
     deadline: date | None = None
 
 
+class TaskPriorityAdjust(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    priority: int | None = Field(default=None, ge=1, le=5)
+    value_level: ValueLevel | None = None
+    reason: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def require_priority_or_value_level(self) -> "TaskPriorityAdjust":
+        if self.priority is None and self.value_level is None:
+            raise ValueError("priority or value_level is required")
+        return self
+
+
 class TaskStepCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -72,6 +86,16 @@ class TaskResponse(TimestampedResponse):
     status: TaskStatus
     source: TaskSource
     steps: list[TaskStepResponse] = Field(default_factory=list)
+
+
+class TaskPriorityAdjustmentResponse(BaseModel):
+    task: TaskResponse
+    previous_priority: int
+    current_priority: int
+    previous_value_level: ValueLevel
+    current_value_level: ValueLevel
+    changed_fields: list[str] = Field(default_factory=list)
+    reason: str | None
 
 
 class TaskDetailGoalResponse(BaseModel):

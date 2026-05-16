@@ -45,6 +45,33 @@ class TaskGoalServiceTests(unittest.TestCase):
         self.assertIn("TASK_CREATED", {event.event_type for event in events})
         self.assertIn("TASK_COMPLETED", {event.event_type for event in events})
 
+    def test_adjust_task_priority_records_user_correction_event(self):
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Protect this task",
+            priority=5,
+            value_level=ValueLevel.LOW,
+        )
+
+        result = task_service.adjust_task_priority(
+            self.db,
+            task_id=task.id,
+            user_id=self.user.id,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+            reason="Actually important today",
+        )
+        events = task_service.list_task_events(self.db, task_id=task.id, user_id=self.user.id)
+
+        self.assertEqual(result["previous_priority"], 5)
+        self.assertEqual(result["current_priority"], 1)
+        self.assertEqual(result["previous_value_level"], ValueLevel.LOW)
+        self.assertEqual(result["current_value_level"], ValueLevel.HIGH)
+        self.assertEqual(result["changed_fields"], ["priority", "value_level"])
+        self.assertEqual(result["reason"], "Actually important today")
+        self.assertIn("TASK_PRIORITY_ADJUSTED", [event.event_type for event in events])
+
     def test_postponing_completed_task_raises_invalid_state(self):
         task = task_service.create_task(self.db, user_id=self.user.id, title="Finish this")
         task_service.complete_task(self.db, task_id=task.id, user_id=self.user.id)

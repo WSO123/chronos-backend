@@ -78,6 +78,47 @@ class TaskGoalAPITests(unittest.TestCase):
         self.assertIn("TASK_STEP_COMPLETED", event_types)
         self.assertIn("TASK_COMPLETED", event_types)
 
+    def test_adjust_task_priority_api_returns_adjustment_summary(self):
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Re-rank this task", "priority": 5, "value_level": "low"},
+            headers=self.headers,
+        )
+        task_id = task_response.json()["id"]
+
+        response = self.client.patch(
+            f"/api/v1/tasks/{task_id}/priority",
+            json={"priority": 1, "value_level": "high", "reason": "Protect high-value work"},
+            headers=self.headers,
+        )
+        events_response = self.client.get(f"/api/v1/tasks/{task_id}/events", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["previous_priority"], 5)
+        self.assertEqual(body["current_priority"], 1)
+        self.assertEqual(body["previous_value_level"], "low")
+        self.assertEqual(body["current_value_level"], "high")
+        self.assertEqual(body["changed_fields"], ["priority", "value_level"])
+        self.assertEqual(body["task"]["priority"], 1)
+        self.assertEqual(body["task"]["value_level"], "high")
+        self.assertIn("TASK_PRIORITY_ADJUSTED", {event["event_type"] for event in events_response.json()})
+
+    def test_adjust_task_priority_requires_priority_or_value_level(self):
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "No empty adjustment"},
+            headers=self.headers,
+        )
+
+        response = self.client.patch(
+            f"/api/v1/tasks/{task_response.json()['id']}/priority",
+            json={"reason": "Missing fields"},
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 422)
+
     def test_get_task_returns_task_detail_execution_context(self):
         goal_response = self.client.post(
             "/api/v1/goals",

@@ -183,6 +183,64 @@ class TaskService:
         db.refresh(task)
         return self.get_task(db, task_id=task.id, user_id=user_id)
 
+    def adjust_task_priority(
+        self,
+        db: Session,
+        *,
+        task_id: uuid.UUID,
+        user_id: uuid.UUID,
+        priority: int | None = None,
+        value_level: ValueLevel | None = None,
+        reason: str | None = None,
+    ) -> dict:
+        task = self._get_user_task(db, task_id=task_id, user_id=user_id)
+        self._ensure_task_status(
+            task,
+            allowed={TaskStatus.ACTIVE, TaskStatus.IN_FOCUS, TaskStatus.POSTPONED, TaskStatus.COMPLETED},
+            action="priority adjusted",
+        )
+
+        previous_priority = task.priority
+        previous_value_level = task.value_level
+        changed_fields: list[str] = []
+
+        if priority is not None and priority != task.priority:
+            task.priority = priority
+            changed_fields.append("priority")
+        if value_level is not None and value_level != task.value_level:
+            task.value_level = value_level
+            changed_fields.append("value_level")
+
+        if changed_fields:
+            activity_event_service.add_event(
+                db,
+                user_id=user_id,
+                entity_type=EntityType.TASK,
+                entity_id=task.id,
+                event_type="TASK_PRIORITY_ADJUSTED",
+                related_task_id=task.id,
+                payload={
+                    "changed_fields": changed_fields,
+                    "previous_priority": previous_priority,
+                    "current_priority": task.priority,
+                    "previous_value_level": previous_value_level.value,
+                    "current_value_level": task.value_level.value,
+                    "reason": reason,
+                },
+            )
+            db.commit()
+            db.refresh(task)
+
+        return {
+            "task": self.get_task(db, task_id=task.id, user_id=user_id),
+            "previous_priority": previous_priority,
+            "current_priority": task.priority,
+            "previous_value_level": previous_value_level,
+            "current_value_level": task.value_level,
+            "changed_fields": changed_fields,
+            "reason": reason,
+        }
+
     def complete_task(
         self,
         db: Session,

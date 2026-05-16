@@ -13,6 +13,8 @@ from app.schemas.tasks import (
     TaskDependencyCreate,
     TaskDependencyEdgeResponse,
     TaskDetailResponse,
+    TaskPriorityAdjust,
+    TaskPriorityAdjustmentResponse,
     TaskResponse,
     TaskStepCreate,
     TaskStepResponse,
@@ -63,6 +65,23 @@ def update_task(
         task_id=task_id,
         user_id=user_id,
         updates=payload.model_dump(exclude_unset=True),
+    )
+
+
+@router.patch("/{task_id}/priority", response_model=TaskPriorityAdjustmentResponse)
+def adjust_task_priority(
+    task_id: uuid.UUID,
+    payload: TaskPriorityAdjust,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return task_service.adjust_task_priority(
+        db,
+        task_id=task_id,
+        user_id=user_id,
+        priority=payload.priority,
+        value_level=payload.value_level,
+        reason=payload.reason,
     )
 
 

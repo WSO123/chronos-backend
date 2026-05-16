@@ -92,7 +92,7 @@ uv run python scripts/dev_seed_demo.py
 | Global Capture | `POST /captures` | Ready |
 | Inbox | `GET /inbox`, `PATCH /inbox/{id}`, `POST /inbox/{id}/confirm` | Ready |
 | Today | `GET /today`, `GET /today/strategy`, `POST /today/replan`, `PATCH /today/items/{id}` | Ready, Strategy Detail P2 Ready |
-| Task Detail | `GET /tasks/{id}`, `POST /tasks/{id}/breakdown`, dependencies / steps / complete / postpone | Ready, Dependency P2 Ready |
+| Task Detail | `GET /tasks/{id}`, `PATCH /tasks/{id}/priority`, `POST /tasks/{id}/breakdown`, dependencies / steps / complete / postpone | Ready, P2 priority / dependency ready |
 | Focus | `POST /focus-sessions`, complete / interrupt / postpone | Ready |
 | Reports | `GET /reports/daily`, `POST /reports/daily/generate`, `GET /reports/weekly`, `GET /reports/monthly` | Daily Ready, Weekly / Monthly P2 Ready |
 | Me Overview | `GET /me/overview` | Ready |
@@ -572,6 +572,7 @@ Frontend notes:
 | Method | Path | 用途 |
 | --- | --- | --- |
 | `PATCH` | `/tasks/{task_id}` | 编辑任务基础字段 |
+| `PATCH` | `/tasks/{task_id}/priority` | 调整任务优先级 / 价值等级 |
 | `POST` | `/tasks/{task_id}/complete` | 直接完成任务 |
 | `POST` | `/tasks/{task_id}/postpone` | 直接延后任务 |
 | `GET` | `/tasks/{task_id}/dependencies` | 获取任务依赖 |
@@ -580,6 +581,50 @@ Frontend notes:
 | `POST` | `/tasks/{task_id}/steps` | 手动添加步骤 |
 | `POST` | `/tasks/{task_id}/steps/{step_id}/complete` | 完成步骤 |
 | `GET` | `/tasks/{task_id}/events` | 调试 / 活动历史 |
+
+### PATCH `/tasks/{task_id}/priority`
+
+用于 P2 Task Detail 的“调整优先级”动作。它是一个窄接口，只记录用户对 AI 判断的修正信号，不替代完整任务编辑。
+
+Request:
+
+```json
+{
+  "priority": 1,
+  "value_level": "high",
+  "reason": "Protect this task today"
+}
+```
+
+Rules:
+
+- `priority` 和 `value_level` 至少提供一个。
+- `priority` 范围是 `1-5`，数字越小越优先。
+- 变更会写入 `TASK_PRIORITY_ADJUSTED` ActivityEvent。
+
+Response key fields:
+
+```json
+{
+  "task": {
+    "id": "uuid",
+    "title": "Prepare demo",
+    "priority": 1,
+    "value_level": "high"
+  },
+  "previous_priority": 5,
+  "current_priority": 1,
+  "previous_value_level": "low",
+  "current_value_level": "high",
+  "changed_fields": ["priority", "value_level"],
+  "reason": "Protect this task today"
+}
+```
+
+Frontend notes:
+
+- Task Detail 里可以做成轻量 selector，不要做复杂策略面板。
+- 调整后如果用户要刷新今日顺序，可以再调用 `/today/replan`，本接口本身不自动重排 Today。
 
 ---
 
