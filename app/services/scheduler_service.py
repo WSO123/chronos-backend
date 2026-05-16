@@ -2,6 +2,92 @@ from __future__ import annotations
 
 
 class SchedulerService:
+    def data_source_schedule_plan(self) -> dict:
+        return {
+            "timezone": "UTC",
+            "entries": [
+                {
+                    "task_name": "data_source.sync_ready_connections",
+                    "cadence": "every_15_minutes",
+                    "schedule_hint": "Pull calendar and email source items into Capture / Inbox through ready connections.",
+                    "scope": "connected_calendar_email_sources",
+                    "enabled": True,
+                    "payload_template": {
+                        "limit": 50,
+                    },
+                    "guardrails": [
+                        "Only syncs source_type in calendar/email.",
+                        "Skips paused, disconnected, or sync_disabled connections.",
+                        "Imports into Capture / Inbox and does not auto-confirm tasks.",
+                    ],
+                },
+                {
+                    "task_name": "health.sync_ready_energy_connections",
+                    "cadence": "hourly",
+                    "schedule_hint": "Pull health metrics into Energy Dashboard for connected health sources.",
+                    "scope": "connected_health_sources",
+                    "enabled": True,
+                    "payload_template": {
+                        "limit": 50,
+                    },
+                    "guardrails": [
+                        "Only syncs health source connections.",
+                        "Writes EnergyDailyMetric through health sync service.",
+                        "Does not create tasks, reminders, or Today plans.",
+                    ],
+                },
+            ],
+            "notes": [
+                "This is a scheduler contract, not an active Celery Beat configuration.",
+                "Calendar and email sync must enter Capture / Inbox before user confirmation.",
+                "Health sync feeds Energy Dashboard and Today strategy context only.",
+            ],
+        }
+
+    def data_source_celery_beat_schedule(self) -> dict:
+        return {
+            "timezone": "UTC",
+            "entries": [
+                {
+                    "name": "data-source-sync-ready-every-15-minutes",
+                    "task": "data_source.sync_ready_connections",
+                    "schedule": {
+                        "type": "interval",
+                        "seconds": 900,
+                    },
+                    "kwargs": {
+                        "limit": 50,
+                    },
+                },
+                {
+                    "name": "health-sync-ready-energy-hourly",
+                    "task": "health.sync_ready_energy_connections",
+                    "schedule": {
+                        "type": "interval",
+                        "seconds": 3600,
+                    },
+                    "kwargs": {
+                        "limit": 50,
+                    },
+                },
+            ],
+            "excluded_entries": [
+                {
+                    "task_name": "data_source.sync_connection",
+                    "reason": "Single-connection sync should be triggered explicitly for a selected connection.",
+                },
+                {
+                    "task_name": "health.sync_energy_connection",
+                    "reason": "Single health sync should be triggered explicitly for a selected connection.",
+                },
+            ],
+            "notes": [
+                "This is a JSON-friendly Celery Beat proposal, not a running scheduler.",
+                "Interval entries are expressed in seconds.",
+                "Single-connection workers remain excluded from automatic Beat fanout.",
+            ],
+        }
+
     def reminder_schedule_plan(self) -> dict:
         return {
             "timezone": "UTC",

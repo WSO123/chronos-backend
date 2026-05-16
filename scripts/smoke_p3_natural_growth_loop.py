@@ -220,6 +220,16 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
         200,
         "get celery beat proposal",
     )
+    data_source_scheduler_plan = _expect(
+        client.get("/api/v1/scheduler/data-sources", headers=headers),
+        200,
+        "get data source scheduler plan",
+    )
+    data_source_beat_proposal = _expect(
+        client.get("/api/v1/scheduler/data-sources/celery-beat", headers=headers),
+        200,
+        "get data source celery beat proposal",
+    )
     expected_scheduler_tasks = {
         "reminder.generate_deadline",
         "reminder.generate_execution_for_active_users",
@@ -232,6 +242,18 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
         raise RuntimeError(f"scheduler plan missing entries: {expected_scheduler_tasks - scheduler_tasks}")
     if not expected_scheduler_tasks.issubset(beat_tasks):
         raise RuntimeError(f"beat proposal missing entries: {expected_scheduler_tasks - beat_tasks}")
+    expected_data_source_tasks = {
+        "data_source.sync_ready_connections",
+        "health.sync_ready_energy_connections",
+    }
+    data_source_scheduler_tasks = {entry["task_name"] for entry in data_source_scheduler_plan["entries"]}
+    data_source_beat_tasks = {entry["task"] for entry in data_source_beat_proposal["entries"]}
+    if not expected_data_source_tasks.issubset(data_source_scheduler_tasks):
+        missing = expected_data_source_tasks - data_source_scheduler_tasks
+        raise RuntimeError(f"data source scheduler plan missing entries: {missing}")
+    if not expected_data_source_tasks.issubset(data_source_beat_tasks):
+        missing = expected_data_source_tasks - data_source_beat_tasks
+        raise RuntimeError(f"data source beat proposal missing entries: {missing}")
 
     return {
         "status": "ok",
@@ -250,6 +272,8 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
         "dispatch_sent_count": dispatch["sent_count"],
         "scheduler_entries": sorted(scheduler_tasks),
         "beat_entries": sorted(beat_tasks),
+        "data_source_scheduler_entries": sorted(data_source_scheduler_tasks),
+        "data_source_beat_entries": sorted(data_source_beat_tasks),
     }
 
 

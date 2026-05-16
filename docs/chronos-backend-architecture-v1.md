@@ -1328,6 +1328,8 @@ PUT   /api/v1/data-sources/{source_type}/{provider}
 PATCH /api/v1/data-sources/{connection_id}
 GET   /api/v1/data-sources/{connection_id}/sync-runs
 POST  /api/v1/data-sources/{connection_id}/disconnect
+GET   /api/v1/scheduler/data-sources
+GET   /api/v1/scheduler/data-sources/celery-beat
 ```
 
 说明：
@@ -1341,6 +1343,9 @@ POST  /api/v1/data-sources/{connection_id}/disconnect
 - 批量 worker 中单个连接失败不会中断整批同步；失败连接返回 `failed` 结果并通过 `failed_connection_count` 汇总。
 - `GET /data-sources/{id}/sync-runs` 只读返回最近同步记录，服务 Settings / 调试观测，不触发同步。
 - Health worker 复用 `DataSourceSyncRun` 做同步观测，但导入目标是 `EnergyDailyMetric`，不是 Capture / Inbox。
+- P3 已支持 `GET /api/v1/scheduler/data-sources`，输出 data source / health worker 的只读调度计划契约，不直接启动 Celery Beat。
+- P3 已支持 `GET /api/v1/scheduler/data-sources/celery-beat`，输出 JSON-friendly Celery Beat 配置草案，但不修改运行时配置。
+- Data source scheduler contract 明确 Calendar / Email 只进入 Capture / Inbox，不自动确认；Health 只写 EnergyDailyMetric，不创建 Task / Reminder / Today。
 
 ### Insights
 

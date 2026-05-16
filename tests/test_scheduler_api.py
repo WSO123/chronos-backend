@@ -21,6 +21,31 @@ class SchedulerAPITests(unittest.TestCase):
         self.db.close()
         app.dependency_overrides.clear()
 
+    def test_get_data_source_scheduler_plan(self):
+        response = self.client.get("/api/v1/scheduler/data-sources", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        task_names = {entry["task_name"] for entry in body["entries"]}
+        self.assertEqual(body["timezone"], "UTC")
+        self.assertIn("data_source.sync_ready_connections", task_names)
+        self.assertIn("health.sync_ready_energy_connections", task_names)
+        self.assertTrue(body["notes"])
+
+    def test_get_data_source_celery_beat_schedule(self):
+        response = self.client.get("/api/v1/scheduler/data-sources/celery-beat", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        tasks = {entry["task"] for entry in body["entries"]}
+        excluded = {entry["task_name"] for entry in body["excluded_entries"]}
+        self.assertEqual(body["timezone"], "UTC")
+        self.assertIn("data_source.sync_ready_connections", tasks)
+        self.assertIn("health.sync_ready_energy_connections", tasks)
+        self.assertIn("data_source.sync_connection", excluded)
+        self.assertIn("health.sync_energy_connection", excluded)
+        self.assertTrue(body["notes"])
+
     def test_get_reminder_scheduler_plan(self):
         response = self.client.get("/api/v1/scheduler/reminders", headers=self.headers)
 

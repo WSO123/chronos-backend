@@ -17,6 +17,12 @@ class ReminderSchedulerPlanResponse(BaseModel):
     notes: list[str]
 
 
+class DataSourceSchedulerPlanResponse(BaseModel):
+    timezone: str
+    entries: list[SchedulerEntryResponse]
+    notes: list[str]
+
+
 class CeleryBeatScheduleEntryResponse(BaseModel):
     name: str
     task: str
@@ -30,6 +36,13 @@ class ExcludedSchedulerEntryResponse(BaseModel):
 
 
 class ReminderCeleryBeatScheduleResponse(BaseModel):
+    timezone: str
+    entries: list[CeleryBeatScheduleEntryResponse]
+    excluded_entries: list[ExcludedSchedulerEntryResponse]
+    notes: list[str]
+
+
+class DataSourceCeleryBeatScheduleResponse(BaseModel):
     timezone: str
     entries: list[CeleryBeatScheduleEntryResponse]
     excluded_entries: list[ExcludedSchedulerEntryResponse]

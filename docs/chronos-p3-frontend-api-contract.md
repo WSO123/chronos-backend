@@ -31,6 +31,8 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Calendar Sync Worker Placeholder | `data_source.sync_connection` | Ready |
 | Email Sync Worker Placeholder | `data_source.sync_connection` | Ready |
 | Calendar / Email Fake Provider Adapter | internal provider registry | Ready |
+| Data Source Scheduler Plan | `GET /api/v1/scheduler/data-sources` | Ready |
+| Data Source Celery Beat Proposal | `GET /api/v1/scheduler/data-sources/celery-beat` | Ready |
 | Energy Daily Metric Upsert | `PUT /api/v1/energy/daily-metrics` | Ready |
 | Energy Dashboard | `GET /api/v1/energy/dashboard` | Ready |
 | Health Energy Sync Worker | `health.sync_energy_connection` | Ready |
@@ -900,14 +902,114 @@ Rules:
 - 当前包含 deadline generation、execution fanout、due dispatch、delivery attempt cleanup。
 - 单用户 `reminder.generate_execution` 不直接进入 Beat；Beat 只使用安全 fanout worker。
 
-## 11. 当前安全边界
+## 11. Data Source Scheduler Plan
+
+### GET `/api/v1/scheduler/data-sources`
+
+返回 data source / health workers 的只读调度计划契约。该接口不启动 Celery Beat、不触发 worker，只帮助开发、部署和前端理解 P3 数据接入如何被安排。
+
+Response:
+
+```json
+{
+  "timezone": "UTC",
+  "entries": [
+    {
+      "task_name": "data_source.sync_ready_connections",
+      "cadence": "every_15_minutes",
+      "scope": "connected_calendar_email_sources",
+      "enabled": true,
+      "payload_template": {
+        "limit": 50
+      },
+      "guardrails": [
+        "Imports into Capture / Inbox and does not auto-confirm tasks."
+      ]
+    },
+    {
+      "task_name": "health.sync_ready_energy_connections",
+      "cadence": "hourly",
+      "scope": "connected_health_sources",
+      "enabled": true,
+      "payload_template": {
+        "limit": 50
+      },
+      "guardrails": [
+        "Does not create tasks, reminders, or Today plans."
+      ]
+    }
+  ],
+  "notes": []
+}
+```
+
+Rules:
+
+- Calendar / Email sync 只进入 Capture / Inbox，不自动确认 Task / Goal。
+- Health sync 只写 EnergyDailyMetric，不创建任务、提醒或 Today。
+- 这是 scheduler contract，不是 active scheduler。
+
+### GET `/api/v1/scheduler/data-sources/celery-beat`
+
+返回 JSON-friendly Celery Beat 配置草案。该接口不修改 `celery_app.conf`，不启动 scheduler。
+
+Response:
+
+```json
+{
+  "timezone": "UTC",
+  "entries": [
+    {
+      "name": "data-source-sync-ready-every-15-minutes",
+      "task": "data_source.sync_ready_connections",
+      "schedule": {
+        "type": "interval",
+        "seconds": 900
+      },
+      "kwargs": {
+        "limit": 50
+      }
+    },
+    {
+      "name": "health-sync-ready-energy-hourly",
+      "task": "health.sync_ready_energy_connections",
+      "schedule": {
+        "type": "interval",
+        "seconds": 3600
+      },
+      "kwargs": {
+        "limit": 50
+      }
+    }
+  ],
+  "excluded_entries": [
+    {
+      "task_name": "data_source.sync_connection",
+      "reason": "Single-connection sync should be triggered explicitly for a selected connection."
+    },
+    {
+      "task_name": "health.sync_energy_connection",
+      "reason": "Single health sync should be triggered explicitly for a selected connection."
+    }
+  ],
+  "notes": []
+}
+```
+
+Rules:
+
+- Interval 时间以秒表示。
+- 当前只包含 ready fanout worker。
+- 单连接 worker 不直接进入 Beat，必须由明确的连接级操作触发。
+
+## 12. 当前安全边界
 
 - 仍使用开发态 `X-User-Id` 用户上下文。
 - 不保存外部平台 access token / refresh token。
 - 当前不接真实第三方 API。
 - 外部来源任务只进入 Capture / Inbox，由用户确认后再生成 Task / Goal。
 
-## 12. 后续 P3
+## 13. 后续 P3
 
 - 真实 Calendar / Email provider adapter。
 - 定时调度与失败重试策略。
