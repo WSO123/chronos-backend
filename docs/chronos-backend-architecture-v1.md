@@ -12,7 +12,10 @@
 - [Chronos Competitive Analysis](./chronos-competitive-analysis.md)：竞品边界、差异化地图和产品取舍。
 - [Chronos App 产品信息架构](./chronos-information-architecture-final.md)：页面结构、核心路径和分期建议。
 - [Chronos Interaction Flow Design](./chronos-interaction-flow-design.md)：交互主路径、页面跳转和后端对象映射。
+- [Chronos LLM & Agent Architecture](./chronos-llm-agent-architecture.md)：LLM 接入、Agent 职责、AIJob 生命周期和 fallback 策略。
+- [Chronos Engineering Guidelines](./chronos-engineering-guidelines.md)：代码结构、分层调用、数据/API/AI/测试开发规范。
 - [Chronos PRD V3.5](./chronos-prd-v3.5.md)：长期愿景、能力池和路线图。
+- [Iteration Docs](./iterations/README.md)：需求迭代文档规范和模板。
 
 ---
 
@@ -753,14 +756,19 @@ AIJob {
   id
   user_id
   job_type                // capture_parser | daily_planner | task_breakdown | daily_report_generator
-  status                  // queued | running | succeeded | failed | canceled
+  status                  // queued | running | succeeded | succeeded_with_fallback | failed | canceled
   input_entity_type
   input_entity_id
   result_entity_type
   result_entity_id
   celery_task_id
+  provider
+  model
+  prompt_version
+  latency_ms
   error_message
   retry_count
+  metadata                // json
   started_at
   finished_at
   created_at
@@ -854,6 +862,7 @@ active -> paused -> active
 ```text
 queued -> running -> succeeded
 queued -> running -> failed
+queued -> running -> succeeded_with_fallback
 failed -> queued
 running -> canceled
 ```
