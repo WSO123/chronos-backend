@@ -2,6 +2,7 @@ from app.models.activity_event import ActivityEvent
 from app.models.ai_job import AIJob
 from app.models.capture import AIParseResult, CaptureInput
 from app.models.daily_plan import DailyPlan, DailyPlanItem, PlanRevision, StrategySnapshot
+from app.models.data_source import DataSourceConnection
 from app.models.focus_session import FocusSession
 from app.models.goal import Goal
 from app.models.inbox import InboxItem
@@ -19,6 +20,7 @@ __all__ = [
     "DailyPlan",
     "DailyPlanItem",
     "DailyReport",
+    "DataSourceConnection",
     "FocusSession",
     "Goal",
     "InboxItem",

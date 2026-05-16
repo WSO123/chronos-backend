@@ -129,6 +129,19 @@ class InboxItemStatus(StrEnum):
     DISCARDED = "discarded"
 
 
+class DataSourceType(StrEnum):
+    CALENDAR = "calendar"
+    EMAIL = "email"
+    HEALTH = "health"
+
+
+class DataSourceStatus(StrEnum):
+    DISCONNECTED = "disconnected"
+    CONNECTED = "connected"
+    NEEDS_REAUTH = "needs_reauth"
+    PAUSED = "paused"
+
+
 class EntityType(StrEnum):
     TASK = "task"
     GOAL = "goal"
@@ -138,6 +151,7 @@ class EntityType(StrEnum):
     FOCUS_SESSION = "focus_session"
     AI_JOB = "ai_job"
     REPORT = "report"
+    DATA_SOURCE = "data_source"
 
 
 class ActorType(StrEnum):

@@ -461,10 +461,32 @@ P2 / P3 / P4 扩展：
 
 - Insights
 - Energy
+- Data Sources
 - Social
 - Gamification
 
-### 7.10 AI Agent / Worker Module
+### 7.10 Data Source Module
+
+Data Source 是 P3 自然生长模块的权限和连接状态底座，服务日历、邮件、健康数据接入。
+
+职责：
+
+- 记录用户连接了哪些外部数据来源。
+- 记录连接状态、授权范围、同步开关、最近同步时间和非敏感元数据。
+- 为后续 Calendar / Email / Health worker 提供统一入口。
+- 让 Me / Settings 能展示数据接入状态。
+
+边界：
+
+- 不保存真实 OAuth token。
+- 不直接拉取外部数据。
+- 不把外部来源任务写入 Task，后续由专门 worker 解析并进入 Capture / Inbox。
+
+核心对象：
+
+- DataSourceConnection
+
+### 7.11 AI Agent / Worker Module
 
 职责：
 
@@ -521,6 +543,34 @@ UserSettings {
   updated_at
 }
 ```
+
+### DataSourceConnection
+
+```text
+DataSourceConnection {
+  id
+  user_id
+  source_type              // calendar | email | health
+  provider                 // google_calendar | gmail | apple_health ...
+  status                   // disconnected | connected | needs_reauth | paused
+  external_account_label
+  scopes
+  sync_enabled
+  sync_cursor
+  last_sync_at
+  connected_at
+  revoked_at
+  metadata
+  created_at
+  updated_at
+}
+```
+
+说明：
+
+- 该模型只保存连接状态和非敏感元数据，不保存 OAuth token。
+- P3 后续同步 worker 应读取该表决定是否可同步。
+- 外部数据导入后应进入 Capture / Inbox，不直接绕过确认层写入正式任务。
 
 ### CaptureInput
 
@@ -1044,6 +1094,21 @@ PATCH /api/v1/me/settings
 - P1 返回基础数据总览。
 - Insights 已支持 P2 轻量详情；Energy、Social 作为后续入口。
 
+### Data Sources
+
+```text
+GET   /api/v1/data-sources
+PUT   /api/v1/data-sources/{source_type}/{provider}
+PATCH /api/v1/data-sources/{connection_id}
+POST  /api/v1/data-sources/{connection_id}/disconnect
+```
+
+说明：
+
+- P3 已支持数据源连接状态底座，用于 Calendar / Email / Health 接入前置准备。
+- 当前不接真实 OAuth，不保存 token，只保存 provider、scopes、sync 状态和非敏感元数据。
+- 连接 / 更新 / 断开会写入 ActivityEvent，便于后续审计和用户行为学习。
+
 ### Insights
 
 ```text
@@ -1320,6 +1385,7 @@ app/
 
 - User
 - UserSettings
+- DataSourceConnection
 - Goal
 - Task
 - TaskStep
@@ -1443,9 +1509,9 @@ P1 不是以“接口都写完”为验收，而是以核心闭环跑通为验�
 
 - 语音输入
 - 图片输入
-- 日历接入
-- 邮件接入
-- 睡眠 / 压力数据接入
+- 日历接入（已支持 Data Source 连接状态底座，真实同步待后续）
+- 邮件接入（已支持 Data Source 连接状态底座，真实同步待后续）
+- 睡眠 / 压力数据接入（已支持 Health 连接状态底座，真实数据待后续）
 - Energy Dashboard
 - 自动提醒增强
 - 来源内容关联

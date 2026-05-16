@@ -1,0 +1,97 @@
+import unittest
+
+from fastapi.testclient import TestClient
+
+from app.core.db import get_db
+from main import app
+from tests.db import TestingSessionLocal, override_get_db, reset_database
+from tests.factories import create_user
+
+
+class DataSourceAPITests(unittest.TestCase):
+    def setUp(self):
+        reset_database()
+        app.dependency_overrides[get_db] = override_get_db
+        self.client = TestClient(app)
+        self.db = TestingSessionLocal()
+        self.user = create_user(self.db)
+        self.other_user = create_user(self.db)
+        self.headers = {"X-User-Id": str(self.user.id)}
+        self.other_headers = {"X-User-Id": str(self.other_user.id)}
+
+    def tearDown(self):
+        self.db.close()
+        app.dependency_overrides.clear()
+
+    def test_list_data_sources_returns_catalog(self):
+        response = self.client.get("/api/v1/data-sources", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["connected_count"], 0)
+        self.assertEqual(
+            {source["source_type"] for source in body["sources"]},
+            {"calendar", "email", "health"},
+        )
+        self.assertTrue(all(source["status"] == "disconnected" for source in body["sources"]))
+
+    def test_connect_update_and_disconnect_data_source(self):
+        connect_response = self.client.put(
+            "/api/v1/data-sources/calendar/google_calendar",
+            json={
+                "external_account_label": "alice@example.com",
+                "sync_enabled": True,
+                "connection_metadata": {"origin": "settings"},
+            },
+            headers=self.headers,
+        )
+        connection_id = connect_response.json()["id"]
+        update_response = self.client.patch(
+            f"/api/v1/data-sources/{connection_id}",
+            json={"status": "paused", "sync_enabled": False},
+            headers=self.headers,
+        )
+        disconnect_response = self.client.post(
+            f"/api/v1/data-sources/{connection_id}/disconnect",
+            headers=self.headers,
+        )
+
+        self.assertEqual(connect_response.status_code, 200)
+        self.assertEqual(connect_response.json()["status"], "connected")
+        self.assertEqual(connect_response.json()["scopes"], ["calendar.read"])
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.json()["status"], "paused")
+        self.assertFalse(update_response.json()["sync_enabled"])
+        self.assertEqual(disconnect_response.status_code, 200)
+        self.assertEqual(disconnect_response.json()["status"], "disconnected")
+        self.assertFalse(disconnect_response.json()["sync_enabled"])
+
+    def test_unsupported_provider_returns_validation_error(self):
+        response = self.client.put(
+            "/api/v1/data-sources/email/google_calendar",
+            json={},
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
+
+    def test_connection_isolated_by_user(self):
+        connect_response = self.client.put(
+            "/api/v1/data-sources/email/gmail",
+            json={},
+            headers=self.headers,
+        )
+        connection_id = connect_response.json()["id"]
+
+        response = self.client.post(
+            f"/api/v1/data-sources/{connection_id}/disconnect",
+            headers=self.other_headers,
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "NOT_FOUND")
+
+
+if __name__ == "__main__":
+    unittest.main()

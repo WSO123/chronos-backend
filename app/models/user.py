@@ -31,6 +31,11 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     goals: Mapped[list["Goal"]] = relationship("Goal", back_populates="user")
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="user")
+    data_source_connections: Mapped[list["DataSourceConnection"]] = relationship(
+        "DataSourceConnection",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class UserSettings(UUIDPrimaryKeyMixin, TimestampMixin, Base):
