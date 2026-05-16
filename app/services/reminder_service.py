@@ -88,6 +88,42 @@ class ReminderService:
             "overdue_count": overdue_count,
         }
 
+    def reminder_summary(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        now: datetime | None = None,
+    ) -> dict:
+        self._ensure_user(db, user_id=user_id)
+        resolved_now = self._normalize_datetime(now or datetime.now(UTC))
+        stmt = (
+            select(Reminder)
+            .where(
+                Reminder.user_id == user_id,
+                Reminder.status == "scheduled",
+            )
+            .order_by(Reminder.scheduled_for, Reminder.created_at)
+        )
+        reminders = list(db.scalars(stmt).all())
+        due_count = 0
+        execution_count = 0
+        deadline_count = 0
+        for reminder in reminders:
+            if self._normalize_datetime(reminder.scheduled_for) <= resolved_now:
+                due_count += 1
+            if reminder.reminder_type == "execution":
+                execution_count += 1
+            if reminder.reminder_type == "deadline":
+                deadline_count += 1
+        return {
+            "pending_count": len(reminders),
+            "due_count": due_count,
+            "execution_count": execution_count,
+            "deadline_count": deadline_count,
+            "next_reminder": reminders[0] if reminders else None,
+        }
+
     def dismiss_reminder(self, db: Session, *, reminder_id: uuid.UUID, user_id: uuid.UUID) -> Reminder:
         reminder = self._get_user_reminder(db, reminder_id=reminder_id, user_id=user_id)
         if reminder.status in {"dismissed", "canceled"}:

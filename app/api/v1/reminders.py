@@ -1,3 +1,4 @@
+from datetime import datetime
 import uuid
 
 from fastapi import APIRouter, Depends, Query
@@ -5,7 +6,12 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_id
 from app.core.db import get_db
-from app.schemas.reminders import ReminderCreate, ReminderListResponse, ReminderResponse
+from app.schemas.reminders import (
+    ReminderCreate,
+    ReminderListResponse,
+    ReminderResponse,
+    ReminderSummaryResponse,
+)
 from app.services.reminder_service import reminder_service
 
 router = APIRouter(prefix="/reminders", tags=["reminders"])
@@ -30,6 +36,23 @@ def list_reminders(
         "reminders": [reminder_service.to_response(reminder) for reminder in result["reminders"]],
         "scheduled_count": result["scheduled_count"],
         "overdue_count": result["overdue_count"],
+    }
+
+
+@router.get("/summary", response_model=ReminderSummaryResponse)
+def get_reminder_summary(
+    now: datetime | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    result = reminder_service.reminder_summary(db, user_id=user_id, now=now)
+    next_reminder = result["next_reminder"]
+    return {
+        "pending_count": result["pending_count"],
+        "due_count": result["due_count"],
+        "execution_count": result["execution_count"],
+        "deadline_count": result["deadline_count"],
+        "next_reminder": reminder_service.to_response(next_reminder) if next_reminder else None,
     }
 
 

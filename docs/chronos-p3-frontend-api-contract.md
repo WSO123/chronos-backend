@@ -37,6 +37,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Health Fake Provider Adapter | internal health provider registry | Ready |
 | Today Strategy Energy Explanation | `GET /api/v1/today/strategy` -> `energy` | Ready |
 | Notification Settings | `GET /api/v1/me/settings` / `PATCH /api/v1/me/settings` | Ready |
+| Reminder Summary | `GET /api/v1/reminders/summary` | Ready |
 | Reminder Center | `GET /api/v1/reminders` | Ready |
 | Create Manual Reminder | `POST /api/v1/reminders` | Ready |
 | Dismiss Reminder | `POST /api/v1/reminders/{id}/dismiss` | Ready |
@@ -569,6 +570,42 @@ Rules:
 ## 9. Reminder Center
 
 Reminder Center 是 P3 自动提醒能力的承接层。当前只做提醒记录、列表、手动创建、dismiss 和 worker 规则生成，不做真实推送。
+
+### GET `/api/v1/reminders/summary`
+
+用于 Today Header 的轻量提醒入口，只返回数字和下一条提醒，不展开完整提醒列表。
+
+Query:
+
+```text
+now=2026-05-17T09:00:00Z
+```
+
+Response:
+
+```json
+{
+  "pending_count": 2,
+  "due_count": 1,
+  "execution_count": 1,
+  "deadline_count": 1,
+  "next_reminder": {
+    "id": "uuid",
+    "title": "Due execution",
+    "reminder_type": "execution",
+    "status": "scheduled",
+    "scheduled_for": "2026-05-17T08:59:00Z",
+    "channel": "in_app"
+  }
+}
+```
+
+Frontend notes:
+
+- Today 首屏只展示入口数字和必要提醒状态。
+- 完整列表仍进入 Reminder Center。
+- `pending_count` 只统计 `status=scheduled`。
+- `due_count` 统计 `scheduled_for <= now` 的 scheduled reminders。
 
 ### GET `/api/v1/reminders`
 

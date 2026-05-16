@@ -105,6 +105,47 @@ class ReminderServiceTests(unittest.TestCase):
         with self.assertRaises(NotFoundError):
             reminder_service.dismiss_reminder(self.db, reminder_id=reminder.id, user_id=self.other_user.id)
 
+    def test_reminder_summary_returns_header_counts(self):
+        now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)
+        due = reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={
+                "title": "Due execution",
+                "scheduled_for": now - timedelta(minutes=1),
+                "reminder_type": "execution",
+            },
+        )
+        reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={
+                "title": "Future deadline",
+                "scheduled_for": now + timedelta(hours=1),
+                "reminder_type": "deadline",
+            },
+        )
+        sent = reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={"title": "Sent reminder", "scheduled_for": now - timedelta(hours=1)},
+        )
+        sent.status = "sent"
+        reminder_service.create_reminder(
+            self.db,
+            user_id=self.other_user.id,
+            payload={"title": "Other due", "scheduled_for": now - timedelta(minutes=1)},
+        )
+        self.db.commit()
+
+        summary = reminder_service.reminder_summary(self.db, user_id=self.user.id, now=now)
+
+        self.assertEqual(summary["pending_count"], 2)
+        self.assertEqual(summary["due_count"], 1)
+        self.assertEqual(summary["execution_count"], 1)
+        self.assertEqual(summary["deadline_count"], 1)
+        self.assertEqual(summary["next_reminder"].id, due.id)
+
     def test_dispatch_due_reminders_marks_due_as_sent(self):
         now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)
         due = reminder_service.create_reminder(

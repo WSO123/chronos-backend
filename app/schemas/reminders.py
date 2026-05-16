@@ -40,3 +40,11 @@ class ReminderListResponse(BaseModel):
     reminders: list[ReminderResponse]
     scheduled_count: int
     overdue_count: int
+
+
+class ReminderSummaryResponse(BaseModel):
+    pending_count: int
+    due_count: int
+    execution_count: int
+    deadline_count: int
+    next_reminder: ReminderResponse | None

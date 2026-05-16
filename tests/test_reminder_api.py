@@ -80,6 +80,49 @@ class ReminderAPITests(unittest.TestCase):
         self.assertEqual(other_dismiss_response.status_code, 404)
         self.assertEqual(other_dismiss_response.json()["error"]["code"], "NOT_FOUND")
 
+    def test_summary_returns_lightweight_header_counts(self):
+        now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)
+        due_response = self.client.post(
+            "/api/v1/reminders",
+            json={
+                "title": "Due execution",
+                "scheduled_for": (now - timedelta(minutes=1)).isoformat(),
+                "reminder_type": "execution",
+            },
+            headers=self.headers,
+        )
+        self.client.post(
+            "/api/v1/reminders",
+            json={
+                "title": "Future deadline",
+                "scheduled_for": (now + timedelta(hours=1)).isoformat(),
+                "reminder_type": "deadline",
+            },
+            headers=self.headers,
+        )
+        self.client.post(
+            "/api/v1/reminders",
+            json={
+                "title": "Other due",
+                "scheduled_for": (now - timedelta(minutes=1)).isoformat(),
+            },
+            headers=self.other_headers,
+        )
+
+        response = self.client.get(
+            "/api/v1/reminders/summary",
+            params={"now": now.isoformat()},
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["pending_count"], 2)
+        self.assertEqual(body["due_count"], 1)
+        self.assertEqual(body["execution_count"], 1)
+        self.assertEqual(body["deadline_count"], 1)
+        self.assertEqual(body["next_reminder"]["id"], due_response.json()["id"])
+
     def test_create_reminder_rejects_cross_user_task(self):
         other_task_response = self.client.post(
             "/api/v1/tasks",
