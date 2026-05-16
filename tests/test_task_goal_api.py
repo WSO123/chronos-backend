@@ -1,4 +1,5 @@
 import unittest
+from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -152,6 +153,37 @@ class TaskGoalAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["error"]["code"], "NOT_FOUND")
+
+    def test_goals_home_returns_summary_and_filter_results(self):
+        due_date = (date.today() + timedelta(days=2)).isoformat()
+        goal_response = self.client.post(
+            "/api/v1/goals",
+            json={"title": "Goals Home API", "deadline": due_date, "value_level": "high"},
+            headers=self.headers,
+        )
+        goal_id = goal_response.json()["id"]
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Next goal task", "goal_id": goal_id, "priority": 1, "value_level": "high"},
+            headers=self.headers,
+        )
+        other_goal_response = self.client.post(
+            "/api/v1/goals",
+            json={"title": "Other user goal"},
+            headers=self.other_headers,
+        )
+
+        response = self.client.get("/api/v1/goals/home?filter=due_soon", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["selected_filter"], "due_soon")
+        self.assertEqual(body["summary"]["total_goal_count"], 1)
+        self.assertEqual(body["filters"]["due_soon"], 1)
+        self.assertEqual(len(body["goals"]), 1)
+        self.assertEqual(body["goals"][0]["id"], goal_id)
+        self.assertEqual(body["goals"][0]["recommended_next_task_id"], task_response.json()["id"])
+        self.assertNotEqual(body["goals"][0]["id"], other_goal_response.json()["id"])
 
     def test_breakdown_task_returns_ai_job_and_created_steps(self):
         task_response = self.client.post(

@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_id
 from app.core.db import get_db
-from app.schemas.goals import GoalCreate, GoalDetailResponse, GoalResponse, GoalUpdate
+from app.models.enums import GoalHomeFilter
+from app.schemas.goals import GoalCreate, GoalDetailResponse, GoalResponse, GoalUpdate, GoalsHomeResponse
 from app.services.goal_service import goal_service
 
 router = APIRouter(prefix="/goals", tags=["goals"])
@@ -35,6 +36,23 @@ def list_goals(
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
     return goal_service.list_goals(db, user_id=user_id, limit=limit, offset=offset)
+
+
+@router.get("/home", response_model=GoalsHomeResponse)
+def get_goals_home(
+    selected_filter: GoalHomeFilter = Query(default=GoalHomeFilter.ACTIVE, alias="filter"),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return goal_service.get_goals_home(
+        db,
+        user_id=user_id,
+        selected_filter=selected_filter,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/{goal_id}", response_model=GoalResponse)

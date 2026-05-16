@@ -25,6 +25,14 @@ class GoalStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class GoalHomeFilter(StrEnum):
+    ALL = "all"
+    ACTIVE = "active"
+    DUE_SOON = "due_soon"
+    COMPLETED = "completed"
+    HIGH_VALUE = "high_value"
+
+
 class TaskStatus(StrEnum):
     ACTIVE = "active"
     IN_FOCUS = "in_focus"

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.enums import EntityType, GoalStatus, TaskStatus, ValueLevel
+from app.models.enums import EntityType, GoalHomeFilter, GoalStatus, TaskStatus, ValueLevel
 from app.models.goal import Goal
 from app.models.task import Task
 from app.models.user import User
@@ -72,6 +72,29 @@ class GoalService:
         if goal is None or goal.user_id != user_id:
             raise NotFoundError("Goal not found")
         return goal
+
+    def get_goals_home(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        selected_filter: GoalHomeFilter = GoalHomeFilter.ACTIVE,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        today = self._current_user_date(db, user_id=user_id)
+        goals = self._goals_with_tasks(db, user_id=user_id)
+        visible_goals = [goal for goal in goals if goal.status != GoalStatus.ARCHIVED]
+        home_items = [self._goal_home_item(goal, today=today) for goal in visible_goals]
+        filtered_items = self._filter_home_items(home_items, selected_filter=selected_filter, today=today)
+        paginated_items = filtered_items[offset : offset + limit]
+
+        return {
+            "selected_filter": selected_filter,
+            "summary": self._home_summary(visible_goals, home_items, today=today),
+            "filters": self._home_filter_counts(home_items, today=today),
+            "goals": paginated_items,
+        }
 
     def get_goal_detail(self, db: Session, *, goal_id: uuid.UUID, user_id: uuid.UUID) -> dict:
         goal = self.get_goal(db, goal_id=goal_id, user_id=user_id)
@@ -147,6 +170,87 @@ class GoalService:
             .where(Task.goal_id == goal.id, Task.user_id == user_id)
         )
         return list(db.scalars(stmt).all())
+
+    def _goals_with_tasks(self, db: Session, *, user_id: uuid.UUID) -> list[Goal]:
+        stmt = (
+            select(Goal)
+            .options(selectinload(Goal.tasks).selectinload(Task.steps))
+            .where(Goal.user_id == user_id)
+            .order_by(Goal.created_at.desc())
+        )
+        return list(db.scalars(stmt).all())
+
+    def _goal_home_item(self, goal: Goal, *, today: date) -> dict:
+        visible_tasks = [task for task in goal.tasks if task.status != TaskStatus.ARCHIVED]
+        sorted_tasks = sorted(visible_tasks, key=lambda task: self._task_sort_key(task, today=today))
+        unfinished_tasks = [task for task in sorted_tasks if task.status != TaskStatus.COMPLETED]
+        completed_tasks = [task for task in sorted_tasks if task.status == TaskStatus.COMPLETED]
+        recommended_next_task = unfinished_tasks[0] if goal.status == GoalStatus.ACTIVE and unfinished_tasks else None
+        progress = self._progress(goal=goal, tasks=visible_tasks, today=today)
+        return {
+            "id": goal.id,
+            "title": goal.title,
+            "deadline": goal.deadline,
+            "value_level": goal.value_level,
+            "status": goal.status,
+            "progress": progress["completion_rate"],
+            "risk_level": progress["risk_level"],
+            "risk_reason": progress["risk_reason"],
+            "associated_task_count": len(visible_tasks),
+            "unfinished_task_count": len(unfinished_tasks),
+            "completed_task_count": len(completed_tasks),
+            "recommended_next_task_id": recommended_next_task.id if recommended_next_task else None,
+        }
+
+    def _filter_home_items(self, items: list[dict], *, selected_filter: GoalHomeFilter, today: date) -> list[dict]:
+        if selected_filter == GoalHomeFilter.ALL:
+            return items
+        if selected_filter == GoalHomeFilter.ACTIVE:
+            return [item for item in items if item["status"] == GoalStatus.ACTIVE]
+        if selected_filter == GoalHomeFilter.DUE_SOON:
+            return [item for item in items if self._is_due_soon_home_item(item, today=today)]
+        if selected_filter == GoalHomeFilter.COMPLETED:
+            return [item for item in items if item["status"] == GoalStatus.COMPLETED]
+        if selected_filter == GoalHomeFilter.HIGH_VALUE:
+            return [item for item in items if item["value_level"] == ValueLevel.HIGH]
+        return items
+
+    def _home_summary(self, goals: list[Goal], items: list[dict], *, today: date) -> dict:
+        weekly_completed_task_goal_ids: set[uuid.UUID] = set()
+        weekly_completed_task_count = 0
+        week_start = today - timedelta(days=today.weekday())
+        for goal in goals:
+            for task in goal.tasks:
+                if task.status != TaskStatus.COMPLETED or task.updated_at.date() < week_start:
+                    continue
+                weekly_completed_task_count += 1
+                weekly_completed_task_goal_ids.add(goal.id)
+
+        return {
+            "total_goal_count": len(items),
+            "active_goal_count": len([item for item in items if item["status"] == GoalStatus.ACTIVE]),
+            "completed_goal_count": len([item for item in items if item["status"] == GoalStatus.COMPLETED]),
+            "due_soon_goal_count": len([item for item in items if self._is_due_soon_home_item(item, today=today)]),
+            "high_value_goal_count": len([item for item in items if item["value_level"] == ValueLevel.HIGH]),
+            "at_risk_goal_count": len(
+                [item for item in items if item["risk_level"] in {"behind", "at_risk", "needs_breakdown"}]
+            ),
+            "weekly_completed_task_count": weekly_completed_task_count,
+            "weekly_touched_goal_count": len(weekly_completed_task_goal_ids),
+        }
+
+    def _home_filter_counts(self, items: list[dict], *, today: date) -> dict:
+        return {
+            "all": len(items),
+            "active": len([item for item in items if item["status"] == GoalStatus.ACTIVE]),
+            "due_soon": len([item for item in items if self._is_due_soon_home_item(item, today=today)]),
+            "completed": len([item for item in items if item["status"] == GoalStatus.COMPLETED]),
+            "high_value": len([item for item in items if item["value_level"] == ValueLevel.HIGH]),
+        }
+
+    def _is_due_soon_home_item(self, item: dict, *, today: date) -> bool:
+        deadline = item["deadline"]
+        return item["status"] == GoalStatus.ACTIVE and deadline is not None and deadline <= today + timedelta(days=7)
 
     def _progress(self, *, goal: Goal, tasks: list[Task], today: date) -> dict:
         total_task_count = len(tasks)

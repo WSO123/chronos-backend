@@ -96,7 +96,7 @@ uv run python scripts/dev_seed_demo.py
 | Focus | `POST /focus-sessions`, complete / interrupt / postpone | Ready |
 | Daily Report | `GET /reports/daily`, `POST /reports/daily/generate` | Ready |
 | Me Overview | `GET /me/overview` | Ready |
-| Goals | `GET /goals`, `POST /goals`, `GET /goals/{id}`, `GET /goals/{id}/detail` | Backend Ready, P2 UI |
+| Goals | `GET /goals/home`, `GET /goals`, `POST /goals`, `GET /goals/{id}`, `GET /goals/{id}/detail` | Backend Ready, P2 UI |
 | AIJob Status | `GET /ai-jobs/{id}` | Backend Ready, mostly debug / future UI |
 
 ---
@@ -610,7 +610,8 @@ Goals 是 P2 一级 Tab，但 P1 后端已经提供轻量 Goal API，主要用�
 | Method | Path | 用途 |
 | --- | --- | --- |
 | `POST` | `/goals` | 创建目标 |
-| `GET` | `/goals` | 目标列表 |
+| `GET` | `/goals` | 轻量目标列表 / selector |
+| `GET` | `/goals/home` | Goals 首页聚合 |
 | `GET` | `/goals/{goal_id}` | 目标详情基础信息 |
 | `GET` | `/goals/{goal_id}/detail` | Goal Detail 聚合 |
 | `PATCH` | `/goals/{goal_id}` | 编辑目标基础字段 |
@@ -628,8 +629,11 @@ Goal fields:
 }
 ```
 
-P2 Goal Detail 已提供：
+P2 Goals 已提供：
 
+- Goals Home Summary。
+- Goal List progress / deadline / risk / task count。
+- Goals filters: `all` / `active` / `due_soon` / `completed` / `high_value`。
 - Goal Overview。
 - Goal Progress。
 - Goal Task List。

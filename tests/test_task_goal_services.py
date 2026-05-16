@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.models.activity_event import ActivityEvent
-from app.models.enums import AIJobStatus, GoalStatus, TaskStatus, ValueLevel
+from app.models.enums import AIJobStatus, GoalHomeFilter, GoalStatus, TaskStatus, ValueLevel
 from app.services.errors import InvalidStateError
 from app.services.focus_service import focus_service
 from app.services.goal_service import goal_service
@@ -188,6 +188,78 @@ class TaskGoalServiceTests(unittest.TestCase):
         self.assertIsNone(detail["task_list"]["recommended_next_task"])
         self.assertIsNone(detail["ai_suggestion"]["next_action_task_id"])
         self.assertEqual(detail["ai_suggestion"]["summary"], "This goal is already complete.")
+
+    def test_goals_home_returns_summary_filters_and_goal_cards(self):
+        today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        active_goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Active high value goal",
+            deadline=today + timedelta(days=3),
+            value_level=ValueLevel.HIGH,
+        )
+        next_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=active_goal.id,
+            title="Next important step",
+            priority=1,
+            value_level=ValueLevel.HIGH,
+        )
+        done_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=active_goal.id,
+            title="Finished setup",
+        )
+        task_service.complete_task(self.db, task_id=done_task.id, user_id=self.user.id)
+        completed_goal = goal_service.create_goal(self.db, user_id=self.user.id, title="Completed goal")
+        completed_goal_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=completed_goal.id,
+            title="Completed goal task",
+        )
+        task_service.complete_task(self.db, task_id=completed_goal_task.id, user_id=self.user.id)
+        goal_service.update_goal(
+            self.db,
+            goal_id=completed_goal.id,
+            user_id=self.user.id,
+            updates={"status": GoalStatus.COMPLETED},
+        )
+        archived_goal = goal_service.create_goal(self.db, user_id=self.user.id, title="Archived goal")
+        goal_service.update_goal(
+            self.db,
+            goal_id=archived_goal.id,
+            user_id=self.user.id,
+            updates={"status": GoalStatus.ARCHIVED},
+        )
+
+        home = goal_service.get_goals_home(
+            self.db,
+            user_id=self.user.id,
+            selected_filter=GoalHomeFilter.ACTIVE,
+        )
+        completed_home = goal_service.get_goals_home(
+            self.db,
+            user_id=self.user.id,
+            selected_filter=GoalHomeFilter.COMPLETED,
+        )
+
+        self.assertEqual(home["summary"]["total_goal_count"], 2)
+        self.assertEqual(home["summary"]["active_goal_count"], 1)
+        self.assertEqual(home["summary"]["completed_goal_count"], 1)
+        self.assertEqual(home["summary"]["due_soon_goal_count"], 1)
+        self.assertEqual(home["summary"]["high_value_goal_count"], 1)
+        self.assertEqual(home["summary"]["weekly_completed_task_count"], 2)
+        self.assertEqual(home["summary"]["weekly_touched_goal_count"], 2)
+        self.assertEqual(home["filters"]["all"], 2)
+        self.assertEqual(home["filters"]["active"], 1)
+        self.assertEqual(len(home["goals"]), 1)
+        self.assertEqual(home["goals"][0]["id"], active_goal.id)
+        self.assertEqual(home["goals"][0]["recommended_next_task_id"], next_task.id)
+        self.assertEqual(home["goals"][0]["associated_task_count"], 2)
+        self.assertEqual(completed_home["goals"][0]["id"], completed_goal.id)
 
     def test_breakdown_task_creates_rule_steps_and_ai_job(self):
         task = task_service.create_task(

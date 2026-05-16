@@ -4,7 +4,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import GoalStatus, TaskStatus, ValueLevel
+from app.models.enums import GoalHomeFilter, GoalStatus, TaskStatus, ValueLevel
 from app.schemas.common import TimestampedResponse
 
 
@@ -108,3 +108,44 @@ class GoalDetailResponse(BaseModel):
     dependency_map: GoalDependencyMapResponse
     ai_suggestion: GoalAISuggestionResponse
     actions: GoalActionsResponse
+
+
+class GoalHomeItemResponse(BaseModel):
+    id: uuid.UUID
+    title: str
+    deadline: date | None
+    value_level: ValueLevel
+    status: GoalStatus
+    progress: float
+    risk_level: str
+    risk_reason: str
+    associated_task_count: int
+    unfinished_task_count: int
+    completed_task_count: int
+    recommended_next_task_id: uuid.UUID | None
+
+
+class GoalHomeSummaryResponse(BaseModel):
+    total_goal_count: int
+    active_goal_count: int
+    completed_goal_count: int
+    due_soon_goal_count: int
+    high_value_goal_count: int
+    at_risk_goal_count: int
+    weekly_completed_task_count: int
+    weekly_touched_goal_count: int
+
+
+class GoalHomeFilterCountsResponse(BaseModel):
+    all: int
+    active: int
+    due_soon: int
+    completed: int
+    high_value: int
+
+
+class GoalsHomeResponse(BaseModel):
+    selected_filter: GoalHomeFilter
+    summary: GoalHomeSummaryResponse
+    filters: GoalHomeFilterCountsResponse
+    goals: list[GoalHomeItemResponse] = Field(default_factory=list)
