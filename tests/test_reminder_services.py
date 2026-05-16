@@ -147,10 +147,27 @@ class ReminderServiceTests(unittest.TestCase):
         summary = reminder_service.reminder_summary(self.db, user_id=self.user.id, now=now)
 
         self.assertEqual(summary["pending_count"], 2)
+        self.assertEqual(summary["unseen_count"], 2)
         self.assertEqual(summary["due_count"], 1)
         self.assertEqual(summary["execution_count"], 1)
         self.assertEqual(summary["deadline_count"], 1)
         self.assertEqual(summary["next_reminder"].id, due.id)
+
+    def test_mark_reminder_seen_is_user_isolated_and_does_not_change_status(self):
+        reminder = reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={"title": "Seen reminder", "scheduled_for": datetime.now(UTC)},
+        )
+
+        seen = reminder_service.mark_reminder_seen(self.db, reminder_id=reminder.id, user_id=self.user.id)
+        seen_again = reminder_service.mark_reminder_seen(self.db, reminder_id=reminder.id, user_id=self.user.id)
+
+        self.assertEqual(seen.status, "scheduled")
+        self.assertIsNotNone(seen.seen_at)
+        self.assertEqual(seen_again.seen_at, seen.seen_at)
+        with self.assertRaises(NotFoundError):
+            reminder_service.mark_reminder_seen(self.db, reminder_id=reminder.id, user_id=self.other_user.id)
 
     def test_dispatch_due_reminders_marks_due_as_sent(self):
         now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)

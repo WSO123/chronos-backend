@@ -49,6 +49,7 @@ def get_reminder_summary(
     next_reminder = result["next_reminder"]
     return {
         "pending_count": result["pending_count"],
+        "unseen_count": result["unseen_count"],
         "due_count": result["due_count"],
         "execution_count": result["execution_count"],
         "deadline_count": result["deadline_count"],
@@ -67,6 +68,16 @@ def create_reminder(
         user_id=user_id,
         payload=payload.model_dump(),
     )
+    return reminder_service.to_response(reminder)
+
+
+@router.post("/{reminder_id}/seen", response_model=ReminderResponse)
+def mark_reminder_seen(
+    reminder_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    reminder = reminder_service.mark_reminder_seen(db, reminder_id=reminder_id, user_id=user_id)
     return reminder_service.to_response(reminder)
 
 

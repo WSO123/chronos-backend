@@ -23,6 +23,7 @@ class Reminder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     channel: Mapped[str] = mapped_column(String(40), default="in_app", nullable=False)
     source: Mapped[str] = mapped_column(String(40), default="manual", nullable=False)
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reminder_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict, nullable=False)

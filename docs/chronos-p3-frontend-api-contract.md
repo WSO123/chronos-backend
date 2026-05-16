@@ -40,6 +40,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Reminder Summary | `GET /api/v1/reminders/summary` | Ready |
 | Reminder Center | `GET /api/v1/reminders` | Ready |
 | Create Manual Reminder | `POST /api/v1/reminders` | Ready |
+| Mark Reminder Seen | `POST /api/v1/reminders/{id}/seen` | Ready |
 | Dismiss Reminder | `POST /api/v1/reminders/{id}/dismiss` | Ready |
 | Reminder Scheduler Plan | `GET /api/v1/scheduler/reminders` | Ready |
 | Reminder Celery Beat Proposal | `GET /api/v1/scheduler/reminders/celery-beat` | Ready |
@@ -588,6 +589,7 @@ Response:
 ```json
 {
   "pending_count": 2,
+  "unseen_count": 2,
   "due_count": 1,
   "execution_count": 1,
   "deadline_count": 1,
@@ -607,6 +609,7 @@ Frontend notes:
 - Today 首屏只展示入口数字和必要提醒状态。
 - 完整列表仍进入 Reminder Center。
 - `pending_count` 只统计 `status=scheduled`。
+- `unseen_count` 统计 scheduled reminders 中 `seen_at=null` 的数量。
 - `due_count` 统计 `scheduled_for <= now` 的 scheduled reminders。
 
 ### GET `/api/v1/reminders`
@@ -635,6 +638,7 @@ Response:
       "scheduled_for": "2026-05-17T09:00:00Z",
       "channel": "in_app",
       "source": "manual",
+      "seen_at": null,
       "dismissed_at": null,
       "sent_at": null,
       "reminder_metadata": {}
@@ -674,6 +678,16 @@ Rules:
 ### POST `/api/v1/reminders/{id}/dismiss`
 
 将 pending center 中的 reminder 标记为 `dismissed`。
+
+### POST `/api/v1/reminders/{id}/seen`
+
+将 reminder 标记为已看过，写入 `seen_at`，但不改变 reminder 的主状态。
+
+Rules:
+
+- seen 和 dismiss 是两种不同动作。
+- `seen_at` 可用于 Reminder Center 或 Today Header 清除未看数量。
+- 重复调用保持幂等。
 
 Frontend notes:
 

@@ -107,9 +107,12 @@ class ReminderService:
         )
         reminders = list(db.scalars(stmt).all())
         due_count = 0
+        unseen_count = 0
         execution_count = 0
         deadline_count = 0
         for reminder in reminders:
+            if reminder.seen_at is None:
+                unseen_count += 1
             if self._normalize_datetime(reminder.scheduled_for) <= resolved_now:
                 due_count += 1
             if reminder.reminder_type == "execution":
@@ -118,11 +121,20 @@ class ReminderService:
                 deadline_count += 1
         return {
             "pending_count": len(reminders),
+            "unseen_count": unseen_count,
             "due_count": due_count,
             "execution_count": execution_count,
             "deadline_count": deadline_count,
             "next_reminder": reminders[0] if reminders else None,
         }
+
+    def mark_reminder_seen(self, db: Session, *, reminder_id: uuid.UUID, user_id: uuid.UUID) -> Reminder:
+        reminder = self._get_user_reminder(db, reminder_id=reminder_id, user_id=user_id)
+        if reminder.seen_at is None:
+            reminder.seen_at = datetime.now(UTC)
+            db.commit()
+            db.refresh(reminder)
+        return reminder
 
     def dismiss_reminder(self, db: Session, *, reminder_id: uuid.UUID, user_id: uuid.UUID) -> Reminder:
         reminder = self._get_user_reminder(db, reminder_id=reminder_id, user_id=user_id)
@@ -495,6 +507,7 @@ class ReminderService:
             "scheduled_for": reminder.scheduled_for,
             "channel": reminder.channel,
             "source": reminder.source,
+            "seen_at": reminder.seen_at,
             "dismissed_at": reminder.dismissed_at,
             "sent_at": reminder.sent_at,
             "reminder_metadata": reminder.reminder_metadata,

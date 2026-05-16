@@ -51,6 +51,7 @@ class ReminderAPITests(unittest.TestCase):
 
         self.assertEqual(create_response.status_code, 201)
         self.assertEqual(create_response.json()["status"], "scheduled")
+        self.assertEqual(create_response.json()["seen_at"], None)
         self.assertEqual(create_response.json()["channel"], "in_app")
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(list_response.json()["scheduled_count"], 1)
@@ -79,6 +80,30 @@ class ReminderAPITests(unittest.TestCase):
         self.assertEqual(other_list_response.json()["reminders"], [])
         self.assertEqual(other_dismiss_response.status_code, 404)
         self.assertEqual(other_dismiss_response.json()["error"]["code"], "NOT_FOUND")
+
+    def test_mark_reminder_seen(self):
+        create_response = self.client.post(
+            "/api/v1/reminders",
+            json={
+                "title": "Seen API reminder",
+                "scheduled_for": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            },
+            headers=self.headers,
+        )
+
+        seen_response = self.client.post(
+            f"/api/v1/reminders/{create_response.json()['id']}/seen",
+            headers=self.headers,
+        )
+        other_seen_response = self.client.post(
+            f"/api/v1/reminders/{create_response.json()['id']}/seen",
+            headers=self.other_headers,
+        )
+
+        self.assertEqual(seen_response.status_code, 200)
+        self.assertEqual(seen_response.json()["status"], "scheduled")
+        self.assertIsNotNone(seen_response.json()["seen_at"])
+        self.assertEqual(other_seen_response.status_code, 404)
 
     def test_summary_returns_lightweight_header_counts(self):
         now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)
@@ -118,6 +143,7 @@ class ReminderAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["pending_count"], 2)
+        self.assertEqual(body["unseen_count"], 2)
         self.assertEqual(body["due_count"], 1)
         self.assertEqual(body["execution_count"], 1)
         self.assertEqual(body["deadline_count"], 1)

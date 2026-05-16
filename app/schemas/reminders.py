@@ -31,6 +31,7 @@ class ReminderResponse(TimestampedResponse):
     scheduled_for: datetime
     channel: str
     source: str
+    seen_at: datetime | None
     dismissed_at: datetime | None
     sent_at: datetime | None
     reminder_metadata: dict
@@ -44,6 +45,7 @@ class ReminderListResponse(BaseModel):
 
 class ReminderSummaryResponse(BaseModel):
     pending_count: int
+    unseen_count: int
     due_count: int
     execution_count: int
     deadline_count: int
