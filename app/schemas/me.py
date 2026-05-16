@@ -46,6 +46,19 @@ class MeSettingsOverviewResponse(BaseModel):
     focus_mode_default_minutes: int
 
 
+class MeInsightHighlightResponse(BaseModel):
+    key: str
+    title: str
+    message: str
+    signal: str
+
+
+class MeInsightsOverviewResponse(BaseModel):
+    highlights: list[MeInsightHighlightResponse]
+    suggested_next_view: str
+    detail_available: bool
+
+
 class MeOverviewResponse(BaseModel):
     profile: MeProfileResponse
     today: MeTodayOverviewResponse
@@ -53,4 +66,5 @@ class MeOverviewResponse(BaseModel):
     goals: MeGoalOverviewResponse
     tasks: MeTaskOverviewResponse
     reports: MeReportsOverviewResponse
+    insights: MeInsightsOverviewResponse
     settings: MeSettingsOverviewResponse

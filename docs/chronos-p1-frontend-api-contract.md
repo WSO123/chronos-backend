@@ -842,6 +842,18 @@ Response:
     "daily_report_available": true,
     "daily_report_id": "uuid"
   },
+  "insights": {
+    "highlights": [
+      {
+        "key": "strong_today",
+        "title": "Strong execution today",
+        "message": "Most planned work is complete. A short report can help close the loop.",
+        "signal": "positive"
+      }
+    ],
+    "suggested_next_view": "insights_detail",
+    "detail_available": true
+  },
   "settings": {
     "notification_enabled": true,
     "focus_mode_default_minutes": 25
@@ -852,7 +864,8 @@ Response:
 Frontend notes:
 
 - P1 Me 是数据收敛页，不是完整洞察中心。
-- Insights 入口已可调用 `/insights/detail`；Energy、Social 入口仍保留占位。
+- `insights` 是 P2 轻量概览，默认最多展示少量 highlights。
+- Insights 详情入口已可调用 `/insights/detail`；Energy、Social 入口仍保留占位。
 
 ### GET `/insights/detail`
 

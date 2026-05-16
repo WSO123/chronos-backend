@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.activity_event import ActivityEvent
-from app.models.enums import GoalStatus, TaskStatus
+from app.models.enums import GoalStatus, TaskStatus, ValueLevel
 from app.models.goal import Goal
 from app.models.report import DailyReport
 from app.models.task import Task
@@ -30,6 +30,17 @@ class MeService:
         daily_report = self._daily_report(db, user_id=user_id, report_date=resolved_today)
         settings = self._settings_for(db, user_id=user_id)
         timezone = report_service.user_timezone(db, user_id=user_id)
+        week_focus_minutes = report_service.focus_minutes_between(
+            db,
+            user_id=user_id,
+            start_at=week_start_at,
+            end_at=week_end_exclusive,
+        )
+        active_goal_count = self._goal_count(db, user_id=user_id, status=GoalStatus.ACTIVE)
+        completed_goal_count = self._goal_count(db, user_id=user_id, status=GoalStatus.COMPLETED)
+        active_task_count = self._task_count(db, user_id=user_id, statuses={TaskStatus.ACTIVE, TaskStatus.IN_FOCUS})
+        postponed_task_count = self._task_count(db, user_id=user_id, statuses={TaskStatus.POSTPONED})
+        completed_task_count = self._task_count(db, user_id=user_id, statuses={TaskStatus.COMPLETED})
 
         return {
             "profile": {
@@ -53,26 +64,30 @@ class MeService:
             "week": {
                 "week_start": week_start,
                 "week_end": week_end,
-                "focus_minutes": report_service.focus_minutes_between(
-                    db,
-                    user_id=user_id,
-                    start_at=week_start_at,
-                    end_at=week_end_exclusive,
-                ),
+                "focus_minutes": week_focus_minutes,
             },
             "goals": {
-                "active_goal_count": self._goal_count(db, user_id=user_id, status=GoalStatus.ACTIVE),
-                "completed_goal_count": self._goal_count(db, user_id=user_id, status=GoalStatus.COMPLETED),
+                "active_goal_count": active_goal_count,
+                "completed_goal_count": completed_goal_count,
             },
             "tasks": {
-                "active_task_count": self._task_count(db, user_id=user_id, statuses={TaskStatus.ACTIVE, TaskStatus.IN_FOCUS}),
-                "postponed_task_count": self._task_count(db, user_id=user_id, statuses={TaskStatus.POSTPONED}),
-                "completed_task_count": self._task_count(db, user_id=user_id, statuses={TaskStatus.COMPLETED}),
+                "active_task_count": active_task_count,
+                "postponed_task_count": postponed_task_count,
+                "completed_task_count": completed_task_count,
             },
             "reports": {
                 "daily_report_available": daily_report is not None,
                 "daily_report_id": daily_report.id if daily_report else None,
             },
+            "insights": self._insights_overview(
+                completion_rate=metrics.completion_rate,
+                planned_task_count=metrics.planned_task_count,
+                week_focus_minutes=week_focus_minutes,
+                active_goal_count=active_goal_count,
+                postponed_task_count=postponed_task_count,
+                overdue_task_count=self._overdue_task_count(db, user_id=user_id, today=resolved_today),
+                high_value_active_task_count=self._high_value_active_task_count(db, user_id=user_id),
+            ),
             "settings": {
                 "notification_enabled": settings.notification_enabled if settings else True,
                 "focus_mode_default_minutes": settings.focus_mode_default_minutes if settings else 25,
@@ -97,6 +112,106 @@ class MeService:
     def _task_count(self, db: Session, *, user_id: uuid.UUID, statuses: set[TaskStatus]) -> int:
         stmt = select(Task.id).where(Task.user_id == user_id, Task.status.in_(statuses))
         return len(list(db.scalars(stmt).all()))
+
+    def _overdue_task_count(self, db: Session, *, user_id: uuid.UUID, today: date) -> int:
+        stmt = select(Task.id).where(
+            Task.user_id == user_id,
+            Task.status.in_([TaskStatus.ACTIVE, TaskStatus.IN_FOCUS, TaskStatus.POSTPONED]),
+            Task.deadline < today,
+        )
+        return len(list(db.scalars(stmt).all()))
+
+    def _high_value_active_task_count(self, db: Session, *, user_id: uuid.UUID) -> int:
+        stmt = select(Task.id).where(
+            Task.user_id == user_id,
+            Task.status.in_([TaskStatus.ACTIVE, TaskStatus.IN_FOCUS, TaskStatus.POSTPONED]),
+            Task.value_level == ValueLevel.HIGH,
+        )
+        return len(list(db.scalars(stmt).all()))
+
+    def _insights_overview(
+        self,
+        *,
+        completion_rate: float,
+        planned_task_count: int,
+        week_focus_minutes: int,
+        active_goal_count: int,
+        postponed_task_count: int,
+        overdue_task_count: int,
+        high_value_active_task_count: int,
+    ) -> dict:
+        highlights: list[dict] = []
+        if planned_task_count == 0:
+            highlights.append(
+                {
+                    "key": "no_plan_yet",
+                    "title": "No plan yet",
+                    "message": "Capture one clear task to let Today build a starting sequence.",
+                    "signal": "neutral",
+                }
+            )
+        elif completion_rate >= 0.8:
+            highlights.append(
+                {
+                    "key": "strong_today",
+                    "title": "Strong execution today",
+                    "message": "Most planned work is complete. A short report can help close the loop.",
+                    "signal": "positive",
+                }
+            )
+        elif completion_rate == 0:
+            highlights.append(
+                {
+                    "key": "start_needed",
+                    "title": "Start signal",
+                    "message": "Today has a plan, but no completed task yet. Start with the first protected item.",
+                    "signal": "neutral",
+                }
+            )
+
+        if overdue_task_count:
+            highlights.append(
+                {
+                    "key": "overdue_tasks",
+                    "title": "Overdue work exists",
+                    "message": f"{overdue_task_count} tasks are overdue. Re-check whether they still matter.",
+                    "signal": "risk",
+                }
+            )
+        if postponed_task_count:
+            highlights.append(
+                {
+                    "key": "postponed_tasks",
+                    "title": "Postponed tasks are building up",
+                    "message": f"{postponed_task_count} tasks are postponed. Keep only the ones that still support a goal.",
+                    "signal": "risk",
+                }
+            )
+        if week_focus_minutes:
+            highlights.append(
+                {
+                    "key": "weekly_focus",
+                    "title": "Focus is accumulating",
+                    "message": f"{week_focus_minutes} minutes of Focus are recorded this week.",
+                    "signal": "positive",
+                }
+            )
+        if high_value_active_task_count and active_goal_count:
+            highlights.append(
+                {
+                    "key": "high_value_backlog",
+                    "title": "High-value work remains",
+                    "message": f"{high_value_active_task_count} high-value tasks are still active across goals.",
+                    "signal": "neutral",
+                }
+            )
+
+        suggested_next_view = "insights_detail" if highlights else "today"
+        return {
+            "highlights": highlights[:4],
+            "suggested_next_view": suggested_next_view,
+            "detail_available": True,
+        }
 
     def _current_streak_days(self, db: Session, *, user_id: uuid.UUID, today: date, timezone) -> int:
         stmt = (

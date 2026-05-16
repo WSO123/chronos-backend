@@ -235,6 +235,29 @@ class ReportAndMeServiceTests(unittest.TestCase):
         self.assertEqual(overview["today"]["completion_rate"], 1.0)
         self.assertEqual(overview["tasks"]["completed_task_count"], 1)
         self.assertEqual(overview["reports"]["daily_report_available"], False)
+        self.assertEqual(overview["insights"]["highlights"][0]["key"], "strong_today")
+        self.assertEqual(overview["insights"]["suggested_next_view"], "insights_detail")
+        self.assertTrue(overview["insights"]["detail_available"])
+
+    def test_me_overview_insights_flags_overdue_and_postponed_work(self):
+        goal = goal_service.create_goal(self.db, user_id=self.user.id, title="Overview insight goal")
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Overdue overview task",
+            deadline=self.report_date - timedelta(days=1),
+            value_level=ValueLevel.HIGH,
+        )
+        postponed = task_service.create_task(self.db, user_id=self.user.id, title="Postponed overview task")
+        task_service.postpone_task(self.db, task_id=postponed.id, user_id=self.user.id)
+
+        overview = me_service.get_overview(self.db, user_id=self.user.id, today=self.report_date)
+        highlight_keys = {highlight["key"] for highlight in overview["insights"]["highlights"]}
+
+        self.assertIn("overdue_tasks", highlight_keys)
+        self.assertIn("postponed_tasks", highlight_keys)
+        self.assertIn("high_value_backlog", highlight_keys)
 
     def _today_items(self, today: dict) -> list[dict]:
         items: list[dict] = []

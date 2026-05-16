@@ -230,6 +230,9 @@ class ReportAndMeAPITests(unittest.TestCase):
         self.assertEqual(body["profile"]["user_id"], str(self.user.id))
         self.assertEqual(body["tasks"]["active_task_count"], 1)
         self.assertEqual(body["reports"]["daily_report_available"], False)
+        self.assertTrue(body["insights"]["highlights"])
+        self.assertEqual(body["insights"]["suggested_next_view"], "insights_detail")
+        self.assertTrue(body["insights"]["detail_available"])
 
     def test_report_user_isolation(self):
         self.client.post("/api/v1/tasks", json={"title": "Only Alice task"}, headers=self.headers)
