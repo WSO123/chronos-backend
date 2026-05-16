@@ -62,6 +62,24 @@ uv run alembic upgrade head
 uv run python scripts/dev_seed_user.py
 ```
 
+准备一组可用于前端联调和手动验收的 P1 demo 数据：
+
+```bash
+uv run python scripts/dev_seed_demo.py
+```
+
+跑一遍 P1 主链路 smoke 验证：
+
+```bash
+uv run python scripts/smoke_p1_execution_loop.py
+```
+
+该 smoke 会通过 API 跑通：
+
+```text
+Capture -> Inbox -> Today -> Task Detail -> Focus -> Daily Report -> Me
+```
+
 **启动 API 后端 (热重载模式):**
 
 ```bash
@@ -84,14 +102,37 @@ chronos-backend/
 ├── app/
 │   ├── api/                # 接口层：处理 HTTP 请求，不做复杂逻辑
 │   ├── core/               # 核心层：全局配置、数据库连接、Celery 配置
-│   ├── services/           # 服务层：业务逻辑封装 (如 S3 上传、RAG 检索)
-│   ├── workers/            # 任务层：Celery 任务定义 & AI Agent 实现
-│   │   └── agents/         # LangGraph 工作流定义 (核心 AI 逻辑)
-│   └── models/             # 数据模型 (SQLModel/SQLAlchemy)
+│   ├── models/             # 数据模型 (SQLAlchemy)
+│   ├── schemas/            # API 输入输出结构
+│   ├── services/           # 服务层：业务逻辑、调度、报表、AIJob 状态
+│   └── workers/            # 任务层：Celery 任务定义与后续 Agent 入口
+├── docs/                   # 产品、架构、迭代规范与迭代记录
+├── scripts/                # 本地开发 seed / smoke 工具
+├── tests/                  # 服务层和 API 层测试
 ├── docker-compose.yml      # 基础设施编排
 ├── pyproject.toml          # 依赖管理配置
 └── uv.lock                 # 依赖版本锁定
 ```
+
+## P1 主链路验收
+
+本阶段优先保护 Chronos 的核心执行闭环，不追求复杂驾驶舱：
+
+```text
+Capture -> Inbox -> Today -> Task Detail -> Focus -> Report / Me
+```
+
+本地验收建议按顺序执行：
+
+```bash
+uv run alembic upgrade head
+uv run python scripts/dev_seed_demo.py
+uv run python scripts/smoke_p1_execution_loop.py
+uv run python -m unittest discover -s tests
+```
+
+`scripts/dev_seed_demo.py` 用于前端和手动体验，默认创建 `demo@chronos.local` 用户并输出 `X-User-Id`。
+`scripts/smoke_p1_execution_loop.py` 用于开发后快速防回归，每次默认创建一个独立 smoke 用户，不会重置数据库。
 
 ##  开发指南
 
