@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.models.activity_event import ActivityEvent
 from app.models.daily_plan import DailyPlan, DailyPlanItem, PlanRevision, StrategySnapshot
 from app.models.enums import (
     ActorType,
@@ -20,6 +21,7 @@ from app.models.enums import (
     TaskStatus,
     ValueLevel,
 )
+from app.models.task_dependency import TaskDependency
 from app.models.task import Task
 from app.models.user import User
 from app.services.activity_event_service import activity_event_service
@@ -35,6 +37,10 @@ class PlannedTask:
     estimated_duration_min: int
     status: DailyPlanItemStatus | None = None
     contributes_to_strategy: bool = True
+    dependency_depth: int = 0
+    unlocks_task: bool = False
+    blocked_by_dependency: bool = False
+    priority_adjusted: bool = False
 
 
 class PlanningService:
@@ -258,7 +264,7 @@ class PlanningService:
                 primary_reason=strategy_payload["primary_reason"],
                 score_factors=strategy_payload["score_factors"],
                 model_name="rule-planner",
-                prompt_version="p1-rule-v1",
+                prompt_version="p2-rule-v1",
             )
         )
         db.flush()
@@ -274,16 +280,96 @@ class PlanningService:
             Task.status.in_([TaskStatus.ACTIVE, TaskStatus.POSTPONED]),
         )
         tasks = list(db.scalars(stmt).all())
+        signals = self._planning_signals(db, user_id=user_id, tasks=tasks)
         planned_tasks = [
             PlannedTask(
                 task=task,
-                section=self._section_for(task, plan_date=plan_date),
-                recommendation_reason=self._reason_for(task, plan_date=plan_date),
+                section=self._section_for(
+                    task,
+                    plan_date=plan_date,
+                    unlocking_task_ids=signals["unlocking_task_ids"],
+                ),
+                recommendation_reason=self._reason_for(
+                    task,
+                    plan_date=plan_date,
+                    unlocking_task_ids=signals["unlocking_task_ids"],
+                    blocked_task_ids=signals["blocked_task_ids"],
+                    adjusted_task_ids=signals["adjusted_task_ids"],
+                ),
                 estimated_duration_min=task.estimated_duration_min or 25,
+                dependency_depth=signals["dependency_depth_by_task_id"].get(task.id, 0),
+                unlocks_task=task.id in signals["unlocking_task_ids"],
+                blocked_by_dependency=task.id in signals["blocked_task_ids"],
+                priority_adjusted=task.id in signals["adjusted_task_ids"],
             )
             for task in tasks
         ]
         return sorted(planned_tasks, key=self._planned_sort_key)
+
+    def _planning_signals(self, db: Session, *, user_id: uuid.UUID, tasks: list[Task]) -> dict:
+        task_by_id = {task.id: task for task in tasks}
+        if not task_by_id:
+            return {
+                "dependency_depth_by_task_id": {},
+                "unlocking_task_ids": set(),
+                "blocked_task_ids": set(),
+                "adjusted_task_ids": set(),
+            }
+
+        task_ids = set(task_by_id)
+        dependency_edges = list(
+            db.scalars(
+                select(TaskDependency).where(
+                    TaskDependency.user_id == user_id,
+                    TaskDependency.dependent_task_id.in_(task_ids),
+                    TaskDependency.prerequisite_task_id.in_(task_ids),
+                )
+            ).all()
+        )
+        prerequisites_by_dependent: dict[uuid.UUID, list[uuid.UUID]] = {}
+        unlocking_task_ids: set[uuid.UUID] = set()
+        blocked_task_ids: set[uuid.UUID] = set()
+        for edge in dependency_edges:
+            prerequisites_by_dependent.setdefault(edge.dependent_task_id, []).append(edge.prerequisite_task_id)
+            unlocking_task_ids.add(edge.prerequisite_task_id)
+            blocked_task_ids.add(edge.dependent_task_id)
+
+        depth_by_task_id: dict[uuid.UUID, int] = {}
+        visiting: set[uuid.UUID] = set()
+
+        def dependency_depth(task_id: uuid.UUID) -> int:
+            if task_id in depth_by_task_id:
+                return depth_by_task_id[task_id]
+            if task_id in visiting:
+                return 0
+            visiting.add(task_id)
+            prerequisites = prerequisites_by_dependent.get(task_id, [])
+            depth = 0
+            if prerequisites:
+                depth = max(dependency_depth(prerequisite_id) + 1 for prerequisite_id in prerequisites)
+            visiting.remove(task_id)
+            depth_by_task_id[task_id] = depth
+            return depth
+
+        for task_id in task_ids:
+            dependency_depth(task_id)
+
+        adjusted_task_ids = set(
+            db.scalars(
+                select(ActivityEvent.related_task_id).where(
+                    ActivityEvent.user_id == user_id,
+                    ActivityEvent.event_type == "TASK_PRIORITY_ADJUSTED",
+                    ActivityEvent.related_task_id.in_(task_ids),
+                )
+            ).all()
+        )
+
+        return {
+            "dependency_depth_by_task_id": depth_by_task_id,
+            "unlocking_task_ids": unlocking_task_ids,
+            "blocked_task_ids": blocked_task_ids,
+            "adjusted_task_ids": adjusted_task_ids,
+        }
 
     def _completed_carryover_tasks(self, db: Session, *, plan: DailyPlan) -> list[PlannedTask]:
         carryovers: list[PlannedTask] = []
@@ -306,9 +392,17 @@ class PlanningService:
             )
         return carryovers
 
-    def _section_for(self, task: Task, *, plan_date: date) -> DailyPlanItemSection:
+    def _section_for(
+        self,
+        task: Task,
+        *,
+        plan_date: date,
+        unlocking_task_ids: set[uuid.UUID],
+    ) -> DailyPlanItemSection:
         if task.status == TaskStatus.POSTPONED:
             return DailyPlanItemSection.ROLLED_OVER
+        if task.id in unlocking_task_ids:
+            return DailyPlanItemSection.PINNED
         if task.deadline is not None and task.deadline <= plan_date:
             return DailyPlanItemSection.PINNED
         if task.value_level == ValueLevel.HIGH or task.priority <= 2:
@@ -317,13 +411,27 @@ class PlanningService:
             return DailyPlanItemSection.LOW_PRIORITY
         return DailyPlanItemSection.RECOMMENDED
 
-    def _reason_for(self, task: Task, *, plan_date: date) -> str:
+    def _reason_for(
+        self,
+        task: Task,
+        *,
+        plan_date: date,
+        unlocking_task_ids: set[uuid.UUID],
+        blocked_task_ids: set[uuid.UUID],
+        adjusted_task_ids: set[uuid.UUID],
+    ) -> str:
         if task.status == TaskStatus.POSTPONED:
             return "Postponed item kept visible without pushing it back into the main sequence."
         if task.deadline is not None and task.deadline < plan_date:
             return "Overdue task protected at the top of today's sequence."
         if task.deadline == plan_date:
             return "Due today, so it is protected in the priority section."
+        if task.id in unlocking_task_ids:
+            return "Prerequisite task placed early because it unlocks another planned task."
+        if task.id in blocked_task_ids:
+            return "Dependent task kept after its prerequisite in today's sequence."
+        if task.id in adjusted_task_ids:
+            return "Adjusted by you, so the planner keeps that preference visible."
         if task.value_level == ValueLevel.HIGH:
             return "High-value task protected from being crowded out by lighter work."
         if task.priority <= 2:
@@ -332,7 +440,7 @@ class PlanningService:
             return "Lower-priority task kept available after the main sequence."
         return "Balanced task placed in the recommended execution order."
 
-    def _planned_sort_key(self, planned: PlannedTask) -> tuple[int, date, int, int, datetime]:
+    def _planned_sort_key(self, planned: PlannedTask) -> tuple[int, int, int, int, int, date, int, int, datetime]:
         section_rank = {
             DailyPlanItemSection.PINNED: 0,
             DailyPlanItemSection.RECOMMENDED: 1,
@@ -342,6 +450,10 @@ class PlanningService:
         value_rank = {ValueLevel.HIGH: 0, ValueLevel.MEDIUM: 1, ValueLevel.LOW: 2}
         return (
             section_rank[planned.section],
+            planned.dependency_depth,
+            0 if planned.unlocks_task else 1,
+            1 if planned.blocked_by_dependency else 0,
+            0 if planned.priority_adjusted else 1,
             planned.task.deadline or date.max,
             planned.task.priority,
             value_rank[planned.task.value_level],
@@ -352,13 +464,21 @@ class PlanningService:
         active_tasks = [planned for planned in planned_tasks if planned.section != DailyPlanItemSection.ROLLED_OVER]
         pinned_count = len([planned for planned in active_tasks if planned.section == DailyPlanItemSection.PINNED])
         total_minutes = sum(planned.estimated_duration_min for planned in active_tasks)
+        dependency_protected_count = len([planned for planned in active_tasks if planned.unlocks_task])
+        user_adjusted_count = len([planned for planned in active_tasks if planned.priority_adjusted])
 
         if not active_tasks:
             return {
                 "summary": "No planned tasks yet. Capture one clear next action when you are ready.",
                 "mode": PlanningPreference.LIGHT,
                 "primary_reason": "No active tasks need sequencing today.",
-                "score_factors": {"task_count": 0, "pinned_count": 0, "total_minutes": 0},
+                "score_factors": {
+                    "task_count": 0,
+                    "pinned_count": 0,
+                    "total_minutes": 0,
+                    "dependency_protected_count": 0,
+                    "user_adjusted_count": 0,
+                },
             }
         if total_minutes >= 180 or pinned_count >= 3:
             mode = PlanningPreference.SPRINT
@@ -381,6 +501,8 @@ class PlanningService:
                 "task_count": len(active_tasks),
                 "pinned_count": pinned_count,
                 "total_minutes": total_minutes,
+                "dependency_protected_count": dependency_protected_count,
+                "user_adjusted_count": user_adjusted_count,
             },
         }
 
@@ -461,6 +583,8 @@ class PlanningService:
             ),
             "rolled_over_count": len([item for item in items if item.section == DailyPlanItemSection.ROLLED_OVER]),
             "total_estimated_minutes": int(score_factors.get("total_minutes", plan.total_estimated_minutes) or 0),
+            "dependency_protected_count": int(score_factors.get("dependency_protected_count", 0) or 0),
+            "user_adjusted_count": int(score_factors.get("user_adjusted_count", 0) or 0),
             "completed_count": plan.completed_count,
             "focus_minutes": plan.focus_minutes,
         }
@@ -471,6 +595,10 @@ class PlanningService:
             explanation.append(f"{factors['pinned_count']} 个任务被保护在前面，因为它们更重要或更紧急。")
         if factors["rolled_over_count"]:
             explanation.append(f"{factors['rolled_over_count']} 个延后任务保留可见，但不会挤占主执行序列。")
+        if factors["dependency_protected_count"]:
+            explanation.append(f"{factors['dependency_protected_count']} 个前置任务被提前，用来保护任务依赖顺序。")
+        if factors["user_adjusted_count"]:
+            explanation.append(f"{factors['user_adjusted_count']} 个任务读取了你的优先级修正，让 AI 判断保持可校正。")
         if strategy.mode == PlanningPreference.LIGHT:
             explanation.append("今天保持轻量，让第一个动作更容易开始。")
         elif strategy.mode == PlanningPreference.SPRINT:

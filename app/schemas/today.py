@@ -99,6 +99,8 @@ class StrategyDetailFactorsResponse(BaseModel):
     low_priority_count: int
     rolled_over_count: int
     total_estimated_minutes: int
+    dependency_protected_count: int
+    user_adjusted_count: int
     completed_count: int
     focus_minutes: int
 

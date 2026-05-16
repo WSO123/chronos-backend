@@ -51,10 +51,10 @@ ef6c32b feat: add P2 monthly report aggregate
 
 - 当前 P2 洞察、报告、Today Preview 均为规则聚合，不是真实 LLM。
 - Weekly / Monthly Report 不持久化，适合轻量趋势展示，不适合审计快照。
-- Dependency 已建模，但 Today planner 尚未使用依赖边排序。
+- Dependency 已建模，且后续 `2026-05-16-p2-planner-stabilization.md` 已将依赖边接入 Today 排序。
 - Energy / Social / Calendar / Email / Health / Notification 仍是后续阶段。
 
 ## 6. 下一步建议
 
-- 进入 P2 planner 稳定化：让 Today 排序逐步读取 dependency edge 和 `TASK_PRIORITY_ADJUSTED` 事件。
-- 或进入 P3 前置准备：认证、通知、外部数据接入前的权限和数据来源模型。
+- P2 planner 稳定化已在后续迭代推进。
+- 下一步建议进入 P3 前置准备：认证、通知、外部数据接入前的权限和数据来源模型。

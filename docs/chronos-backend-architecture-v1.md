@@ -370,6 +370,7 @@ Today 不是任务列表，而是每日执行入口。
 - 每次 AI 重排都生成新的 plan version 或 revision。
 - 用户手动调整计划也要记录。
 - Today 默认返回轻量摘要，不返回完整评分细节。
+- P2 起 Today planner 会读取任务依赖边和 `TASK_PRIORITY_ADJUSTED` 事件，但只把结果表现为更合理的顺序、简短推荐理由和 Strategy Detail 轻量解释。
 
 核心对象：
 
@@ -1130,6 +1131,8 @@ StrategyDetailResponse {
     low_priority_count
     rolled_over_count
     total_estimated_minutes
+    dependency_protected_count
+    user_adjusted_count
     completed_count
     focus_minutes
   }
@@ -1149,6 +1152,7 @@ StrategyDetailResponse {
 - Today 默认不展示复杂 score factors。
 - 如果用户进入 Strategy Detail，再调用单独接口获取解释。
 - Strategy Detail 只能解释当前 plan，不直接重新排序或改变 Task / Goal 状态；无 plan 时与 `GET /today` 一致 lazy create。
+- P2 调度信号包括任务价值、优先级、deadline、postpone 状态、任务依赖和用户优先级修正；其中依赖和修正只在 Strategy Detail 暴露轻量计数，不进入 Today 首屏驾驶舱。
 - Today 要像每日执行入口，不要像数据驾驶舱。
 
 ---
@@ -1426,12 +1430,12 @@ P1 不是以“接口都写完”为验收，而是以核心闭环跑通为验�
 - Task Priority Adjustment（已支持用户修正事件）
 - Goal Detail（已支持聚合详情）
 - Goal Progress / Timeline（Timeline 已支持轻量事件聚合）
-- Dependency（已支持任务依赖边和 Goal Detail 依赖图）
+- Dependency（已支持任务依赖边、Goal Detail 依赖图，并接入 Today 前置任务排序）
 - Weekly Report（已支持轻量聚合）
 - Monthly Report（已支持轻量聚合）
 - Insight Detail（已支持轻量规则聚合）
 - Me Insights Overview（已支持轻量 highlights）
-- Strategy Detail（已支持当前 Today 策略解释）
+- Strategy Detail（已支持当前 Today 策略解释，并暴露依赖保护 / 用户修正轻量因子）
 - 滚动策略解释
 - 高价值任务分析
 

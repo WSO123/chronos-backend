@@ -320,6 +320,7 @@ Frontend notes:
 - Today 首页优先渲染 `strategy.summary`、`pinned_tasks`、`recommended_tasks` 和进度。
 - `insights_preview` 是 P2 轻量预览，只展示风险提醒、剩余时间建议和最多几条调整建议。
 - `recommendation_reason` 是解释文案，可在轻提示 / 展开区展示，不要让它抢占任务列表。
+- P2 起 Today 后端排序会读取任务依赖和用户优先级修正信号；前端只消费服务端返回的分区和 `sort_order`，不自行重排。
 - `rolled_over_tasks` 默认可以弱化或折叠。
 - Strategy Detail 不在 Today 默认首屏展开，用户主动查看时再调用 `/today/strategy`。
 
@@ -358,6 +359,8 @@ Response key fields:
     "low_priority_count": 1,
     "rolled_over_count": 0,
     "total_estimated_minutes": 95,
+    "dependency_protected_count": 1,
+    "user_adjusted_count": 1,
     "completed_count": 0,
     "focus_minutes": 0
   },
@@ -368,7 +371,7 @@ Response key fields:
   "source": {
     "strategy_snapshot_id": "uuid",
     "model_name": "rule-planner",
-    "prompt_version": "p1-rule-v1",
+    "prompt_version": "p2-rule-v1",
     "generated_at": "2026-05-16T09:00:00Z"
   }
 }
@@ -378,6 +381,7 @@ Frontend notes:
 
 - 默认展示 `summary`、`primary_reason`、`explanation` 和少量 `factors`。
 - `task_rationales` 复用 Today item 字段，可用于解释为什么某个任务被放在当前位置。
+- `dependency_protected_count` 和 `user_adjusted_count` 只服务信任解释，不建议放入 Today 首屏。
 - 不要把完整 factors 做成复杂驾驶舱；它是信任解释，不是操作中心。
 
 ### POST `/today/replan`
@@ -616,6 +620,7 @@ Rules:
 - `priority` 和 `value_level` 至少提供一个。
 - `priority` 范围是 `1-5`，数字越小越优先。
 - 变更会写入 `TASK_PRIORITY_ADJUSTED` ActivityEvent。
+- 不自动触发 Today replan；用户主动 replan 或生成新计划时，Today planner 会读取该修正信号。
 
 Response key fields:
 

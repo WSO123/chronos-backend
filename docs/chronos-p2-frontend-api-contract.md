@@ -59,6 +59,7 @@ P2 新增字段：
 - 默认只展示 1 条风险或剩余时间提示。
 - 不在 Today 首屏展开完整解释。
 - 用户需要解释排序时进入 Strategy Detail。
+- Today 排序已读取任务依赖和用户优先级修正信号，但前端仍只按分区和 `sort_order` 渲染，不需要自己重排。
 
 ### GET `/api/v1/today/strategy`
 
@@ -72,6 +73,30 @@ P2 新增字段：
 - `explanation`
 - `task_rationales`
 - `source`
+
+`factors` 当前包含：
+
+```json
+{
+  "task_count": 3,
+  "high_value_task_count": 1,
+  "pinned_count": 1,
+  "recommended_count": 1,
+  "low_priority_count": 1,
+  "rolled_over_count": 0,
+  "total_estimated_minutes": 95,
+  "dependency_protected_count": 1,
+  "user_adjusted_count": 1,
+  "completed_count": 0,
+  "focus_minutes": 0
+}
+```
+
+说明：
+
+- `dependency_protected_count` 表示被提前保护的前置任务数量。
+- `user_adjusted_count` 表示当前计划读取到用户优先级修正事件的任务数量。
+- 这两个字段用于 Strategy Detail 的信任解释，不建议放到 Today 首屏。
 
 ## 4. Task Detail
 
@@ -92,7 +117,7 @@ P2 新增字段：
 - `priority` 和 `value_level` 至少传一个。
 - `priority` 范围为 `1-5`，数字越小越优先。
 - 写入 `TASK_PRIORITY_ADJUSTED`。
-- 不自动触发 Today replan。
+- 不自动触发 Today replan；下一次打开 Today 已有计划时不会静默改版，用户主动 replan 或新计划生成时会读取该信号。
 
 ### Task Dependencies
 

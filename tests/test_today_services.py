@@ -113,6 +113,66 @@ class TodayServiceTests(unittest.TestCase):
         self.assertTrue(strategy["explanation"])
         self.assertEqual(strategy["source"]["model_name"], "rule-planner")
 
+    def test_today_planner_orders_prerequisites_before_dependent_tasks(self):
+        prerequisite = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Draft source outline",
+            estimated_duration_min=30,
+            priority=4,
+            value_level=ValueLevel.LOW,
+        )
+        dependent = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Write final proposal",
+            estimated_duration_min=60,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+        )
+        task_service.add_task_dependency(
+            self.db,
+            task_id=dependent.id,
+            user_id=self.user.id,
+            prerequisite_task_id=prerequisite.id,
+            reason="Proposal needs the outline first",
+        )
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        ordered_titles = [item["title"] for item in today["sections"]["pinned_tasks"]]
+
+        self.assertEqual(ordered_titles[:2], ["Draft source outline", "Write final proposal"])
+        self.assertEqual(today["sections"]["pinned_tasks"][0]["task_id"], prerequisite.id)
+        self.assertIn("unlocks another planned task", today["sections"]["pinned_tasks"][0]["recommendation_reason"])
+        self.assertIn("after its prerequisite", today["sections"]["pinned_tasks"][1]["recommendation_reason"])
+        self.assertEqual(strategy["factors"]["dependency_protected_count"], 1)
+
+    def test_today_planner_uses_user_priority_adjustment_signal(self):
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Promote important follow-up",
+            estimated_duration_min=35,
+            priority=5,
+            value_level=ValueLevel.LOW,
+        )
+        task_service.adjust_task_priority(
+            self.db,
+            task_id=task.id,
+            user_id=self.user.id,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+            reason="This became important today",
+        )
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        self.assertEqual(today["sections"]["pinned_tasks"][0]["task_id"], task.id)
+        self.assertIn("Adjusted by you", today["sections"]["pinned_tasks"][0]["recommendation_reason"])
+        self.assertEqual(strategy["factors"]["user_adjusted_count"], 1)
+
     def test_replan_creates_new_revision_and_keeps_same_plan(self):
         task_service.create_task(self.db, user_id=self.user.id, title="First task")
         today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
