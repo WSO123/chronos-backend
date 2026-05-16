@@ -14,6 +14,7 @@
 - [Chronos Interaction Flow Design](./chronos-interaction-flow-design.md)：交互主路径、页面跳转和后端对象映射。
 - [Chronos LLM & Agent Architecture](./chronos-llm-agent-architecture.md)：LLM 接入、Agent 职责、AIJob 生命周期和 fallback 策略。
 - [Chronos Engineering Guidelines](./chronos-engineering-guidelines.md)：代码结构、分层调用、数据/API/AI/测试开发规范。
+- [Chronos P2 Frontend API Contract](./chronos-p2-frontend-api-contract.md)：P2 前端接口合同总览。
 - [Chronos PRD V3.5](./chronos-prd-v3.5.md)：长期愿景、能力池和路线图。
 - [Iteration Docs](./iterations/README.md)：需求迭代文档规范和模板。
 

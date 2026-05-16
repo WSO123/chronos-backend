@@ -10,6 +10,8 @@
 
 这份文档把当前后端能力按 Chronos 的前端页面和核心用户路径整理出来，供前端开发、联调和后续迭代对齐使用。
 
+P2 已完成能力的集中合同见：[Chronos P2 Frontend API Contract](./chronos-p2-frontend-api-contract.md)。
+
 Chronos P1 的主路径是：
 
 ```text
