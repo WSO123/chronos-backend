@@ -1,9 +1,10 @@
 from datetime import date
+from decimal import Decimal
 import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import GoalStatus, ValueLevel
+from app.models.enums import GoalStatus, TaskStatus, ValueLevel
 from app.schemas.common import TimestampedResponse
 
 
@@ -33,3 +34,77 @@ class GoalResponse(TimestampedResponse):
     deadline: date | None
     value_level: ValueLevel
     status: GoalStatus
+
+
+class GoalTaskSummaryResponse(BaseModel):
+    id: uuid.UUID
+    title: str
+    deadline: date | None
+    estimated_duration_min: int | None
+    actual_duration_min: int
+    priority: int
+    value_level: ValueLevel
+    progress: Decimal
+    status: TaskStatus
+    step_count: int
+    completed_step_count: int
+
+
+class GoalProgressResponse(BaseModel):
+    total_task_count: int
+    unfinished_task_count: int
+    completed_task_count: int
+    postponed_task_count: int
+    completion_rate: float
+    total_estimated_duration_min: int
+    total_actual_duration_min: int
+    risk_level: str
+    risk_reason: str
+
+
+class GoalTaskListResponse(BaseModel):
+    unfinished_tasks: list[GoalTaskSummaryResponse] = Field(default_factory=list)
+    completed_tasks: list[GoalTaskSummaryResponse] = Field(default_factory=list)
+    recommended_next_task: GoalTaskSummaryResponse | None
+
+
+class GoalDependencyNodeResponse(BaseModel):
+    task_id: uuid.UUID
+    title: str
+    status: TaskStatus
+    sort_order: int
+
+
+class GoalDependencyEdgeResponse(BaseModel):
+    from_task_id: uuid.UUID
+    to_task_id: uuid.UUID
+    reason: str | None = None
+
+
+class GoalDependencyMapResponse(BaseModel):
+    nodes: list[GoalDependencyNodeResponse] = Field(default_factory=list)
+    edges: list[GoalDependencyEdgeResponse] = Field(default_factory=list)
+    note: str
+
+
+class GoalAISuggestionResponse(BaseModel):
+    source: str
+    summary: str
+    next_action_task_id: uuid.UUID | None
+    risk_warning: str | None
+    suggestions: list[str] = Field(default_factory=list)
+
+
+class GoalActionsResponse(BaseModel):
+    can_add_task: bool
+    can_edit_goal: bool
+    can_mark_complete: bool
+
+
+class GoalDetailResponse(BaseModel):
+    overview: GoalResponse
+    progress: GoalProgressResponse
+    task_list: GoalTaskListResponse
+    dependency_map: GoalDependencyMapResponse
+    ai_suggestion: GoalAISuggestionResponse
+    actions: GoalActionsResponse

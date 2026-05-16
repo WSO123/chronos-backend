@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_id
 from app.core.db import get_db
-from app.schemas.goals import GoalCreate, GoalResponse, GoalUpdate
+from app.schemas.goals import GoalCreate, GoalDetailResponse, GoalResponse, GoalUpdate
 from app.services.goal_service import goal_service
 
 router = APIRouter(prefix="/goals", tags=["goals"])
@@ -44,6 +44,15 @@ def get_goal(
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
     return goal_service.get_goal(db, goal_id=goal_id, user_id=user_id)
+
+
+@router.get("/{goal_id}/detail", response_model=GoalDetailResponse)
+def get_goal_detail(
+    goal_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return goal_service.get_goal_detail(db, goal_id=goal_id, user_id=user_id)
 
 
 @router.patch("/{goal_id}", response_model=GoalResponse)

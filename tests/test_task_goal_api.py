@@ -109,6 +109,50 @@ class TaskGoalAPITests(unittest.TestCase):
         self.assertTrue(body["actions"]["can_start_focus"])
         self.assertFalse(body["focus_state"]["is_currently_focusing_this_task"])
 
+    def test_get_goal_detail_returns_goal_progress_and_next_task(self):
+        goal_response = self.client.post(
+            "/api/v1/goals",
+            json={"title": "Goal Detail API", "value_level": "high"},
+            headers=self.headers,
+        )
+        goal_id = goal_response.json()["id"]
+        next_task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Do the important part", "goal_id": goal_id, "priority": 1, "value_level": "high"},
+            headers=self.headers,
+        )
+        completed_task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Already done part", "goal_id": goal_id},
+            headers=self.headers,
+        )
+        self.client.post(f"/api/v1/tasks/{completed_task_response.json()['id']}/complete", headers=self.headers)
+
+        response = self.client.get(f"/api/v1/goals/{goal_id}/detail", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["overview"]["id"], goal_id)
+        self.assertEqual(body["progress"]["total_task_count"], 2)
+        self.assertEqual(body["progress"]["completed_task_count"], 1)
+        self.assertEqual(body["task_list"]["recommended_next_task"]["id"], next_task_response.json()["id"])
+        self.assertEqual(body["ai_suggestion"]["next_action_task_id"], next_task_response.json()["id"])
+        self.assertEqual(body["dependency_map"]["edges"], [])
+        self.assertFalse(body["actions"]["can_mark_complete"])
+
+    def test_goal_detail_user_isolation(self):
+        goal_response = self.client.post(
+            "/api/v1/goals",
+            json={"title": "Private Goal Detail"},
+            headers=self.headers,
+        )
+        goal_id = goal_response.json()["id"]
+
+        response = self.client.get(f"/api/v1/goals/{goal_id}/detail", headers=self.other_headers)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "NOT_FOUND")
+
     def test_breakdown_task_returns_ai_job_and_created_steps(self):
         task_response = self.client.post(
             "/api/v1/tasks",

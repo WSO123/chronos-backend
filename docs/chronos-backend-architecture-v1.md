@@ -945,14 +945,16 @@ GET   /api/v1/tasks/{task_id}/events
 POST  /api/v1/goals
 GET   /api/v1/goals
 GET   /api/v1/goals/{goal_id}
+GET   /api/v1/goals/{goal_id}/detail
 PATCH /api/v1/goals/{goal_id}
 ```
 
 说明：
 
 - P1 只做轻量目标，服务创建、选择器和任务归属。
-- `GET /goals/{goal_id}` 在 P1 只返回基础信息和轻量任务摘要，不实现完整 Goal Detail 页面聚合。
-- P2 再补 Goal Detail、Dependency Map 和目标洞察。
+- `GET /goals/{goal_id}` 保持基础信息接口，服务轻量详情和 selector。
+- `GET /goals/{goal_id}/detail` 服务 P2 Goal Detail 聚合，返回 overview、progress、task list、规则建议和 dependency nodes。
+- 当前 Dependency Map 只返回节点顺序和空 edges，不伪造真实依赖边；深度目标洞察仍留到后续 P2 迭代。
 
 ### Focus
 

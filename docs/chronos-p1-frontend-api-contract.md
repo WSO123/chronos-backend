@@ -96,7 +96,7 @@ uv run python scripts/dev_seed_demo.py
 | Focus | `POST /focus-sessions`, complete / interrupt / postpone | Ready |
 | Daily Report | `GET /reports/daily`, `POST /reports/daily/generate` | Ready |
 | Me Overview | `GET /me/overview` | Ready |
-| Goals | `GET /goals`, `POST /goals`, `GET /goals/{id}` | Backend Ready, P2 UI |
+| Goals | `GET /goals`, `POST /goals`, `GET /goals/{id}`, `GET /goals/{id}/detail` | Backend Ready, P2 UI |
 | AIJob Status | `GET /ai-jobs/{id}` | Backend Ready, mostly debug / future UI |
 
 ---
@@ -612,6 +612,7 @@ Goals 是 P2 一级 Tab，但 P1 后端已经提供轻量 Goal API，主要用�
 | `POST` | `/goals` | 创建目标 |
 | `GET` | `/goals` | 目标列表 |
 | `GET` | `/goals/{goal_id}` | 目标详情基础信息 |
+| `GET` | `/goals/{goal_id}/detail` | Goal Detail 聚合 |
 | `PATCH` | `/goals/{goal_id}` | 编辑目标基础字段 |
 
 Goal fields:
@@ -627,12 +628,19 @@ Goal fields:
 }
 ```
 
-P2 尚未实现：
+P2 Goal Detail 已提供：
 
-- Goal Detail 聚合。
+- Goal Overview。
+- Goal Progress。
+- Goal Task List。
+- 规则版 AI Suggestion。
+- Dependency Map 节点顺序。
+
+尚未实现：
+
 - Goal progress timeline。
-- Dependency map。
-- AI suggestion for goal.
+- 真实任务依赖边。
+- 深度 Goal 洞察。
 
 ---
 
