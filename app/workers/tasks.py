@@ -21,7 +21,7 @@ def sync_data_source_connection(
         result = data_source_sync_service.sync_connection(
             db,
             connection_id=uuid.UUID(connection_id),
-            items=items or [],
+            items=items,
             sync_cursor=sync_cursor,
         )
         return _json_ready(result)

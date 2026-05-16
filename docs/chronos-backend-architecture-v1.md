@@ -478,12 +478,13 @@ Data Source 是 P3 自然生长模块的权限和连接状态底座，服务日�
 - 记录连接状态、授权范围、同步开关、最近同步时间和非敏感元数据。
 - 为后续 Calendar / Email / Health worker 提供统一入口。
 - 为 Calendar / Email connector worker 提供占位同步服务。
+- 为 Calendar / Email provider adapter 提供稳定接口；当前实现为 fake provider。
 - 让 Me / Settings 能展示数据接入状态。
 
 边界：
 
 - 不保存真实 OAuth token。
-- 当前不直接拉取外部数据；worker 占位任务只消费已规范化的外部 item。
+- 当前不直接拉取真实外部数据；fake provider 只从连接 metadata 读取测试 item。
 - 不把外部来源任务直接写入 Task；Calendar / Email 条目必须先通过 ExternalCaptureImport 进入 Capture / Inbox。
 
 核心对象：
@@ -508,7 +509,8 @@ P1 Agent：
 
 P3 Worker：
 
-- Data Source Sync：读取 Calendar / Email 连接状态，消费规范化外部 item，并通过 ExternalCaptureImport 进入 Capture / Inbox。
+- Data Source Sync：读取 Calendar / Email 连接状态，通过 provider adapter 获取规范化 item，并通过 ExternalCaptureImport 进入 Capture / Inbox。
+- Fake Provider Adapter：从 `DataSourceConnection.connection_metadata.fake_items` 读取规范化测试条目，为真实 provider adapter 固定接口。
 
 关键要求：
 
@@ -1150,6 +1152,7 @@ POST  /api/v1/data-sources/{connection_id}/disconnect
 - 当前不接真实 OAuth，不保存 token，只保存 provider、scopes、sync 状态和非敏感元数据。
 - 连接 / 更新 / 断开会写入 ActivityEvent，便于后续审计和用户行为学习。
 - Calendar / Email worker 占位同步通过 `data_source.sync_connection` / `data_source.sync_ready_connections` 运行，只处理 `connected + sync_enabled` 的连接，并将外部 item 导入 Capture / Inbox。
+- `items=null` 时 worker 会通过 provider adapter 拉取 item；当前 fake adapter 从 connection metadata 读取 `fake_items` / `fake_next_cursor`。
 - Worker 写入 `DATA_SOURCE_SYNCED` / `DATA_SOURCE_SYNC_SKIPPED`，事件 `source=worker`、`actor_type=system`。
 
 ### Insights
@@ -1632,6 +1635,7 @@ AI output -> schema validation -> service decision -> DB write
 - `app/core/db.py`：数据库连接
 - `app/core/celery.py`：Celery 配置
 - `app/models/*`：核心业务模型与 P1-P3 支撑模型
+- `app/providers/*`：外部 provider adapter 协议与 fake provider
 - `app/schemas/*`：API request / response schema
 - `app/services/*`：业务 service、聚合 service、P3 data source sync service
 - `app/services/storage.py`：MinIO / S3 存储服务

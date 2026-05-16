@@ -29,6 +29,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Task Detail Source Context | `GET /api/v1/tasks/{task_id}` | Ready |
 | Calendar Sync Worker Placeholder | `data_source.sync_connection` | Ready |
 | Email Sync Worker Placeholder | `data_source.sync_connection` | Ready |
+| Calendar / Email Fake Provider Adapter | internal provider registry | Ready |
 | Health / Energy Data Import | - | Not Started |
 | Notification Center | - | Not Started |
 
@@ -240,16 +241,22 @@ Frontend notes:
 
 ## 6. Connector Worker Placeholder
 
-当前已具备 Calendar / Email 的内部 worker 占位同步能力，但仍不接真实第三方 API。
+当前已具备 Calendar / Email 的内部 worker 占位同步能力和 fake provider adapter，但仍不接真实第三方 API。
 
 Celery tasks:
 
 ```text
-data_source.sync_connection(connection_id, items=[], sync_cursor=null)
+data_source.sync_connection(connection_id, items=null, sync_cursor=null)
 data_source.sync_ready_connections(limit=50)
 ```
 
-`data_source.sync_connection` 的输入 items 使用 External Capture Import 的标准 item 形状：
+`data_source.sync_connection` 的输入规则：
+
+- `items=null`：通过 provider adapter 拉取条目；当前使用 fake provider adapter。
+- `items=[]`：显式传入空同步结果，不拉取 provider。
+- `items=[...]`：使用调用方传入的规范化 item。
+
+规范化 item 使用 External Capture Import 的标准 item 形状：
 
 ```json
 {
@@ -268,16 +275,36 @@ Worker rules:
 
 - 只处理 `calendar` / `email` 连接。
 - 只有 `status=connected` 且 `sync_enabled=true` 的连接会同步。
+- 当前 fake provider adapter 从 `DataSourceConnection.connection_metadata.fake_items` 读取测试条目。
+- fake provider 可读取 `connection_metadata.fake_next_cursor` 作为下一次 cursor。
 - 同步成功后更新 `last_sync_at`，传入 `sync_cursor` 时更新连接 cursor。
+- 如果通过 provider adapter 获取到 `next_cursor` 且调用方未显式传入 `sync_cursor`，后端会使用 provider 返回的 cursor。
 - 每个外部 item 仍通过 `ExternalCaptureImport -> Capture -> Inbox`，不会直接生成 Task。
 - 重复 item 依赖 `user_id + source + provider + external_item_id` 幂等复用。
 - Worker 写入 `DATA_SOURCE_SYNCED` / `DATA_SOURCE_SYNC_SKIPPED`，事件来源为 `worker`，执行者为 `system`。
+
+Fake provider metadata example:
+
+```json
+{
+  "connection_metadata": {
+    "fake_items": [
+      {
+        "external_item_id": "fake-calendar-1",
+        "title": "完成项目复盘",
+        "body": "整理会议结论"
+      }
+    ],
+    "fake_next_cursor": "fake-cursor-2"
+  }
+}
+```
 
 Frontend notes:
 
 - 这不是前端直接调用的接口。
 - Me / Settings 仍只依赖 Data Source 状态接口展示连接和最近同步时间。
-- 当前 worker 的价值是打通后端承接层；真实 OAuth、provider 拉取、定时调度仍在后续迭代。
+- 当前 worker 和 fake provider 的价值是打通后端承接层；真实 OAuth、真实 provider 拉取、定时调度仍在后续迭代。
 
 ## 7. 当前安全边界
 
@@ -288,7 +315,7 @@ Frontend notes:
 
 ## 8. 后续 P3
 
-- Calendar / Email provider adapter。
+- 真实 Calendar / Email provider adapter。
 - 定时调度与失败重试策略。
 - Health data import。
 - Energy Dashboard。

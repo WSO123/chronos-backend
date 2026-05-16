@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models.data_source import DataSourceConnection
 from app.models.enums import ActorType, DataSourceStatus, DataSourceType, EntityType, EventSource
 from app.models.mixins import utc_now
+from app.providers.data_sources import data_source_provider_registry
 from app.services.activity_event_service import activity_event_service
 from app.services.errors import NotFoundError
 from app.services.external_capture_import_service import external_capture_import_service
@@ -26,11 +27,21 @@ class DataSourceSyncService:
         user_id: uuid.UUID | None = None,
         items: list[dict[str, Any]] | None = None,
         sync_cursor: str | None = None,
+        fetch_limit: int = 50,
     ) -> dict:
         connection = self._get_connection(db, connection_id=connection_id, user_id=user_id)
         skip_reason = self._skip_reason(connection)
         if skip_reason is not None:
             return self._skip(db, connection=connection, reason=skip_reason)
+
+        fetched_from_provider = items is None
+        provider_mode: str | None = None
+        if fetched_from_provider:
+            fetch_result = self._fetch_provider_items(connection, limit=fetch_limit)
+            items = fetch_result["items"]
+            provider_mode = fetch_result["provider_mode"]
+            if sync_cursor is None:
+                sync_cursor = fetch_result["next_cursor"]
 
         imported_count = 0
         reused_count = 0
@@ -73,6 +84,8 @@ class DataSourceSyncService:
                 "reused_count": reused_count,
                 "sync_cursor": connection.sync_cursor,
                 "import_record_ids": import_record_ids,
+                "fetched_from_provider": fetched_from_provider,
+                "provider_mode": provider_mode,
             },
         )
         db.commit()
@@ -84,6 +97,8 @@ class DataSourceSyncService:
             imported_count=imported_count,
             reused_count=reused_count,
             import_record_ids=import_record_ids,
+            fetched_from_provider=fetched_from_provider,
+            provider_mode=provider_mode,
         )
 
     def sync_ready_connections(self, db: Session, *, limit: int = 50) -> dict:
@@ -99,7 +114,7 @@ class DataSourceSyncService:
         )
         connections = list(db.scalars(stmt).all())
         results = [
-            self.sync_connection(db, connection_id=connection.id, items=[])
+            self.sync_connection(db, connection_id=connection.id)
             for connection in connections
         ]
         return {
@@ -159,6 +174,8 @@ class DataSourceSyncService:
         imported_count: int = 0,
         reused_count: int = 0,
         import_record_ids: list[str] | None = None,
+        fetched_from_provider: bool = False,
+        provider_mode: str | None = None,
     ) -> dict:
         return {
             "status": status,
@@ -173,6 +190,19 @@ class DataSourceSyncService:
             "import_record_ids": import_record_ids or [],
             "sync_cursor": connection.sync_cursor,
             "last_sync_at": connection.last_sync_at,
+            "fetched_from_provider": fetched_from_provider,
+            "provider_mode": provider_mode,
+        }
+
+    def _fetch_provider_items(self, connection: DataSourceConnection, *, limit: int) -> dict:
+        adapter = data_source_provider_registry.adapter_for(connection)
+        if adapter is None:
+            return {"items": [], "next_cursor": connection.sync_cursor, "provider_mode": None}
+        fetch_result = adapter.fetch_items(connection, limit=limit)
+        return {
+            "items": fetch_result.items,
+            "next_cursor": fetch_result.next_cursor,
+            "provider_mode": fetch_result.provider_mode,
         }
 
     def _default_external_item_type(self, connection: DataSourceConnection) -> str:
