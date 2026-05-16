@@ -50,6 +50,18 @@ uv sync
 
 ### 3. 启动服务
 
+执行数据库迁移：
+
+```bash
+uv run alembic upgrade head
+```
+
+创建本地开发用户，并复制输出的 `X-User-Id` 到后续 API 请求头：
+
+```bash
+uv run python scripts/dev_seed_user.py
+```
+
 **启动 API 后端 (热重载模式):**
 
 ```bash
