@@ -1,9 +1,11 @@
 import unittest
+import uuid
 
 from fastapi.testclient import TestClient
 
 from app.core.db import get_db
 from main import app
+from app.services.data_source_sync_service import data_source_sync_service
 from tests.db import TestingSessionLocal, override_get_db, reset_database
 from tests.factories import create_user
 
@@ -91,6 +93,46 @@ class DataSourceAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["error"]["code"], "NOT_FOUND")
+
+    def test_list_data_source_sync_runs_returns_recent_runs(self):
+        connect_response = self.client.put(
+            "/api/v1/data-sources/email/gmail",
+            json={
+                "connection_metadata": {
+                    "fake_items": [
+                        {
+                            "external_item_id": "api-sync-run-email-1",
+                            "title": "同步运行记录验证",
+                        }
+                    ],
+                    "fake_next_cursor": "api-sync-cursor-2",
+                }
+            },
+            headers=self.headers,
+        )
+        connection_id = connect_response.json()["id"]
+        data_source_sync_service.sync_connection(self.db, connection_id=uuid.UUID(connection_id))
+
+        response = self.client.get(
+            f"/api/v1/data-sources/{connection_id}/sync-runs",
+            headers=self.headers,
+        )
+        other_response = self.client.get(
+            f"/api/v1/data-sources/{connection_id}/sync-runs",
+            headers=self.other_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(len(body), 1)
+        self.assertEqual(body[0]["status"], "succeeded")
+        self.assertEqual(body[0]["provider"], "gmail")
+        self.assertEqual(body[0]["imported_count"], 1)
+        self.assertEqual(body[0]["provider_mode"], "fake")
+        self.assertEqual(body[0]["sync_cursor_after"], "api-sync-cursor-2")
+        self.assertFalse(body[0]["retryable"])
+        self.assertEqual(other_response.status_code, 404)
+        self.assertEqual(other_response.json()["error"]["code"], "NOT_FOUND")
 
 
 if __name__ == "__main__":

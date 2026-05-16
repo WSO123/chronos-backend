@@ -5,9 +5,12 @@ from app.models.activity_event import ActivityEvent
 from app.models.enums import ActorType, DataSourceStatus, DataSourceType, EventSource
 from app.models.external_import import ExternalCaptureImport
 from app.models.inbox import InboxItem
+from app.models.data_source_sync_run import DataSourceSyncRun
 from app.providers.data_sources import data_source_provider_registry
 from app.services.data_source_service import data_source_service
 from app.services.data_source_sync_service import data_source_sync_service
+from app.services.errors import ValidationDomainError
+from app.services.external_capture_import_service import external_capture_import_service
 from app.workers.tasks import sync_data_source_connection, sync_ready_data_source_connections
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
@@ -53,6 +56,7 @@ class DataSourceSyncServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "synced")
+        self.assertIsNotNone(result["sync_run_id"])
         self.assertEqual(result["processed_count"], 1)
         self.assertEqual(result["imported_count"], 1)
         self.assertEqual(result["reused_count"], 0)
@@ -62,8 +66,16 @@ class DataSourceSyncServiceTests(unittest.TestCase):
         self.assertEqual(self.db.query(InboxItem).count(), 1)
         self.assertEqual(sync_event.actor_type, ActorType.SYSTEM)
         self.assertEqual(sync_event.source, EventSource.WORKER)
+        self.assertEqual(sync_event.payload["sync_run_id"], str(result["sync_run_id"]))
         self.assertEqual(sync_event.payload["processed_count"], 1)
         self.assertFalse(sync_event.payload["fetched_from_provider"])
+        sync_run = self.db.get(DataSourceSyncRun, result["sync_run_id"])
+        self.assertEqual(sync_run.status, "succeeded")
+        self.assertEqual(sync_run.processed_count, 1)
+        self.assertEqual(sync_run.imported_count, 1)
+        self.assertEqual(sync_run.sync_cursor_before, None)
+        self.assertEqual(sync_run.sync_cursor_after, "cursor-1")
+        self.assertFalse(sync_run.retryable)
 
     def test_sync_connection_fetches_items_from_fake_provider_metadata(self):
         connection = data_source_service.connect_source(
@@ -172,6 +184,7 @@ class DataSourceSyncServiceTests(unittest.TestCase):
         health_result = data_source_sync_service.sync_connection(self.db, connection_id=health.id)
 
         self.assertEqual(paused_result["status"], "skipped")
+        self.assertIsNotNone(paused_result["sync_run_id"])
         self.assertEqual(paused_result["skip_reason"], "status_not_connected")
         self.assertEqual(health_result["status"], "skipped")
         self.assertEqual(health_result["skip_reason"], "unsupported_source")
@@ -182,6 +195,40 @@ class DataSourceSyncServiceTests(unittest.TestCase):
             .count(),
             2,
         )
+        skipped_run = self.db.get(DataSourceSyncRun, paused_result["sync_run_id"])
+        self.assertEqual(skipped_run.status, "skipped")
+        self.assertEqual(skipped_run.skip_reason, "status_not_connected")
+
+    def test_sync_connection_records_failed_run_and_retry_state(self):
+        connection = data_source_service.connect_source(
+            self.db,
+            user_id=self.user.id,
+            source_type=DataSourceType.EMAIL,
+            provider="gmail",
+        )
+
+        with self.assertRaises(ValidationDomainError):
+            data_source_sync_service.sync_connection(
+                self.db,
+                connection_id=connection.id,
+                items=[{"external_item_id": "bad-email-1", "title": "   "}],
+                attempt=1,
+                max_attempts=2,
+            )
+        failed_run = self.db.query(DataSourceSyncRun).one()
+        failed_event = (
+            self.db.query(ActivityEvent)
+            .filter(ActivityEvent.event_type == "DATA_SOURCE_SYNC_FAILED")
+            .one()
+        )
+
+        self.assertEqual(failed_run.status, "failed")
+        self.assertTrue(failed_run.retryable)
+        self.assertIsNotNone(failed_run.next_retry_at)
+        self.assertIn("External item title cannot be empty", failed_run.error_message)
+        self.assertEqual(failed_event.source, EventSource.WORKER)
+        self.assertEqual(failed_event.payload["sync_run_id"], str(failed_run.id))
+        self.assertTrue(failed_event.payload["retryable"])
 
     def test_worker_sync_connection_uses_session_and_returns_json_ready_result(self):
         connection = data_source_service.connect_source(
@@ -256,6 +303,64 @@ class DataSourceSyncServiceTests(unittest.TestCase):
         self.assertIsNotNone(calendar.last_sync_at)
         self.assertIsNotNone(email.last_sync_at)
         self.assertEqual(self.db.query(ExternalCaptureImport).count(), 2)
+
+    def test_worker_sync_ready_connections_continues_after_one_failure(self):
+        data_source_service.connect_source(
+            self.db,
+            user_id=self.user.id,
+            source_type=DataSourceType.CALENDAR,
+            provider="google_calendar",
+            connection_metadata={
+                "fake_items": [
+                    {
+                        "external_item_id": "ready-failing-calendar-1",
+                        "title": "Ready failing item",
+                    }
+                ]
+            },
+        )
+        data_source_service.connect_source(
+            self.db,
+            user_id=self.user.id,
+            source_type=DataSourceType.EMAIL,
+            provider="gmail",
+            connection_metadata={
+                "fake_items": [
+                    {
+                        "external_item_id": "ready-success-email-1",
+                        "title": "Ready success item",
+                    }
+                ]
+            },
+        )
+        real_import_item = external_capture_import_service.import_item
+
+        def import_or_fail(db, **kwargs):
+            if kwargs["title"] == "Ready failing item":
+                raise ValidationDomainError("simulated import failure")
+            return real_import_item(db, **kwargs)
+
+        with (
+            patch("app.workers.tasks.SessionLocal", TestingSessionLocal),
+            patch(
+                "app.services.data_source_sync_service.external_capture_import_service.import_item",
+                side_effect=import_or_fail,
+            ),
+        ):
+            result = sync_ready_data_source_connections.run(limit=10)
+
+        statuses = sorted(run.status for run in self.db.query(DataSourceSyncRun).all())
+        self.assertEqual(result["status"], "partial_failed")
+        self.assertEqual(result["processed_connection_count"], 2)
+        self.assertEqual(result["failed_connection_count"], 1)
+        self.assertEqual(statuses, ["failed", "succeeded"])
+        self.assertEqual(self.db.query(ExternalCaptureImport).count(), 1)
+        self.assertEqual(
+            self.db.query(ActivityEvent)
+            .filter(ActivityEvent.event_type == "DATA_SOURCE_SYNC_FAILED")
+            .count(),
+            1,
+        )
 
     def test_fake_provider_registry_returns_adapters_for_calendar_and_email(self):
         calendar = data_source_service.connect_source(

@@ -11,8 +11,10 @@ from app.schemas.data_sources import (
     DataSourceConnectionResponse,
     DataSourceConnectionUpdate,
     DataSourceListResponse,
+    DataSourceSyncRunResponse,
 )
 from app.services.data_source_service import data_source_service
+from app.services.data_source_sync_service import data_source_sync_service
 
 router = APIRouter(prefix="/data-sources", tags=["data-sources"])
 
@@ -61,6 +63,23 @@ def update_data_source_connection(
         connection_id=connection_id,
         user_id=user_id,
         updates=payload.model_dump(exclude_unset=True),
+    )
+
+
+@router.get("/{connection_id}/sync-runs", response_model=list[DataSourceSyncRunResponse])
+def list_data_source_sync_runs(
+    connection_id: uuid.UUID,
+    limit: int = 20,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return data_source_sync_service.list_sync_runs(
+        db,
+        connection_id=connection_id,
+        user_id=user_id,
+        limit=limit,
+        offset=offset,
     )
 
 

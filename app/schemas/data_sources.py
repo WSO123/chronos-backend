@@ -66,3 +66,29 @@ class DataSourceCatalogEntryResponse(BaseModel):
 class DataSourceListResponse(BaseModel):
     sources: list[DataSourceCatalogEntryResponse]
     connected_count: int
+
+
+class DataSourceSyncRunResponse(TimestampedResponse):
+    user_id: uuid.UUID
+    data_source_connection_id: uuid.UUID | None
+    source_type: DataSourceType
+    provider: str
+    status: str
+    trigger: str
+    attempt: int
+    max_attempts: int
+    retryable: bool
+    next_retry_at: datetime | None
+    skip_reason: str | None
+    error_message: str | None
+    processed_count: int
+    imported_count: int
+    reused_count: int
+    fetched_from_provider: bool
+    provider_mode: str | None
+    sync_cursor_before: str | None
+    sync_cursor_after: str | None
+    started_at: datetime
+    finished_at: datetime | None
+    duration_ms: int | None
+    run_metadata: dict

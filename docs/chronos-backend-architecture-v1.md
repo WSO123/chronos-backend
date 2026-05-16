@@ -612,6 +612,46 @@ ExternalCaptureImport {
 - 用户确认 Inbox 生成 Task 后，Task Detail 可通过该映射返回轻量 `source_context`。
 - Health 数据不走该模型；后续应进入 Energy / Health 专用数据模型。
 
+### DataSourceSyncRun
+
+```text
+DataSourceSyncRun {
+  id
+  user_id
+  data_source_connection_id
+  source_type
+  provider
+  status                  // running | succeeded | skipped | failed
+  trigger                 // worker | ready_batch | manual
+  attempt
+  max_attempts
+  retryable
+  next_retry_at
+  skip_reason
+  error_message
+  processed_count
+  imported_count
+  reused_count
+  fetched_from_provider
+  provider_mode
+  sync_cursor_before
+  sync_cursor_after
+  started_at
+  finished_at
+  duration_ms
+  metadata
+  created_at
+  updated_at
+}
+```
+
+说明：
+
+- 记录每次 Data Source 同步尝试的结构化结果。
+- ActivityEvent 继续负责行为时间线；DataSourceSyncRun 负责 worker 观测和 retry 判断。
+- 失败时记录 `retryable` 和 `next_retry_at`，但当前不自动重试。
+- 不保存外部 token 或完整第三方响应。
+
 ### CaptureInput
 
 ```text
@@ -1143,6 +1183,7 @@ PATCH /api/v1/me/settings
 GET   /api/v1/data-sources
 PUT   /api/v1/data-sources/{source_type}/{provider}
 PATCH /api/v1/data-sources/{connection_id}
+GET   /api/v1/data-sources/{connection_id}/sync-runs
 POST  /api/v1/data-sources/{connection_id}/disconnect
 ```
 
@@ -1153,7 +1194,9 @@ POST  /api/v1/data-sources/{connection_id}/disconnect
 - 连接 / 更新 / 断开会写入 ActivityEvent，便于后续审计和用户行为学习。
 - Calendar / Email worker 占位同步通过 `data_source.sync_connection` / `data_source.sync_ready_connections` 运行，只处理 `connected + sync_enabled` 的连接，并将外部 item 导入 Capture / Inbox。
 - `items=null` 时 worker 会通过 provider adapter 拉取 item；当前 fake adapter 从 connection metadata 读取 `fake_items` / `fake_next_cursor`。
-- Worker 写入 `DATA_SOURCE_SYNCED` / `DATA_SOURCE_SYNC_SKIPPED`，事件 `source=worker`、`actor_type=system`。
+- Worker 写入 `DataSourceSyncRun`，并同步记录 `DATA_SOURCE_SYNCED` / `DATA_SOURCE_SYNC_SKIPPED` / `DATA_SOURCE_SYNC_FAILED`。
+- 批量 worker 中单个连接失败不会中断整批同步；失败连接返回 `failed` 结果并通过 `failed_connection_count` 汇总。
+- `GET /data-sources/{id}/sync-runs` 只读返回最近同步记录，服务 Settings / 调试观测，不触发同步。
 
 ### Insights
 

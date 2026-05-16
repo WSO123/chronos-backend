@@ -24,6 +24,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Data Source Catalog | `GET /api/v1/data-sources` | Ready |
 | Connect Data Source Placeholder | `PUT /api/v1/data-sources/{source_type}/{provider}` | Ready |
 | Update Data Source Status | `PATCH /api/v1/data-sources/{connection_id}` | Ready |
+| Data Source Sync Runs | `GET /api/v1/data-sources/{connection_id}/sync-runs` | Ready |
 | Disconnect Data Source | `POST /api/v1/data-sources/{connection_id}/disconnect` | Ready |
 | External Capture Import | `POST /api/v1/captures/external-imports` | Ready |
 | Task Detail Source Context | `GET /api/v1/tasks/{task_id}` | Ready |
@@ -115,6 +116,51 @@ Rules:
 - 至少传一个字段。
 - 可用于 worker 写入 `last_sync_at` 和 `sync_cursor`。
 - 更新会写入 `DATA_SOURCE_UPDATED`。
+
+### GET `/api/v1/data-sources/{connection_id}/sync-runs`
+
+用于 Me / Settings 或开发调试查看最近同步记录，不会触发同步。
+
+Response key fields:
+
+```json
+[
+  {
+    "id": "uuid",
+    "data_source_connection_id": "uuid",
+    "source_type": "email",
+    "provider": "gmail",
+    "status": "succeeded",
+    "trigger": "worker",
+    "attempt": 1,
+    "max_attempts": 3,
+    "retryable": false,
+    "next_retry_at": null,
+    "skip_reason": null,
+    "error_message": null,
+    "processed_count": 1,
+    "imported_count": 1,
+    "reused_count": 0,
+    "fetched_from_provider": true,
+    "provider_mode": "fake",
+    "sync_cursor_before": null,
+    "sync_cursor_after": "fake-cursor-2",
+    "started_at": "2026-05-17T09:00:00Z",
+    "finished_at": "2026-05-17T09:00:01Z",
+    "duration_ms": 120,
+    "run_metadata": {
+      "import_record_ids": ["uuid"]
+    }
+  }
+]
+```
+
+Rules:
+
+- 只返回当前用户自己的连接同步记录。
+- 默认用于展示最近同步状态和失败原因。
+- `status=failed` 时可读取 `retryable` / `next_retry_at`，但当前不会自动重试。
+- 不返回外部平台 token 或完整第三方响应。
 
 ### POST `/api/v1/data-sources/{connection_id}/disconnect`
 
@@ -281,7 +327,8 @@ Worker rules:
 - 如果通过 provider adapter 获取到 `next_cursor` 且调用方未显式传入 `sync_cursor`，后端会使用 provider 返回的 cursor。
 - 每个外部 item 仍通过 `ExternalCaptureImport -> Capture -> Inbox`，不会直接生成 Task。
 - 重复 item 依赖 `user_id + source + provider + external_item_id` 幂等复用。
-- Worker 写入 `DATA_SOURCE_SYNCED` / `DATA_SOURCE_SYNC_SKIPPED`，事件来源为 `worker`，执行者为 `system`。
+- Worker 写入 `DataSourceSyncRun`，并记录 `DATA_SOURCE_SYNCED` / `DATA_SOURCE_SYNC_SKIPPED` / `DATA_SOURCE_SYNC_FAILED`。
+- 批量同步中单个连接失败时，worker 会记录 failed run 并继续处理后续连接；返回 `partial_failed` 和 `failed_connection_count` 供后台观测。
 
 Fake provider metadata example:
 
