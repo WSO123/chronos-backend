@@ -652,6 +652,33 @@ DataSourceSyncRun {
 - 失败时记录 `retryable` 和 `next_retry_at`，但当前不自动重试。
 - 不保存外部 token 或完整第三方响应。
 
+### EnergyDailyMetric
+
+```text
+EnergyDailyMetric {
+  id
+  user_id
+  data_source_connection_id
+  metric_date
+  source                  // manual | health_import | estimated
+  sleep_minutes
+  sleep_quality_score
+  stress_score
+  energy_score
+  note
+  metadata
+  created_at
+  updated_at
+}
+```
+
+说明：
+
+- 记录 Energy Dashboard 需要的日级聚合数据，不保存原始健康平台 payload。
+- 同一用户同一天只保留一条聚合 metric，重复写入视为更新。
+- Health 数据不进入 Capture / Inbox，也不直接生成 Task。
+- 当前 `energy_score` 可由睡眠和压力轻量推导；后续真实 Health provider 可写入同一模型。
+
 ### CaptureInput
 
 ```text
@@ -1177,6 +1204,20 @@ PATCH /api/v1/me/settings
 - P1 返回基础数据总览。
 - Insights 已支持 P2 轻量详情；Energy、Social 作为后续入口。
 
+### Energy
+
+```text
+PUT /api/v1/energy/daily-metrics
+GET /api/v1/energy/dashboard
+```
+
+说明：
+
+- P3 已支持 Energy Dashboard 的日级睡眠、压力、精力聚合数据。
+- `PUT /daily-metrics` 可用于手动 check-in、测试导入或后续 Health provider worker。
+- `GET /dashboard` 返回趋势、今日精力摘要和轻量任务类型建议。
+- 当前不把 Energy 数据直接写入 Today 排序，只作为解释和后续策略输入。
+
 ### Data Sources
 
 ```text
@@ -1601,8 +1642,8 @@ P1 不是以“接口都写完”为验收，而是以核心闭环跑通为验�
 - 图片输入
 - 日历接入（已支持 Data Source 连接状态底座和 External Capture Import，真实第三方同步待后续）
 - 邮件接入（已支持 Data Source 连接状态底座和 External Capture Import，真实第三方同步待后续）
-- 睡眠 / 压力数据接入（已支持 Health 连接状态底座，真实数据待后续）
-- Energy Dashboard
+- 睡眠 / 压力数据接入（已支持 Health 连接状态底座和 EnergyDailyMetric 日级聚合，真实平台同步待后续）
+- Energy Dashboard（已支持轻量趋势和任务类型建议）
 - 自动提醒增强
 - 来源内容关联
 

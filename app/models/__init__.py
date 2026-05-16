@@ -4,6 +4,7 @@ from app.models.capture import AIParseResult, CaptureInput
 from app.models.daily_plan import DailyPlan, DailyPlanItem, PlanRevision, StrategySnapshot
 from app.models.data_source import DataSourceConnection
 from app.models.data_source_sync_run import DataSourceSyncRun
+from app.models.energy import EnergyDailyMetric
 from app.models.external_import import ExternalCaptureImport
 from app.models.focus_session import FocusSession
 from app.models.goal import Goal
@@ -24,6 +25,7 @@ __all__ = [
     "DailyReport",
     "DataSourceConnection",
     "DataSourceSyncRun",
+    "EnergyDailyMetric",
     "ExternalCaptureImport",
     "FocusSession",
     "Goal",

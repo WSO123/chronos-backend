@@ -31,7 +31,8 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Calendar Sync Worker Placeholder | `data_source.sync_connection` | Ready |
 | Email Sync Worker Placeholder | `data_source.sync_connection` | Ready |
 | Calendar / Email Fake Provider Adapter | internal provider registry | Ready |
-| Health / Energy Data Import | - | Not Started |
+| Energy Daily Metric Upsert | `PUT /api/v1/energy/daily-metrics` | Ready |
+| Energy Dashboard | `GET /api/v1/energy/dashboard` | Ready |
 | Notification Center | - | Not Started |
 
 ## 3. Data Sources
@@ -353,7 +354,98 @@ Frontend notes:
 - Me / Settings 仍只依赖 Data Source 状态接口展示连接和最近同步时间。
 - 当前 worker 和 fake provider 的价值是打通后端承接层；真实 OAuth、真实 provider 拉取、定时调度仍在后续迭代。
 
-## 7. 当前安全边界
+## 7. Energy / Health Dashboard
+
+Health 数据不走 Capture / Inbox，不会生成 Task。当前先支持日级聚合数据和只读 Dashboard，服务 Me -> Energy Dashboard，并为后续 Today 的精力解释预留输入。
+
+### PUT `/api/v1/energy/daily-metrics`
+
+用于写入或更新某一天的睡眠、压力、精力聚合数据。当前可用于手动 check-in、测试导入或后续 Health provider worker。
+
+Request:
+
+```json
+{
+  "metric_date": "2026-05-17",
+  "source": "manual",
+  "data_source_connection_id": null,
+  "sleep_minutes": 450,
+  "sleep_quality_score": 82,
+  "stress_score": 30,
+  "energy_score": null,
+  "note": "slept well",
+  "metric_metadata": {
+    "entry": "manual_checkin"
+  }
+}
+```
+
+Rules:
+
+- `source` 当前支持 `manual` / `health_import` / `estimated`。
+- 至少需要一个指标：`sleep_minutes` / `sleep_quality_score` / `stress_score` / `energy_score`。
+- 如果没有传 `energy_score`，后端用轻量规则从睡眠和压力推导一个 `energy_score`。
+- `data_source_connection_id` 如存在，必须属于当前用户且是 `health` 数据源。
+- 同一用户同一天只有一条聚合 metric，重复提交会更新。
+- 不保存原始 HealthKit / Google Fit payload，也不保存 token。
+
+### GET `/api/v1/energy/dashboard`
+
+Query:
+
+```text
+end_date=2026-05-17
+days=7
+```
+
+Response key fields:
+
+```json
+{
+  "start_date": "2026-05-11",
+  "end_date": "2026-05-17",
+  "summary": {
+    "date": "2026-05-17",
+    "energy_score": 83,
+    "energy_level": "high",
+    "sleep_minutes": 450,
+    "sleep_quality_score": 82,
+    "stress_score": 30,
+    "status_message": "Energy looks strong. This is a good day for deeper high-value work."
+  },
+  "trends": [
+    {
+      "date": "2026-05-17",
+      "sleep_minutes": 450,
+      "sleep_quality_score": 82,
+      "stress_score": 30,
+      "energy_score": 83,
+      "energy_level": "high",
+      "has_data": true
+    }
+  ],
+  "task_match": {
+    "recommended_mode": "deep_work",
+    "reason": "Energy is high enough for focused high-value tasks."
+  },
+  "suggestions": [
+    {
+      "key": "protect_deep_work",
+      "title": "Protect deeper work",
+      "message": "This is a good window to move one high-value task forward.",
+      "signal": "positive"
+    }
+  ]
+}
+```
+
+Frontend notes:
+
+- Energy Dashboard 可以展示睡眠趋势、压力趋势、精力曲线和任务类型建议。
+- Today 仍不直接依赖该接口改变排序；后续如接入 Today，只能作为解释性输入和可回滚的策略因子。
+- 文案应保持克制，避免用健康数据制造压力。
+
+## 8. 当前安全边界
 
 - 仍使用开发态 `X-User-Id` 用户上下文。
 - 不保存外部平台 access token / refresh token。
