@@ -9,8 +9,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.activity_event import ActivityEvent
+from app.models.ai_job import AIJob
 from app.models.daily_plan import DailyPlan, DailyPlanItem
-from app.models.enums import DailyPlanStatus, EntityType, FocusSessionStatus, TaskSource, TaskStatus, ValueLevel
+from app.models.enums import (
+    AIJobStatus,
+    AIJobType,
+    DailyPlanStatus,
+    EntityType,
+    FocusSessionStatus,
+    TaskSource,
+    TaskStatus,
+    ValueLevel,
+)
 from app.models.focus_session import FocusSession
 from app.models.goal import Goal
 from app.models.task import Task
@@ -18,6 +28,7 @@ from app.models.task_step import TaskStep
 from app.models.user import User
 from app.models.mixins import utc_now
 from app.services.activity_event_service import activity_event_service
+from app.services.ai_job_service import ai_job_service
 from app.services.errors import InvalidStateError, NotFoundError, ValidationDomainError
 
 
@@ -249,6 +260,85 @@ class TaskService:
         db.flush()
         return task
 
+    def breakdown_task(self, db: Session, *, task_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+        task = self.get_task(db, task_id=task_id, user_id=user_id)
+        self._ensure_task_status(
+            task,
+            allowed={TaskStatus.ACTIVE, TaskStatus.IN_FOCUS, TaskStatus.POSTPONED},
+            action="broken down",
+        )
+        job = ai_job_service.create_job(
+            db,
+            user_id=user_id,
+            job_type=AIJobType.TASK_BREAKDOWN,
+            input_entity_type=EntityType.TASK.value,
+            input_entity_id=task.id,
+            provider="rule",
+            model="task-breakdown-rule",
+            prompt_version="p1-rule-v1",
+            metadata={"mode": "sync_rule_mock"},
+            commit=False,
+        )
+        job.status = AIJobStatus.RUNNING
+        job.started_at = utc_now()
+
+        existing_steps = sorted(task.steps, key=lambda step: (step.sort_order, step.created_at))
+        if existing_steps:
+            job.status = AIJobStatus.SUCCEEDED_WITH_FALLBACK
+            job.result_entity_type = EntityType.TASK.value
+            job.result_entity_id = task.id
+            job.job_metadata = {
+                **job.job_metadata,
+                "fallback_reason": "existing_steps_preserved",
+                "created_step_ids": [],
+            }
+            job.finished_at = utc_now()
+            self._add_breakdown_event(db, task=task, user_id=user_id, job=job, created_steps=[])
+            db.commit()
+            db.refresh(job)
+            return {"ai_job": self._ai_job_summary(job), "created_steps": []}
+
+        created_steps = self._create_breakdown_steps(db, task=task, user_id=user_id)
+        job.status = AIJobStatus.SUCCEEDED_WITH_FALLBACK
+        job.result_entity_type = EntityType.TASK.value
+        job.result_entity_id = task.id
+        job.job_metadata = {
+            **job.job_metadata,
+            "fallback_reason": "rule_mock_breakdown",
+            "created_step_ids": [str(step.id) for step in created_steps],
+        }
+        job.finished_at = utc_now()
+        self._add_breakdown_event(db, task=task, user_id=user_id, job=job, created_steps=created_steps)
+        db.commit()
+        for step in created_steps:
+            db.refresh(step)
+        db.refresh(job)
+        return {"ai_job": self._ai_job_summary(job), "created_steps": created_steps}
+
+    def _add_breakdown_event(
+        self,
+        db: Session,
+        *,
+        task: Task,
+        user_id: uuid.UUID,
+        job: AIJob,
+        created_steps: list[TaskStep],
+    ) -> None:
+        activity_event_service.add_event(
+            db,
+            user_id=user_id,
+            entity_type=EntityType.TASK,
+            entity_id=task.id,
+            event_type="TASK_BREAKDOWN_GENERATED",
+            related_task_id=task.id,
+            payload={
+                "ai_job_id": str(job.id),
+                "created_step_ids": [str(step.id) for step in created_steps],
+                "fallback_reason": job.job_metadata.get("fallback_reason"),
+                "mode": "rule_mock",
+            },
+        )
+
     def activate_task(
         self,
         db: Session,
@@ -378,6 +468,50 @@ class TaskService:
         if task is None or task.user_id != user_id:
             raise NotFoundError("Task not found")
         return task
+
+    def _create_breakdown_steps(self, db: Session, *, task: Task, user_id: uuid.UUID) -> list[TaskStep]:
+        titles = self._breakdown_step_titles(task)
+        created_steps: list[TaskStep] = []
+        for sort_order, title in enumerate(titles, start=1):
+            step = TaskStep(task_id=task.id, title=title, sort_order=sort_order)
+            db.add(step)
+            db.flush()
+            activity_event_service.add_event(
+                db,
+                user_id=user_id,
+                entity_type=EntityType.TASK,
+                entity_id=task.id,
+                event_type="TASK_STEP_CREATED",
+                related_task_id=task.id,
+                payload={"step_id": str(step.id), "title": title, "source": "task_breakdown"},
+            )
+            created_steps.append(step)
+        return created_steps
+
+    def _breakdown_step_titles(self, task: Task) -> list[str]:
+        if task.estimated_duration_min and task.estimated_duration_min >= 60:
+            return [
+                "Clarify the finished state",
+                "Prepare the needed context",
+                "Do the main work",
+                "Review and finish",
+            ]
+        return [
+            "Clarify the finished state",
+            "Do the main work",
+            "Review and finish",
+        ]
+
+    def _ai_job_summary(self, job: AIJob) -> dict:
+        return {
+            "id": job.id,
+            "job_type": job.job_type,
+            "status": job.status,
+            "result_entity_type": job.result_entity_type,
+            "result_entity_id": job.result_entity_id,
+            "error_message": job.error_message,
+            "job_metadata": job.job_metadata,
+        }
 
     def _goal_summary(self, db: Session, *, task: Task) -> dict | None:
         if task.goal_id is None:

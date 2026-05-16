@@ -109,6 +109,56 @@ class TaskGoalAPITests(unittest.TestCase):
         self.assertTrue(body["actions"]["can_start_focus"])
         self.assertFalse(body["focus_state"]["is_currently_focusing_this_task"])
 
+    def test_breakdown_task_returns_ai_job_and_created_steps(self):
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Break down by API", "estimated_duration_min": 70},
+            headers=self.headers,
+        )
+        task_id = task_response.json()["id"]
+
+        breakdown_response = self.client.post(f"/api/v1/tasks/{task_id}/breakdown", headers=self.headers)
+        job_id = breakdown_response.json()["ai_job"]["id"]
+        job_response = self.client.get(f"/api/v1/ai-jobs/{job_id}", headers=self.headers)
+        detail_response = self.client.get(f"/api/v1/tasks/{task_id}", headers=self.headers)
+
+        self.assertEqual(breakdown_response.status_code, 200)
+        self.assertEqual(breakdown_response.json()["ai_job"]["status"], "succeeded_with_fallback")
+        self.assertEqual(len(breakdown_response.json()["created_steps"]), 4)
+        self.assertEqual(job_response.status_code, 200)
+        self.assertEqual(job_response.json()["id"], job_id)
+        self.assertEqual(job_response.json()["job_type"], "task_breakdown")
+        self.assertEqual(len(detail_response.json()["steps"]), 4)
+
+    def test_ai_job_user_isolation(self):
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Private breakdown"},
+            headers=self.headers,
+        )
+        task_id = task_response.json()["id"]
+        breakdown_response = self.client.post(f"/api/v1/tasks/{task_id}/breakdown", headers=self.headers)
+        job_id = breakdown_response.json()["ai_job"]["id"]
+
+        response = self.client.get(f"/api/v1/ai-jobs/{job_id}", headers=self.other_headers)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "NOT_FOUND")
+
+    def test_completed_task_cannot_be_broken_down(self):
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Do not split after done"},
+            headers=self.headers,
+        )
+        task_id = task_response.json()["id"]
+        self.client.post(f"/api/v1/tasks/{task_id}/complete", headers=self.headers)
+
+        response = self.client.post(f"/api/v1/tasks/{task_id}/breakdown", headers=self.headers)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "INVALID_STATE")
+
     def test_user_id_isolation(self):
         task_response = self.client.post(
             "/api/v1/tasks",

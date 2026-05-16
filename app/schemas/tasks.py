@@ -5,6 +5,8 @@ import uuid
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import (
+    AIJobStatus,
+    AIJobType,
     ActorType,
     DailyPlanItemSection,
     DailyPlanItemStatus,
@@ -122,6 +124,21 @@ class TaskDetailResponse(TaskResponse):
     today_context: TaskDetailTodayContextResponse | None
     focus_state: TaskDetailFocusStateResponse
     actions: TaskDetailActionsResponse
+
+
+class TaskBreakdownAIJobResponse(BaseModel):
+    id: uuid.UUID
+    job_type: AIJobType
+    status: AIJobStatus
+    result_entity_type: str | None
+    result_entity_id: uuid.UUID | None
+    error_message: str | None
+    job_metadata: dict
+
+
+class TaskBreakdownResponse(BaseModel):
+    ai_job: TaskBreakdownAIJobResponse
+    created_steps: list[TaskStepResponse] = Field(default_factory=list)
 
 
 class ActivityEventResponse(ORMModel):

@@ -8,6 +8,7 @@ from app.core.db import get_db
 from app.schemas.tasks import (
     ActivityEventResponse,
     TaskCreate,
+    TaskBreakdownResponse,
     TaskDetailResponse,
     TaskResponse,
     TaskStepCreate,
@@ -78,6 +79,15 @@ def postpone_task(
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
     return task_service.postpone_task(db, task_id=task_id, user_id=user_id)
+
+
+@router.post("/{task_id}/breakdown", response_model=TaskBreakdownResponse)
+def breakdown_task(
+    task_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return task_service.breakdown_task(db, task_id=task_id, user_id=user_id)
 
 
 @router.post("/{task_id}/steps", response_model=TaskStepResponse, status_code=status.HTTP_201_CREATED)

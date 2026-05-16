@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models.ai_job import AIJob
 from app.models.enums import AIJobStatus, AIJobType
 from app.models.mixins import utc_now
+from app.services.errors import NotFoundError, ValidationDomainError
 
 
 class AIJobService:
@@ -23,6 +24,7 @@ class AIJobService:
         model: str | None = None,
         prompt_version: str | None = None,
         metadata: dict | None = None,
+        commit: bool = True,
     ) -> AIJob:
         job = AIJob(
             user_id=user_id,
@@ -36,8 +38,17 @@ class AIJobService:
             job_metadata=metadata or {},
         )
         db.add(job)
-        db.commit()
-        db.refresh(job)
+        if commit:
+            db.commit()
+            db.refresh(job)
+        else:
+            db.flush()
+        return job
+
+    def get_job(self, db: Session, *, job_id: uuid.UUID, user_id: uuid.UUID) -> AIJob:
+        job = db.get(AIJob, job_id)
+        if job is None or job.user_id != user_id:
+            raise NotFoundError("AI job not found")
         return job
 
     def mark_running(
@@ -149,7 +160,7 @@ class AIJobService:
     def _get_job(self, db: Session, job_id: uuid.UUID) -> AIJob:
         job = db.get(AIJob, job_id)
         if job is None:
-            raise ValueError("AI job not found")
+            raise ValidationDomainError("AI job not found")
         return job
 
 
