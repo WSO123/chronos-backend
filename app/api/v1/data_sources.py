@@ -12,6 +12,7 @@ from app.schemas.data_sources import (
     DataSourceConnectionUpdate,
     DataSourceListResponse,
     DataSourceSyncRunResponse,
+    DataSourceSyncSummaryResponse,
 )
 from app.services.data_source_service import data_source_service
 from app.services.data_source_sync_service import data_source_sync_service
@@ -49,6 +50,14 @@ def connect_data_source(
         sync_enabled=payload.sync_enabled,
         connection_metadata=payload.connection_metadata,
     )
+
+
+@router.get("/sync-summary", response_model=DataSourceSyncSummaryResponse)
+def get_data_source_sync_summary(
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return data_source_service.sync_summary(db, user_id=user_id)
 
 
 @router.patch("/{connection_id}", response_model=DataSourceConnectionResponse)

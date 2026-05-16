@@ -89,6 +89,13 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
     )
     if not dashboard["trends"][0]["has_data"]:
         raise RuntimeError("energy dashboard did not include the smoke metric")
+    sync_summary_after_health = _expect(
+        client.get("/api/v1/data-sources/sync-summary", headers=headers),
+        200,
+        "get sync summary after health sync",
+    )
+    if sync_summary_after_health["connected_count"] != 1 or sync_summary_after_health["attention_count"] != 0:
+        raise RuntimeError(f"unexpected sync summary after health sync: {sync_summary_after_health}")
 
     calendar_connection = _expect(
         client.put(
@@ -163,6 +170,13 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
     )
     if _find_today_item(today, task_id=task_id) is None:
         raise RuntimeError("P3 smoke task was not present in Today")
+    sync_summary = _expect(
+        client.get("/api/v1/data-sources/sync-summary", headers=headers),
+        200,
+        "get data source sync summary",
+    )
+    if sync_summary["connected_count"] != 2 or sync_summary["attention_count"] != 0:
+        raise RuntimeError(f"unexpected data source sync summary: {sync_summary}")
 
     execution_reminders = generate_execution_reminders.run(
         user_id=str(user.id),
@@ -273,6 +287,7 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
         "inbox_item_id": imported["inbox_item"]["id"],
         "task_id": task_id,
         "daily_plan_id": today["daily_plan_id"],
+        "data_source_attention_count": sync_summary["attention_count"],
         "execution_reminder_id": reminder_id,
         "execution_created_count": execution_reminders["created_count"],
         "summary_pending_count": summary["pending_count"],

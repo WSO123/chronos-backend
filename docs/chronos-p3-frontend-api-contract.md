@@ -24,6 +24,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Data Source Catalog | `GET /api/v1/data-sources` | Ready |
 | Connect Data Source Placeholder | `PUT /api/v1/data-sources/{source_type}/{provider}` | Ready |
 | Update Data Source Status | `PATCH /api/v1/data-sources/{connection_id}` | Ready |
+| Data Source Sync Summary | `GET /api/v1/data-sources/sync-summary` | Ready |
 | Data Source Sync Runs | `GET /api/v1/data-sources/{connection_id}/sync-runs` | Ready |
 | Disconnect Data Source | `POST /api/v1/data-sources/{connection_id}/disconnect` | Ready |
 | External Capture Import | `POST /api/v1/captures/external-imports` | Ready |
@@ -131,6 +132,49 @@ Rules:
 - 至少传一个字段。
 - 可用于 worker 写入 `last_sync_at` 和 `sync_cursor`。
 - 更新会写入 `DATA_SOURCE_UPDATED`。
+
+### GET `/api/v1/data-sources/sync-summary`
+
+用于 Me / Settings 展示数据接入同步健康度总览，不会触发同步。
+
+Response key fields:
+
+```json
+{
+  "connected_count": 2,
+  "sync_enabled_count": 2,
+  "attention_count": 0,
+  "latest_success_at": "2026-05-17T09:00:01Z",
+  "latest_failure_at": null,
+  "items": [
+    {
+      "connection_id": "uuid",
+      "source_type": "calendar",
+      "provider": "google_calendar",
+      "status": "connected",
+      "sync_enabled": true,
+      "last_sync_at": "2026-05-17T09:00:01Z",
+      "latest_run_id": "uuid",
+      "latest_run_status": "succeeded",
+      "latest_run_finished_at": "2026-05-17T09:00:01Z",
+      "latest_run_error_message": null,
+      "retryable": false,
+      "next_retry_at": null,
+      "imported_count": 1,
+      "reused_count": 0,
+      "needs_attention": false,
+      "attention_reason": null
+    }
+  ]
+}
+```
+
+Rules:
+
+- 只返回当前用户自己的 connections。
+- `attention_reason` 只用于轻量提示，可为 `needs_reauth` / `paused` / `disconnected` / `sync_disabled` / `latest_sync_failed`。
+- 不返回外部 payload、token 或完整 sync history。
+- 详细同步记录仍使用 `GET /data-sources/{connection_id}/sync-runs`。
 
 ### GET `/api/v1/data-sources/{connection_id}/sync-runs`
 

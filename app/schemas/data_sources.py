@@ -68,6 +68,34 @@ class DataSourceListResponse(BaseModel):
     connected_count: int
 
 
+class DataSourceSyncSummaryItemResponse(BaseModel):
+    connection_id: uuid.UUID
+    source_type: DataSourceType
+    provider: str
+    status: DataSourceStatus
+    sync_enabled: bool
+    last_sync_at: datetime | None
+    latest_run_id: uuid.UUID | None
+    latest_run_status: str | None
+    latest_run_finished_at: datetime | None
+    latest_run_error_message: str | None
+    retryable: bool
+    next_retry_at: datetime | None
+    imported_count: int
+    reused_count: int
+    needs_attention: bool
+    attention_reason: str | None
+
+
+class DataSourceSyncSummaryResponse(BaseModel):
+    connected_count: int
+    sync_enabled_count: int
+    attention_count: int
+    latest_success_at: datetime | None
+    latest_failure_at: datetime | None
+    items: list[DataSourceSyncSummaryItemResponse]
+
+
 class DataSourceSyncRunResponse(TimestampedResponse):
     user_id: uuid.UUID
     data_source_connection_id: uuid.UUID | None

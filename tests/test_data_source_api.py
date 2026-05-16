@@ -134,6 +134,40 @@ class DataSourceAPITests(unittest.TestCase):
         self.assertEqual(other_response.status_code, 404)
         self.assertEqual(other_response.json()["error"]["code"], "NOT_FOUND")
 
+    def test_get_data_source_sync_summary(self):
+        connect_response = self.client.put(
+            "/api/v1/data-sources/email/gmail",
+            json={
+                "connection_metadata": {
+                    "fake_items": [
+                        {
+                            "external_item_id": "api-sync-summary-email-1",
+                            "title": "同步摘要 API 验证",
+                        }
+                    ]
+                }
+            },
+            headers=self.headers,
+        )
+        connection_id = connect_response.json()["id"]
+        data_source_sync_service.sync_connection(self.db, connection_id=uuid.UUID(connection_id))
+
+        response = self.client.get("/api/v1/data-sources/sync-summary", headers=self.headers)
+        other_response = self.client.get("/api/v1/data-sources/sync-summary", headers=self.other_headers)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["connected_count"], 1)
+        self.assertEqual(body["sync_enabled_count"], 1)
+        self.assertEqual(body["attention_count"], 0)
+        self.assertIsNotNone(body["latest_success_at"])
+        self.assertEqual(len(body["items"]), 1)
+        self.assertEqual(body["items"][0]["connection_id"], connection_id)
+        self.assertEqual(body["items"][0]["latest_run_status"], "succeeded")
+        self.assertEqual(body["items"][0]["imported_count"], 1)
+        self.assertEqual(other_response.status_code, 200)
+        self.assertEqual(other_response.json()["items"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

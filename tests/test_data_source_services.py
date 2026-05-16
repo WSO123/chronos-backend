@@ -1,8 +1,10 @@
 import unittest
 
 from app.models.activity_event import ActivityEvent
+from app.models.data_source_sync_run import DataSourceSyncRun
 from app.models.enums import DataSourceStatus, DataSourceType, EntityType
 from app.services.data_source_service import data_source_service
+from app.services.data_source_sync_service import data_source_sync_service
 from app.services.errors import NotFoundError, ValidationDomainError
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
@@ -51,6 +53,80 @@ class DataSourceServiceTests(unittest.TestCase):
         self.assertEqual(calendar_source["connection"].id, connection.id)
         self.assertIn("DATA_SOURCE_CONNECTED", {event.event_type for event in events})
         self.assertIn(EntityType.DATA_SOURCE, {event.entity_type for event in events})
+
+    def test_sync_summary_returns_connection_health_without_syncing(self):
+        calendar = data_source_service.connect_source(
+            self.db,
+            user_id=self.user.id,
+            source_type=DataSourceType.CALENDAR,
+            provider="google_calendar",
+            connection_metadata={
+                "fake_items": [
+                    {
+                        "external_item_id": "summary-calendar-1",
+                        "title": "同步摘要验证",
+                    }
+                ]
+            },
+        )
+        health = data_source_service.connect_source(
+            self.db,
+            user_id=self.user.id,
+            source_type=DataSourceType.HEALTH,
+            provider="apple_health",
+        )
+        data_source_service.update_connection(
+            self.db,
+            connection_id=health.id,
+            user_id=self.user.id,
+            updates={"status": DataSourceStatus.PAUSED},
+        )
+        data_source_sync_service.sync_connection(self.db, connection_id=calendar.id)
+
+        summary = data_source_service.sync_summary(self.db, user_id=self.user.id)
+        items = {item["connection_id"]: item for item in summary["items"]}
+
+        self.assertEqual(summary["connected_count"], 1)
+        self.assertEqual(summary["sync_enabled_count"], 1)
+        self.assertEqual(summary["attention_count"], 1)
+        self.assertIsNotNone(summary["latest_success_at"])
+        self.assertEqual(items[calendar.id]["latest_run_status"], "succeeded")
+        self.assertEqual(items[calendar.id]["imported_count"], 1)
+        self.assertFalse(items[calendar.id]["needs_attention"])
+        self.assertEqual(items[health.id]["attention_reason"], "paused")
+        self.assertTrue(items[health.id]["needs_attention"])
+
+    def test_sync_summary_marks_failed_latest_run_as_attention(self):
+        connection = data_source_service.connect_source(
+            self.db,
+            user_id=self.user.id,
+            source_type=DataSourceType.EMAIL,
+            provider="gmail",
+        )
+        failed_run = DataSourceSyncRun(
+            user_id=self.user.id,
+            data_source_connection_id=connection.id,
+            source_type=DataSourceType.EMAIL,
+            provider="gmail",
+            status="failed",
+            trigger="worker",
+            retryable=True,
+            error_message="provider timeout",
+            finished_at=connection.updated_at,
+        )
+        self.db.add(failed_run)
+        self.db.commit()
+
+        summary = data_source_service.sync_summary(self.db, user_id=self.user.id)
+        item = summary["items"][0]
+
+        self.assertEqual(summary["connected_count"], 1)
+        self.assertEqual(summary["attention_count"], 1)
+        self.assertIsNotNone(summary["latest_failure_at"])
+        self.assertTrue(item["needs_attention"])
+        self.assertEqual(item["attention_reason"], "latest_sync_failed")
+        self.assertTrue(item["retryable"])
+        self.assertEqual(item["latest_run_error_message"], "provider timeout")
 
     def test_update_and_disconnect_connection(self):
         connection = data_source_service.connect_source(

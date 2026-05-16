@@ -1328,6 +1328,7 @@ GET  /api/v1/scheduler/reminders/celery-beat
 GET   /api/v1/data-sources
 PUT   /api/v1/data-sources/{source_type}/{provider}
 PATCH /api/v1/data-sources/{connection_id}
+GET   /api/v1/data-sources/sync-summary
 GET   /api/v1/data-sources/{connection_id}/sync-runs
 POST  /api/v1/data-sources/{connection_id}/disconnect
 GET   /api/v1/scheduler/data-sources
@@ -1343,6 +1344,7 @@ GET   /api/v1/scheduler/data-sources/celery-beat
 - `items=null` 时 worker 会通过 provider adapter 拉取 item；当前 fake adapter 从 connection metadata 读取 `fake_items` / `fake_next_cursor`。
 - Worker 写入 `DataSourceSyncRun`，并同步记录 `DATA_SOURCE_SYNCED` / `DATA_SOURCE_SYNC_SKIPPED` / `DATA_SOURCE_SYNC_FAILED`。
 - 批量 worker 中单个连接失败不会中断整批同步；失败连接返回 `failed` 结果并通过 `failed_connection_count` 汇总。
+- `GET /data-sources/sync-summary` 只读返回当前用户数据源同步健康度总览，包含 connection 最新 sync run、attention reason 和聚合计数，不触发同步。
 - `GET /data-sources/{id}/sync-runs` 只读返回最近同步记录，服务 Settings / 调试观测，不触发同步。
 - Health worker 复用 `DataSourceSyncRun` 做同步观测，但导入目标是 `EnergyDailyMetric`，不是 Capture / Inbox。
 - P3 已支持 `GET /api/v1/scheduler/data-sources`，输出 data source / health worker 的只读调度计划契约，不直接启动 Celery Beat。

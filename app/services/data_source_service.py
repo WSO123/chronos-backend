@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.data_source import DataSourceConnection
+from app.models.data_source_sync_run import DataSourceSyncRun
 from app.models.enums import ActorType, DataSourceStatus, DataSourceType, EntityType
 from app.models.user import User
 from app.services.activity_event_service import activity_event_service
@@ -62,6 +63,62 @@ class DataSourceService:
             [connection for connection in connections if connection.status == DataSourceStatus.CONNECTED]
         )
         return {"sources": sources, "connected_count": connected_count}
+
+    def sync_summary(self, db: Session, *, user_id: uuid.UUID) -> dict:
+        self._ensure_user(db, user_id=user_id)
+        connections = sorted(
+            self._connections_for_user(db, user_id=user_id),
+            key=lambda connection: (connection.source_type.value, connection.provider),
+        )
+        items = []
+        latest_success_at = None
+        latest_failure_at = None
+        for connection in connections:
+            latest_run = self._latest_sync_run(db, connection_id=connection.id, user_id=user_id)
+            if latest_run is not None and latest_run.status == "succeeded":
+                latest_success_at = self._max_datetime(latest_success_at, latest_run.finished_at)
+            if latest_run is not None and latest_run.status == "failed":
+                latest_failure_at = self._max_datetime(latest_failure_at, latest_run.finished_at)
+            attention_reason = self._attention_reason(connection=connection, latest_run=latest_run)
+            items.append(
+                {
+                    "connection_id": connection.id,
+                    "source_type": connection.source_type,
+                    "provider": connection.provider,
+                    "status": connection.status,
+                    "sync_enabled": connection.sync_enabled,
+                    "last_sync_at": connection.last_sync_at,
+                    "latest_run_id": latest_run.id if latest_run else None,
+                    "latest_run_status": latest_run.status if latest_run else None,
+                    "latest_run_finished_at": latest_run.finished_at if latest_run else None,
+                    "latest_run_error_message": latest_run.error_message if latest_run else None,
+                    "retryable": latest_run.retryable if latest_run else False,
+                    "next_retry_at": latest_run.next_retry_at if latest_run else None,
+                    "imported_count": latest_run.imported_count if latest_run else 0,
+                    "reused_count": latest_run.reused_count if latest_run else 0,
+                    "needs_attention": attention_reason is not None,
+                    "attention_reason": attention_reason,
+                }
+            )
+
+        connected_count = len(
+            [connection for connection in connections if connection.status == DataSourceStatus.CONNECTED]
+        )
+        sync_enabled_count = len(
+            [
+                connection
+                for connection in connections
+                if connection.status == DataSourceStatus.CONNECTED and connection.sync_enabled
+            ]
+        )
+        return {
+            "connected_count": connected_count,
+            "sync_enabled_count": sync_enabled_count,
+            "attention_count": len([item for item in items if item["needs_attention"]]),
+            "latest_success_at": latest_success_at,
+            "latest_failure_at": latest_failure_at,
+            "items": items,
+        }
 
     def connect_source(
         self,
@@ -208,6 +265,24 @@ class DataSourceService:
         stmt = select(DataSourceConnection).where(DataSourceConnection.user_id == user_id)
         return list(db.scalars(stmt).all())
 
+    def _latest_sync_run(
+        self,
+        db: Session,
+        *,
+        connection_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> DataSourceSyncRun | None:
+        stmt = (
+            select(DataSourceSyncRun)
+            .where(
+                DataSourceSyncRun.user_id == user_id,
+                DataSourceSyncRun.data_source_connection_id == connection_id,
+            )
+            .order_by(DataSourceSyncRun.created_at.desc())
+            .limit(1)
+        )
+        return db.scalars(stmt).first()
+
     def _connection_by_source_provider(
         self,
         db: Session,
@@ -259,6 +334,35 @@ class DataSourceService:
                 -(connection.updated_at.timestamp() if connection.updated_at else 0),
             ),
         )[0]
+
+    def _attention_reason(
+        self,
+        *,
+        connection: DataSourceConnection,
+        latest_run: DataSourceSyncRun | None,
+    ) -> str | None:
+        if connection.status == DataSourceStatus.NEEDS_REAUTH:
+            return "needs_reauth"
+        if connection.status == DataSourceStatus.PAUSED:
+            return "paused"
+        if connection.status == DataSourceStatus.DISCONNECTED:
+            return "disconnected"
+        if not connection.sync_enabled:
+            return "sync_disabled"
+        if latest_run is not None and latest_run.status == "failed":
+            return "latest_sync_failed"
+        return None
+
+    def _max_datetime(
+        self,
+        current: datetime | None,
+        candidate: datetime | None,
+    ) -> datetime | None:
+        if candidate is None:
+            return current
+        if current is None or candidate > current:
+            return candidate
+        return current
 
 
 data_source_service = DataSourceService()
