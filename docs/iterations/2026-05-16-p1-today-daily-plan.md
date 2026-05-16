@@ -298,11 +298,12 @@ P1 不接真实 LLM。`PlanningService` 使用 rule planner：
 - [x] `python -m unittest discover -s tests`
 - [x] `python -m compileall app tests scripts`
 - [x] `alembic upgrade head --sql`
+- [x] `alembic upgrade head`
 - [x] `git diff --check`
 
 ### 未验证
 
-- [ ] `alembic upgrade head` 真实连接本地 PostgreSQL 未执行。
+- 无
 
 ### 已知问题
 
