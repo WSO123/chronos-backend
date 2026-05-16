@@ -3,10 +3,13 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.models.activity_event import ActivityEvent
-from app.models.enums import AIJobStatus, GoalHomeFilter, GoalStatus, TaskStatus, ValueLevel
+from app.models.enums import AIJobStatus, DataSourceType, GoalHomeFilter, GoalStatus, TaskSource, TaskStatus, ValueLevel
+from app.services.data_source_service import data_source_service
 from app.services.errors import InvalidStateError
+from app.services.external_capture_import_service import external_capture_import_service
 from app.services.focus_service import focus_service
 from app.services.goal_service import goal_service
+from app.services.inbox_service import inbox_service
 from app.services.planning_service import planning_service
 from app.services.task_service import task_service
 from tests.db import TestingSessionLocal, reset_database
@@ -134,6 +137,44 @@ class TaskGoalServiceTests(unittest.TestCase):
         self.assertEqual(detail["today_context"]["plan_version"], 1)
         self.assertTrue(detail["actions"]["can_start_focus"])
         self.assertFalse(detail["focus_state"]["is_currently_focusing_this_task"])
+        self.assertIsNone(detail["source_context"])
+
+    def test_task_detail_returns_light_source_context_for_external_task(self):
+        connection = data_source_service.connect_source(
+            self.db,
+            user_id=self.user.id,
+            source_type=DataSourceType.CALENDAR,
+            provider="google_calendar",
+        )
+        import_result = external_capture_import_service.import_item(
+            self.db,
+            user_id=self.user.id,
+            data_source_connection_id=connection.id,
+            external_item_id="calendar-detail-1",
+            external_item_type="calendar_event",
+            title="完成发布准备",
+            body="整理发布 checklist，并确认负责人。",
+        )
+        confirmed = inbox_service.confirm_item(
+            self.db,
+            item_id=import_result["inbox_item"].id,
+            user_id=self.user.id,
+        )
+
+        detail = task_service.get_task_detail(self.db, task_id=confirmed.result_entity_id, user_id=self.user.id)
+
+        self.assertEqual(detail["source"], TaskSource.CALENDAR)
+        self.assertIsNotNone(detail["source_context"])
+        source_context = detail["source_context"]
+        self.assertEqual(source_context["source"], TaskSource.CALENDAR)
+        self.assertEqual(source_context["provider"], "google_calendar")
+        self.assertEqual(source_context["external_item_id"], "calendar-detail-1")
+        self.assertEqual(source_context["external_item_type"], "calendar_event")
+        self.assertEqual(source_context["external_title"], "完成发布准备")
+        self.assertEqual(source_context["external_body_preview"], "整理发布 checklist，并确认负责人。")
+        self.assertEqual(source_context["capture_input_id"], import_result["capture"].id)
+        self.assertEqual(source_context["inbox_item_id"], import_result["inbox_item"].id)
+        self.assertEqual(source_context["data_source_connection_id"], connection.id)
 
     def test_task_detail_disables_start_focus_when_another_session_is_active(self):
         first = task_service.create_task(self.db, user_id=self.user.id, title="Currently focusing")

@@ -57,6 +57,16 @@ class ExternalCaptureImportAPITests(unittest.TestCase):
         self.assertEqual(body["inbox_item"]["title"], "完成 API 联调")
         self.assertEqual(confirm_response.status_code, 200)
         self.assertEqual(task_response.json()["source"], "calendar")
+        source_context = task_response.json()["source_context"]
+        self.assertEqual(source_context["source"], "calendar")
+        self.assertEqual(source_context["capture_source"], "calendar")
+        self.assertEqual(source_context["provider"], "google_calendar")
+        self.assertEqual(source_context["external_item_id"], "calendar-event-api-1")
+        self.assertEqual(source_context["external_item_type"], "calendar_event")
+        self.assertEqual(source_context["external_title"], "完成 API 联调")
+        self.assertEqual(source_context["external_body_preview"], "从日历导入")
+        self.assertNotIn("external_payload", source_context)
+        self.assertNotIn("normalized_text", source_context)
 
     def test_duplicate_external_import_reuses_existing_capture(self):
         connection_response = self.client.put(

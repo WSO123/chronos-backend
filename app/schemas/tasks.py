@@ -8,6 +8,7 @@ from app.models.enums import (
     AIJobStatus,
     AIJobType,
     ActorType,
+    CaptureSource,
     DailyPlanItemSection,
     DailyPlanItemStatus,
     EntityType,
@@ -118,6 +119,21 @@ class TaskDetailProgressResponse(BaseModel):
     actual_duration_min: int
 
 
+class TaskSourceContextResponse(BaseModel):
+    source: TaskSource
+    capture_source: CaptureSource | None
+    provider: str | None
+    external_item_id: str | None
+    external_item_type: str | None
+    external_title: str | None
+    external_body_preview: str | None
+    occurred_at: datetime | None
+    imported_at: datetime | None
+    capture_input_id: uuid.UUID | None
+    inbox_item_id: uuid.UUID | None
+    data_source_connection_id: uuid.UUID | None
+
+
 class TaskDetailTodayContextResponse(BaseModel):
     daily_plan_id: uuid.UUID
     daily_plan_item_id: uuid.UUID
@@ -170,6 +186,7 @@ class TaskDependenciesResponse(BaseModel):
 
 
 class TaskDetailResponse(TaskResponse):
+    source_context: TaskSourceContextResponse | None
     goal: TaskDetailGoalResponse | None
     ai_info: TaskDetailAIInfoResponse
     progress_info: TaskDetailProgressResponse

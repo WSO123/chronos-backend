@@ -390,13 +390,15 @@ Task Detail 是执行前承接层。
 - 展示所属 Goal。
 - 展示当前 AI 建议。
 - 展示任务步骤。
+- 展示轻量来源上下文，让用户知道外部任务来自日历或邮件。
 - 给出下一步动作。
 
 设计约束：
 
 - 不要返回过多历史信息。
 - 不要把它变成任务信息仓库。
-- 复杂历史和来源上下文应通过单独接口获取。
+- Task Detail 只返回来源摘要、外部标题、正文预览和关联 id。
+- 复杂历史、完整外部 payload、完整邮件正文、完整日历对象应通过单独接口获取。
 
 ### 7.7 Focus Module
 
@@ -600,6 +602,7 @@ ExternalCaptureImport {
 
 - 记录外部 Calendar / Email 条目与 Chronos Capture / Inbox 的映射。
 - 通过 `user_id + source + provider + external_item_id` 保证幂等导入。
+- 用户确认 Inbox 生成 Task 后，Task Detail 可通过该映射返回轻量 `source_context`。
 - Health 数据不走该模型；后续应进入 Energy / Health 专用数据模型。
 
 ### CaptureInput
@@ -1057,6 +1060,7 @@ GET   /api/v1/tasks/{task_id}/events
 - `GET /tasks/{id}` 服务 Task Detail。
 - `PATCH /tasks/{id}/priority` 服务 P2 用户修正 AI 判断，只允许调整 `priority` 和 `value_level`，并记录 `TASK_PRIORITY_ADJUSTED`。
 - `/dependencies` 服务 P2 Task Detail 的 Dependency 区块，返回当前任务的前置任务和后续任务。
+- 外部导入任务的 Task Detail 可返回 `source_context`，仅包含来源摘要和预览；不返回 `external_payload` 或 `normalized_text`。
 - 任务历史通过 `/events` 单独获取，避免 Task Detail 变成信息仓库。
 - `breakdown` 可以异步执行，返回 `ai_job_id`；AI 输出步骤后需用户可编辑或确认。
 
@@ -1607,7 +1611,7 @@ AI output -> schema validation -> service decision -> DB write
 
 后端可以保存丰富数据，但页面接口默认返回少而准的信息。
 
-复杂解释、历史、来源上下文、评分因子应通过详情接口获取。
+复杂解释、历史、完整来源内容、评分因子应通过详情接口获取；页面详情接口也应保持摘要优先。
 
 ---
 

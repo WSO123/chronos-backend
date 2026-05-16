@@ -21,8 +21,10 @@ from app.models.enums import (
     TaskStatus,
     ValueLevel,
 )
+from app.models.external_import import ExternalCaptureImport
 from app.models.focus_session import FocusSession
 from app.models.goal import Goal
+from app.models.inbox import InboxItem
 from app.models.task import Task
 from app.models.task_dependency import TaskDependency
 from app.models.task_step import TaskStep
@@ -115,6 +117,7 @@ class TaskService:
             "status": task.status,
             "source": task.source,
             "steps": steps,
+            "source_context": self._source_context(db, task=task),
             "goal": self._goal_summary(db, task=task),
             "ai_info": {
                 "recommended_duration_min": task.estimated_duration_min or 25,
@@ -796,6 +799,48 @@ class TaskService:
             "sort_order": item.sort_order,
             "recommendation_reason": item.recommendation_reason,
         }
+
+    def _source_context(self, db: Session, *, task: Task) -> dict | None:
+        if task.source not in {TaskSource.CALENDAR, TaskSource.EMAIL}:
+            return None
+
+        stmt = (
+            select(ExternalCaptureImport)
+            .join(InboxItem, InboxItem.id == ExternalCaptureImport.inbox_item_id)
+            .where(
+                InboxItem.user_id == task.user_id,
+                InboxItem.result_entity_type == EntityType.TASK.value,
+                InboxItem.result_entity_id == task.id,
+                ExternalCaptureImport.user_id == task.user_id,
+            )
+            .order_by(ExternalCaptureImport.created_at.desc())
+        )
+        import_record = db.scalars(stmt).first()
+        if import_record is None:
+            return None
+
+        return {
+            "source": task.source,
+            "capture_source": import_record.source,
+            "provider": import_record.provider,
+            "external_item_id": import_record.external_item_id,
+            "external_item_type": import_record.external_item_type,
+            "external_title": import_record.title,
+            "external_body_preview": self._source_body_preview(import_record.body),
+            "occurred_at": import_record.occurred_at,
+            "imported_at": import_record.created_at,
+            "capture_input_id": import_record.capture_input_id,
+            "inbox_item_id": import_record.inbox_item_id,
+            "data_source_connection_id": import_record.data_source_connection_id,
+        }
+
+    def _source_body_preview(self, body: str | None, *, limit: int = 180) -> str | None:
+        if body is None:
+            return None
+        preview = " ".join(body.split())
+        if not preview:
+            return None
+        return preview[:limit]
 
     def _active_focus_session(self, db: Session, *, user_id: uuid.UUID) -> FocusSession | None:
         stmt = select(FocusSession).where(

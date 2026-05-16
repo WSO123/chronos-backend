@@ -26,6 +26,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Update Data Source Status | `PATCH /api/v1/data-sources/{connection_id}` | Ready |
 | Disconnect Data Source | `POST /api/v1/data-sources/{connection_id}/disconnect` | Ready |
 | External Capture Import | `POST /api/v1/captures/external-imports` | Ready |
+| Task Detail Source Context | `GET /api/v1/tasks/{task_id}` | Ready |
 | Calendar Sync Worker | - | Not Started |
 | Email Sync Worker | - | Not Started |
 | Health / Energy Data Import | - | Not Started |
@@ -197,17 +198,57 @@ Frontend notes:
 - 该接口主要给后端 worker / 内部工具使用，不是普通用户手动输入入口。
 - 外部来源内容必须先进入 Inbox，由用户确认后才生成 Task / Goal。
 
-## 5. 当前安全边界
+## 5. Task Detail Source Context
+
+### GET `/api/v1/tasks/{task_id}`
+
+当任务来自 Calendar / Email 外部导入并经过 Inbox 确认后，Task Detail 会返回轻量来源上下文：
+
+```json
+{
+  "id": "task-uuid",
+  "source": "calendar",
+  "source_context": {
+    "source": "calendar",
+    "capture_source": "calendar",
+    "provider": "google_calendar",
+    "external_item_id": "calendar-event-123",
+    "external_item_type": "calendar_event",
+    "external_title": "完成项目复盘",
+    "external_body_preview": "整理会议结论",
+    "occurred_at": "2026-05-17T09:00:00Z",
+    "imported_at": "2026-05-17T09:05:00Z",
+    "capture_input_id": "uuid",
+    "inbox_item_id": "uuid",
+    "data_source_connection_id": "uuid"
+  }
+}
+```
+
+Rules:
+
+- `source_context=null` 表示手动创建、普通 Capture 创建，或暂时没有可追溯外部导入记录。
+- 只在 Task Detail 展示轻量来源解释，用于帮助用户理解“这个任务从哪里来”。
+- 不返回 `external_payload`、`normalized_text`、完整邮件正文或完整日历原始对象，避免 Task Detail 变成信息仓库。
+- 需要查看完整来源对象时，后续应通过独立来源详情接口承接，而不是继续扩展 Task Detail。
+
+Frontend notes:
+
+- 可在 Task Detail 的 Basic Info / Related Context 区域展示为一行来源卡。
+- 文案应克制，例如：`来自 Google Calendar · calendar_event · 完成项目复盘`。
+- 不要在 Today 任务列表中展开这些字段。
+
+## 6. 当前安全边界
 
 - 仍使用开发态 `X-User-Id` 用户上下文。
 - 不保存外部平台 access token / refresh token。
 - 当前不接真实第三方 API。
 - 外部来源任务只进入 Capture / Inbox，由用户确认后再生成 Task / Goal。
 
-## 6. 后续 P3
+## 7. 后续 P3
 
 - Calendar / Email connector worker。
 - Health data import。
 - Energy Dashboard。
 - Notification / Reminder Center。
-- 来源内容关联到 Task Detail。
+- 独立来源详情接口。
