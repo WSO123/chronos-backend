@@ -477,12 +477,13 @@ Data Source 是 P3 自然生长模块的权限和连接状态底座，服务日�
 - 记录用户连接了哪些外部数据来源。
 - 记录连接状态、授权范围、同步开关、最近同步时间和非敏感元数据。
 - 为后续 Calendar / Email / Health worker 提供统一入口。
+- 为 Calendar / Email connector worker 提供占位同步服务。
 - 让 Me / Settings 能展示数据接入状态。
 
 边界：
 
 - 不保存真实 OAuth token。
-- 不直接拉取外部数据。
+- 当前不直接拉取外部数据；worker 占位任务只消费已规范化的外部 item。
 - 不把外部来源任务直接写入 Task；Calendar / Email 条目必须先通过 ExternalCaptureImport 进入 Capture / Inbox。
 
 核心对象：
@@ -504,6 +505,10 @@ P1 Agent：
 - Daily Planner：生成今日推荐顺序
 - Task Breakdown：拆解任务步骤
 - Daily Report Generator：生成每日复盘建议
+
+P3 Worker：
+
+- Data Source Sync：读取 Calendar / Email 连接状态，消费规范化外部 item，并通过 ExternalCaptureImport 进入 Capture / Inbox。
 
 关键要求：
 
@@ -1144,6 +1149,8 @@ POST  /api/v1/data-sources/{connection_id}/disconnect
 - P3 已支持数据源连接状态底座，用于 Calendar / Email / Health 接入前置准备。
 - 当前不接真实 OAuth，不保存 token，只保存 provider、scopes、sync 状态和非敏感元数据。
 - 连接 / 更新 / 断开会写入 ActivityEvent，便于后续审计和用户行为学习。
+- Calendar / Email worker 占位同步通过 `data_source.sync_connection` / `data_source.sync_ready_connections` 运行，只处理 `connected + sync_enabled` 的连接，并将外部 item 导入 Capture / Inbox。
+- Worker 写入 `DATA_SOURCE_SYNCED` / `DATA_SOURCE_SYNC_SKIPPED`，事件 `source=worker`、`actor_type=system`。
 
 ### Insights
 
@@ -1620,40 +1627,43 @@ AI output -> schema validation -> service decision -> DB write
 当前已有：
 
 - `main.py`：FastAPI 入口
+- `app/api/v1/*`：P1 / P2 / P3 API routers
 - `app/core/config.py`：配置
 - `app/core/db.py`：数据库连接
 - `app/core/celery.py`：Celery 配置
+- `app/models/*`：核心业务模型与 P1-P3 支撑模型
+- `app/schemas/*`：API request / response schema
+- `app/services/*`：业务 service、聚合 service、P3 data source sync service
 - `app/services/storage.py`：MinIO / S3 存储服务
-- `app/workers/tasks.py`：Celery 示例任务
+- `app/workers/tasks.py`：Data Source 同步 Celery tasks
+- `alembic/versions/*`：数据库迁移
 - `docker-compose.yml`：PostgreSQL + Redis + MinIO
 
-当前缺失：
+当前缺失 / 后续：
 
-- API routers
-- Models
-- Schemas
-- Alembic migrations
-- 业务 services
 - LangGraph agents
-- ActivityEvent 事件模型
-- AIJob / AgentRun 状态模型
-- PlanRevision / StrategySnapshot
-- DailyPlan / Focus / Report 业务闭环
+- AgentRun 状态模型
+- 真实 OAuth / provider adapters
+- 生产级鉴权
+- 生产级 worker 调度、失败重试与监控
+- P3 Health / Energy 数据导入
+- P3 Notification / Reminder Center
+- P4 Social / Group 协作模块
 
-下一步应该先补齐 P1 的数据模型和 API 骨架，再接 AI Worker。
+下一步应继续沿 P3 自然生长模块推进：先补 provider adapter / worker 观测能力，再进入 Health / Energy 或 Reminder。
 
 ---
 
 ## 19. 待确认问题
 
-以下问题不阻塞 P1 架构，但会影响具体字段或默认值：
+以下问题不阻塞当前开发，但会影响后续 P3 / Agent 迭代：
 
-- 默认 seed user 的 email/name 如何设置？
-- P1 首选 LLM provider 是 OpenAI、Qwen、DeepSeek，还是先只保留 adapter？
-- 用户本地日期和时区如何保存？DailyPlan / DailyReport 必须按用户本地日切分。
-- Task priority 和 value_level 是否使用同一套枚举，还是拆成 urgency / importance / value？
-- 任务删除采用 hard delete 还是 archived 状态？
-- P1 是否需要导出 / 清空测试数据的开发接口？
+- 真实 OAuth provider 的 token 存储与刷新策略。
+- Calendar / Email provider adapter 的最小字段标准。
+- Data Source sync 是否需要独立 SyncRun 表记录每次同步结果。
+- Reminder Center 的提醒策略边界：只提醒高价值任务，还是允许用户配置更细粒度规则？
+- Health / Energy 数据是否直接影响 Today 排序，还是先只作为解释和洞察输入？
+- P1 首选 LLM provider 是 OpenAI、Qwen、DeepSeek，还是继续保留 adapter 抽象后再接入？
 
 ---
 

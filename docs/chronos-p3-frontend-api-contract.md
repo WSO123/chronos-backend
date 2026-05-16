@@ -27,8 +27,8 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Disconnect Data Source | `POST /api/v1/data-sources/{connection_id}/disconnect` | Ready |
 | External Capture Import | `POST /api/v1/captures/external-imports` | Ready |
 | Task Detail Source Context | `GET /api/v1/tasks/{task_id}` | Ready |
-| Calendar Sync Worker | - | Not Started |
-| Email Sync Worker | - | Not Started |
+| Calendar Sync Worker Placeholder | `data_source.sync_connection` | Ready |
+| Email Sync Worker Placeholder | `data_source.sync_connection` | Ready |
 | Health / Energy Data Import | - | Not Started |
 | Notification Center | - | Not Started |
 
@@ -238,16 +238,58 @@ Frontend notes:
 - 文案应克制，例如：`来自 Google Calendar · calendar_event · 完成项目复盘`。
 - 不要在 Today 任务列表中展开这些字段。
 
-## 6. 当前安全边界
+## 6. Connector Worker Placeholder
+
+当前已具备 Calendar / Email 的内部 worker 占位同步能力，但仍不接真实第三方 API。
+
+Celery tasks:
+
+```text
+data_source.sync_connection(connection_id, items=[], sync_cursor=null)
+data_source.sync_ready_connections(limit=50)
+```
+
+`data_source.sync_connection` 的输入 items 使用 External Capture Import 的标准 item 形状：
+
+```json
+{
+  "external_item_id": "calendar-event-123",
+  "external_item_type": "calendar_event",
+  "title": "完成项目复盘",
+  "body": "整理会议结论",
+  "occurred_at": "2026-05-17T09:00:00Z",
+  "external_payload": {
+    "html_link": "https://calendar.example/event"
+  }
+}
+```
+
+Worker rules:
+
+- 只处理 `calendar` / `email` 连接。
+- 只有 `status=connected` 且 `sync_enabled=true` 的连接会同步。
+- 同步成功后更新 `last_sync_at`，传入 `sync_cursor` 时更新连接 cursor。
+- 每个外部 item 仍通过 `ExternalCaptureImport -> Capture -> Inbox`，不会直接生成 Task。
+- 重复 item 依赖 `user_id + source + provider + external_item_id` 幂等复用。
+- Worker 写入 `DATA_SOURCE_SYNCED` / `DATA_SOURCE_SYNC_SKIPPED`，事件来源为 `worker`，执行者为 `system`。
+
+Frontend notes:
+
+- 这不是前端直接调用的接口。
+- Me / Settings 仍只依赖 Data Source 状态接口展示连接和最近同步时间。
+- 当前 worker 的价值是打通后端承接层；真实 OAuth、provider 拉取、定时调度仍在后续迭代。
+
+## 7. 当前安全边界
 
 - 仍使用开发态 `X-User-Id` 用户上下文。
 - 不保存外部平台 access token / refresh token。
 - 当前不接真实第三方 API。
 - 外部来源任务只进入 Capture / Inbox，由用户确认后再生成 Task / Goal。
 
-## 7. 后续 P3
+## 8. 后续 P3
 
-- Calendar / Email connector worker。
+- Calendar / Email provider adapter。
+- 定时调度与失败重试策略。
 - Health data import。
 - Energy Dashboard。
 - Notification / Reminder Center。
