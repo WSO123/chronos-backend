@@ -264,6 +264,41 @@ class TaskGoalAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["error"]["code"], "NOT_FOUND")
 
+    def test_goal_progress_timeline_api(self):
+        due_date = (date.today() + timedelta(days=5)).isoformat()
+        goal_response = self.client.post(
+            "/api/v1/goals",
+            json={"title": "Timeline API goal", "deadline": due_date, "value_level": "high"},
+            headers=self.headers,
+        )
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Timeline task", "goal_id": goal_response.json()["id"]},
+            headers=self.headers,
+        )
+        self.client.post(f"/api/v1/tasks/{task_response.json()['id']}/complete", headers=self.headers)
+
+        response = self.client.get(
+            f"/api/v1/goals/{goal_response.json()['id']}/progress-timeline",
+            headers=self.headers,
+        )
+        body = response.json()
+        milestone_types = [milestone["milestone_type"] for milestone in body["milestones"]]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(body["summary"]["goal_id"], goal_response.json()["id"])
+        self.assertEqual(body["summary"]["completed_task_count"], 1)
+        self.assertIn("goal_created", milestone_types)
+        self.assertIn("task_completed", milestone_types)
+        self.assertIn("deadline", milestone_types)
+        self.assertEqual(body["note"], "Timeline is derived from goal and task activity events; it does not change Today ordering.")
+
+        other_response = self.client.get(
+            f"/api/v1/goals/{goal_response.json()['id']}/progress-timeline",
+            headers=self.other_headers,
+        )
+        self.assertEqual(other_response.status_code, 404)
+
     def test_goals_home_returns_summary_and_filter_results(self):
         due_date = (date.today() + timedelta(days=2)).isoformat()
         goal_response = self.client.post(

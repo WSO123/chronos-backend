@@ -6,7 +6,14 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user_id
 from app.core.db import get_db
 from app.models.enums import GoalHomeFilter
-from app.schemas.goals import GoalCreate, GoalDetailResponse, GoalResponse, GoalUpdate, GoalsHomeResponse
+from app.schemas.goals import (
+    GoalCreate,
+    GoalDetailResponse,
+    GoalProgressTimelineResponse,
+    GoalResponse,
+    GoalUpdate,
+    GoalsHomeResponse,
+)
 from app.services.goal_service import goal_service
 
 router = APIRouter(prefix="/goals", tags=["goals"])
@@ -71,6 +78,16 @@ def get_goal_detail(
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
     return goal_service.get_goal_detail(db, goal_id=goal_id, user_id=user_id)
+
+
+@router.get("/{goal_id}/progress-timeline", response_model=GoalProgressTimelineResponse)
+def get_goal_progress_timeline(
+    goal_id: uuid.UUID,
+    limit: int = Query(default=30, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return goal_service.get_goal_progress_timeline(db, goal_id=goal_id, user_id=user_id, limit=limit)
 
 
 @router.patch("/{goal_id}", response_model=GoalResponse)

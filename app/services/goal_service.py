@@ -4,13 +4,15 @@ from datetime import date, datetime, timedelta
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.models.activity_event import ActivityEvent
 from app.models.enums import EntityType, GoalHomeFilter, GoalStatus, TaskStatus, ValueLevel
 from app.models.goal import Goal
 from app.models.task import Task
 from app.models.task_dependency import TaskDependency
+from app.models.mixins import utc_now
 from app.models.user import User
 from app.services.activity_event_service import activity_event_service
 from app.services.errors import NotFoundError
@@ -132,6 +134,39 @@ class GoalService:
                     and len(completed_tasks) == len(visible_tasks)
                 ),
             },
+        }
+
+    def get_goal_progress_timeline(
+        self,
+        db: Session,
+        *,
+        goal_id: uuid.UUID,
+        user_id: uuid.UUID,
+        limit: int = 30,
+    ) -> dict:
+        goal = self.get_goal(db, goal_id=goal_id, user_id=user_id)
+        today = self._current_user_date(db, user_id=user_id)
+        tasks = self._goal_tasks(db, goal=goal, user_id=user_id)
+        visible_tasks = [task for task in tasks if task.status != TaskStatus.ARCHIVED]
+        progress = self._progress(goal=goal, tasks=visible_tasks, today=today)
+        events = self._goal_timeline_events(db, goal=goal, tasks=visible_tasks, user_id=user_id)
+        milestones = self._goal_timeline_milestones(goal=goal, tasks=visible_tasks, events=events, today=today)
+
+        return {
+            "goal_id": goal.id,
+            "generated_at": utc_now(),
+            "summary": {
+                "goal_id": goal.id,
+                "goal_status": goal.status,
+                "deadline": goal.deadline,
+                "total_task_count": progress["total_task_count"],
+                "completed_task_count": progress["completed_task_count"],
+                "completion_rate": progress["completion_rate"],
+                "risk_level": progress["risk_level"],
+                "risk_reason": progress["risk_reason"],
+            },
+            "milestones": milestones[:limit],
+            "note": "Timeline is derived from goal and task activity events; it does not change Today ordering.",
         }
 
     def update_goal(
@@ -349,6 +384,116 @@ class GoalService:
                 if edges
                 else "No dependency edges are linked inside this goal yet."
             ),
+        }
+
+    def _goal_timeline_events(
+        self,
+        db: Session,
+        *,
+        goal: Goal,
+        tasks: list[Task],
+        user_id: uuid.UUID,
+    ) -> list[ActivityEvent]:
+        task_ids = [task.id for task in tasks]
+        conditions = [
+            (ActivityEvent.entity_type == EntityType.GOAL) & (ActivityEvent.entity_id == goal.id),
+        ]
+        if task_ids:
+            conditions.append(ActivityEvent.related_task_id.in_(task_ids))
+
+        stmt = (
+            select(ActivityEvent)
+            .where(ActivityEvent.user_id == user_id, or_(*conditions))
+            .order_by(ActivityEvent.occurred_at.asc())
+            .limit(200)
+        )
+        return list(db.scalars(stmt).all())
+
+    def _goal_timeline_milestones(
+        self,
+        *,
+        goal: Goal,
+        tasks: list[Task],
+        events: list[ActivityEvent],
+        today: date,
+    ) -> list[dict]:
+        task_title_by_id = {task.id: task.title for task in tasks}
+        milestones: list[dict] = []
+        for event in events:
+            milestone = self._event_milestone(event, task_title_by_id=task_title_by_id)
+            if milestone is not None:
+                milestones.append(milestone)
+
+        if goal.deadline is not None:
+            milestones.append(self._deadline_milestone(goal=goal, today=today))
+        milestones.sort(key=lambda item: (item["milestone_date"] or date.max, item["occurred_at"] is None))
+        return milestones
+
+    def _event_milestone(self, event: ActivityEvent, *, task_title_by_id: dict[uuid.UUID, str]) -> dict | None:
+        task_title = task_title_by_id.get(event.related_task_id) if event.related_task_id else None
+        task_title = task_title or event.payload.get("title")
+        milestone_map = {
+            "GOAL_CREATED": ("goal_created", "Goal created", "Goal entered Chronos.", "neutral"),
+            "GOAL_UPDATED": ("goal_updated", "Goal updated", "Goal metadata changed.", "neutral"),
+            "TASK_CREATED": ("task_added", "Task added", "A task was linked to this goal.", "neutral"),
+            "TASK_COMPLETED": ("task_completed", "Task completed", "A linked task was completed.", "positive"),
+            "TASK_POSTPONED": ("task_postponed", "Task postponed", "A linked task was postponed.", "risk"),
+            "TASK_ACTIVATED": ("task_activated", "Task reactivated", "A postponed task returned to active work.", "neutral"),
+            "TASK_PRIORITY_ADJUSTED": (
+                "priority_adjusted",
+                "Priority adjusted",
+                "User corrected the task priority or value level.",
+                "neutral",
+            ),
+            "TASK_DEPENDENCY_CREATED": (
+                "dependency_added",
+                "Dependency added",
+                "A prerequisite relationship was added.",
+                "neutral",
+            ),
+            "TASK_DEPENDENCY_DELETED": (
+                "dependency_removed",
+                "Dependency removed",
+                "A prerequisite relationship was removed.",
+                "neutral",
+            ),
+        }
+        metadata = milestone_map.get(event.event_type)
+        if metadata is None:
+            return None
+        milestone_type, title, description, signal = metadata
+        if task_title:
+            description = f"{description} Task: {task_title}."
+        return {
+            "milestone_type": milestone_type,
+            "event_type": event.event_type,
+            "title": title,
+            "description": description,
+            "signal": signal,
+            "task_id": event.related_task_id,
+            "occurred_at": event.occurred_at,
+            "milestone_date": event.occurred_at.date(),
+        }
+
+    def _deadline_milestone(self, *, goal: Goal, today: date) -> dict:
+        if goal.status == GoalStatus.COMPLETED:
+            signal = "positive"
+            description = "The goal has been marked completed."
+        elif goal.deadline is not None and goal.deadline < today:
+            signal = "risk"
+            description = "The deadline has passed while the goal is not completed."
+        else:
+            signal = "neutral"
+            description = "The goal deadline is still ahead."
+        return {
+            "milestone_type": "deadline",
+            "event_type": None,
+            "title": "Goal deadline",
+            "description": description,
+            "signal": signal,
+            "task_id": None,
+            "occurred_at": None,
+            "milestone_date": goal.deadline,
         }
 
     def _ai_suggestion(

@@ -97,7 +97,7 @@ uv run python scripts/dev_seed_demo.py
 | Reports | `GET /reports/daily`, `POST /reports/daily/generate`, `GET /reports/weekly`, `GET /reports/monthly` | Daily Ready, Weekly / Monthly P2 Ready |
 | Me Overview | `GET /me/overview` | Ready |
 | Insights | `GET /insights/detail` | P2 Ready |
-| Goals | `GET /goals/home`, `GET /goals`, `POST /goals`, `GET /goals/{id}`, `GET /goals/{id}/detail` | Backend Ready, P2 UI |
+| Goals | `GET /goals/home`, `GET /goals`, `POST /goals`, `GET /goals/{id}`, `GET /goals/{id}/detail`, `GET /goals/{id}/progress-timeline` | Backend Ready, P2 UI |
 | AIJob Status | `GET /ai-jobs/{id}` | Backend Ready, mostly debug / future UI |
 
 ---
@@ -960,6 +960,7 @@ Goals 是 P2 一级 Tab，但 P1 后端已经提供轻量 Goal API，主要用�
 | `GET` | `/goals/home` | Goals 首页聚合 |
 | `GET` | `/goals/{goal_id}` | 目标详情基础信息 |
 | `GET` | `/goals/{goal_id}/detail` | Goal Detail 聚合 |
+| `GET` | `/goals/{goal_id}/progress-timeline` | Goal Progress Timeline |
 | `PATCH` | `/goals/{goal_id}` | 编辑目标基础字段 |
 
 Goal fields:
@@ -982,14 +983,62 @@ P2 Goals 已提供：
 - Goals filters: `all` / `active` / `due_soon` / `completed` / `high_value`。
 - Goal Overview。
 - Goal Progress。
+- Goal Progress Timeline。
 - Goal Task List。
 - 规则版 AI Suggestion。
 - Dependency Map 节点顺序和真实依赖边。
 
 尚未实现：
 
-- Goal progress timeline。
 - 深度 Goal 洞察。
+
+### GET `/goals/{goal_id}/progress-timeline`
+
+用于 P2 Goal Detail 的 Goal Progress 区块。该接口只读，基于 Goal、关联 Task 和 ActivityEvent 生成轻量时间线。
+
+Query:
+
+```text
+limit=30  // optional, 1-100
+```
+
+Response key fields:
+
+```json
+{
+  "goal_id": "uuid",
+  "generated_at": "2026-05-16T09:00:00Z",
+  "summary": {
+    "goal_id": "uuid",
+    "goal_status": "active",
+    "deadline": "2026-05-30",
+    "total_task_count": 4,
+    "completed_task_count": 2,
+    "completion_rate": 0.5,
+    "risk_level": "on_track",
+    "risk_reason": "Goal has a clear next task and no urgent deadline risk."
+  },
+  "milestones": [
+    {
+      "milestone_type": "task_completed",
+      "event_type": "TASK_COMPLETED",
+      "title": "Task completed",
+      "description": "A linked task was completed. Task: Prepare demo.",
+      "signal": "positive",
+      "task_id": "uuid",
+      "occurred_at": "2026-05-16T09:00:00Z",
+      "milestone_date": "2026-05-16"
+    }
+  ],
+  "note": "Timeline is derived from goal and task activity events; it does not change Today ordering."
+}
+```
+
+Frontend notes:
+
+- 默认展示 summary 和最多 5-8 个 milestones。
+- `signal` 可用于轻量视觉区分：`positive` / `neutral` / `risk`。
+- Timeline 不做甘特图，不替代 Dependency Map，也不触发 Today 重排。
 
 ---
 

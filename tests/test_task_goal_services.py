@@ -290,6 +290,43 @@ class TaskGoalServiceTests(unittest.TestCase):
         self.assertIsNone(detail["ai_suggestion"]["next_action_task_id"])
         self.assertEqual(detail["ai_suggestion"]["summary"], "This goal is already complete.")
 
+    def test_goal_progress_timeline_returns_key_milestones(self):
+        today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Timeline goal",
+            deadline=today + timedelta(days=5),
+            value_level=ValueLevel.HIGH,
+        )
+        completed_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Finished milestone",
+        )
+        postponed_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Delayed milestone",
+        )
+        task_service.complete_task(self.db, task_id=completed_task.id, user_id=self.user.id)
+        task_service.postpone_task(self.db, task_id=postponed_task.id, user_id=self.user.id)
+
+        timeline = goal_service.get_goal_progress_timeline(self.db, goal_id=goal.id, user_id=self.user.id)
+        milestone_types = [milestone["milestone_type"] for milestone in timeline["milestones"]]
+
+        self.assertEqual(timeline["summary"]["total_task_count"], 2)
+        self.assertEqual(timeline["summary"]["completed_task_count"], 1)
+        self.assertEqual(timeline["summary"]["completion_rate"], 0.5)
+        self.assertIn("goal_created", milestone_types)
+        self.assertIn("task_added", milestone_types)
+        self.assertIn("task_completed", milestone_types)
+        self.assertIn("task_postponed", milestone_types)
+        self.assertIn("deadline", milestone_types)
+        self.assertEqual(timeline["note"], "Timeline is derived from goal and task activity events; it does not change Today ordering.")
+
     def test_goals_home_returns_summary_filters_and_goal_cards(self):
         today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
         active_goal = goal_service.create_goal(

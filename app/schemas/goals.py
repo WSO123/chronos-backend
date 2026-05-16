@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 import uuid
 
@@ -108,6 +108,36 @@ class GoalDetailResponse(BaseModel):
     dependency_map: GoalDependencyMapResponse
     ai_suggestion: GoalAISuggestionResponse
     actions: GoalActionsResponse
+
+
+class GoalProgressTimelineSummaryResponse(BaseModel):
+    goal_id: uuid.UUID
+    goal_status: GoalStatus
+    deadline: date | None
+    total_task_count: int
+    completed_task_count: int
+    completion_rate: float
+    risk_level: str
+    risk_reason: str
+
+
+class GoalProgressTimelineMilestoneResponse(BaseModel):
+    milestone_type: str
+    event_type: str | None
+    title: str
+    description: str
+    signal: str
+    task_id: uuid.UUID | None = None
+    occurred_at: datetime | None = None
+    milestone_date: date | None = None
+
+
+class GoalProgressTimelineResponse(BaseModel):
+    goal_id: uuid.UUID
+    generated_at: datetime
+    summary: GoalProgressTimelineSummaryResponse
+    milestones: list[GoalProgressTimelineMilestoneResponse] = Field(default_factory=list)
+    note: str
 
 
 class GoalHomeItemResponse(BaseModel):
