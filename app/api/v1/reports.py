@@ -6,10 +6,19 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_id
 from app.core.db import get_db
-from app.schemas.reports import DailyReportResponse
+from app.schemas.reports import DailyReportResponse, WeeklyReportResponse
 from app.services.report_service import report_service
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+
+@router.get("/weekly", response_model=WeeklyReportResponse)
+def get_weekly_report(
+    week_start: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return report_service.get_weekly_report(db, user_id=user_id, week_start=week_start)
 
 
 @router.get("/daily", response_model=DailyReportResponse)

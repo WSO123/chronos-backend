@@ -94,7 +94,7 @@ uv run python scripts/dev_seed_demo.py
 | Today | `GET /today`, `POST /today/replan`, `PATCH /today/items/{id}` | Ready |
 | Task Detail | `GET /tasks/{id}`, `POST /tasks/{id}/breakdown`, steps / complete / postpone | Ready |
 | Focus | `POST /focus-sessions`, complete / interrupt / postpone | Ready |
-| Daily Report | `GET /reports/daily`, `POST /reports/daily/generate` | Ready |
+| Reports | `GET /reports/daily`, `POST /reports/daily/generate`, `GET /reports/weekly` | Daily Ready, Weekly P2 Ready |
 | Me Overview | `GET /me/overview` | Ready |
 | Goals | `GET /goals/home`, `GET /goals`, `POST /goals`, `GET /goals/{id}`, `GET /goals/{id}/detail` | Backend Ready, P2 UI |
 | AIJob Status | `GET /ai-jobs/{id}` | Backend Ready, mostly debug / future UI |
@@ -540,7 +540,76 @@ Response key fields:
 Frontend notes:
 
 - P1 Daily Report 可以作为完成 Focus 后的轻量复盘入口。
-- `ai_suggestions` 是短建议列表，不要做成复杂洞察页；Weekly / Monthly 是 P2。
+- `ai_suggestions` 是短建议列表，不要做成复杂洞察页。
+
+### GET `/reports/weekly`
+
+Query:
+
+```text
+week_start=YYYY-MM-DD  // optional；后端会归一到该日期所在周的周一
+```
+
+用于 P2 Weekly Report。该接口不生成持久化 report，只基于已有执行数据做轻量聚合。
+
+Response key fields:
+
+```json
+{
+  "week_start": "2026-05-11",
+  "week_end": "2026-05-17",
+  "summary": {
+    "total_planned_task_count": 8,
+    "total_completed_task_count": 5,
+    "total_postponed_task_count": 1,
+    "total_interrupted_count": 1,
+    "total_focus_minutes": 180,
+    "average_completion_rate": 0.63,
+    "high_value_completed_task_count": 2,
+    "active_goal_count": 3,
+    "at_risk_goal_count": 1,
+    "overdue_task_count": 1
+  },
+  "daily_trends": [
+    {
+      "report_date": "2026-05-16",
+      "planned_task_count": 3,
+      "completed_task_count": 2,
+      "postponed_task_count": 1,
+      "interrupted_count": 0,
+      "focus_minutes": 50,
+      "completion_rate": 0.67,
+      "high_value_completed_task_count": 1
+    }
+  ],
+  "focus": {
+    "total_minutes": 180,
+    "average_minutes_per_active_day": 36,
+    "best_focus_date": "2026-05-16",
+    "best_focus_minutes": 50
+  },
+  "lagging_tasks": [
+    {
+      "id": "uuid",
+      "title": "补齐课程项目提交",
+      "goal_id": "uuid",
+      "deadline": "2026-05-14",
+      "days_overdue": 2,
+      "value_level": "high",
+      "priority": 1,
+      "reason": "高价值任务已滞后 2 天，下次安排时需要优先保护。"
+    }
+  ],
+  "ai_suggestions": ["先重新判断滞后任务是否仍重要，重要的保留，不重要的后移或归档。"]
+}
+```
+
+Frontend notes:
+
+- Weekly Report 是 P2 趋势反馈入口，不要替代 Today 的执行决策。
+- 默认展示 summary、daily trends、focus summary 和最多 5 个 lagging tasks。
+- `ai_suggestions` 仍是规则建议，不代表真实 LLM 洞察。
+- Monthly Report 和 Insight Detail 仍未实现。
 
 ---
 

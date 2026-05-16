@@ -414,7 +414,7 @@ Focus 是执行场景。
 
 ### 7.8 Report Module
 
-P1 只做 Daily Report。
+P1 做 Daily Report；P2 先补 Weekly Report 轻量聚合。
 
 职责：
 
@@ -423,10 +423,11 @@ P1 只做 Daily Report。
 - 汇总延后 / 中断记录。
 - 生成每日 AI 建议。
 - 作为后续 Rolling Plan 的行为反馈。
+- 汇总每周完成趋势、高价值任务推进、滞后任务和专注总量。
 
 P2 扩展：
 
-- Weekly Report
+- Weekly Report：已支持轻量聚合，不持久化。
 - Monthly Report
 - Insight Detail
 
@@ -979,13 +980,15 @@ POST  /api/v1/focus-sessions/{session_id}/postpone
 GET  /api/v1/reports/daily
 POST /api/v1/reports/daily/generate
 GET  /api/v1/reports/daily/{date}
+GET  /api/v1/reports/weekly
 ```
 
 说明：
 
-- P1 只做 Daily Report。
-- `generate` 可以异步执行，返回 `ai_job_id`；生成结果落到 DailyReport。
-- Weekly / Monthly 延后到 P2。
+- P1 已支持 Daily Report。
+- P2 已支持 Weekly Report 轻量聚合，不单独持久化，不抢 Today 的执行决策。
+- `daily/generate` 可以异步执行，返回 `ai_job_id`；生成结果落到 DailyReport。
+- Monthly Report 延后到后续 P2。
 
 ### Me
 
@@ -1330,7 +1333,7 @@ P1 不是以“接口都写完”为验收，而是以核心闭环跑通为验�
 - Goal Detail
 - Goal Progress
 - Dependency
-- Weekly Report
+- Weekly Report（已支持轻量聚合）
 - Monthly Report
 - Insight Detail
 - Strategy Detail
