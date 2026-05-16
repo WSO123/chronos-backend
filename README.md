@@ -74,10 +74,17 @@ uv run python scripts/dev_seed_demo.py
 uv run python scripts/smoke_p1_execution_loop.py
 ```
 
-该 smoke 会通过 API 跑通：
+跑一遍 P2 目标 / 洞察 smoke 验证：
+
+```bash
+uv run python scripts/smoke_p2_goal_insight_loop.py
+```
+
+这些 smoke 会通过 API 跑通：
 
 ```text
 Capture -> Inbox -> Today -> Task Detail -> Focus -> Daily Report -> Me
+P2: Goals -> Goal Detail / Timeline -> Reports / Insights -> Me
 ```
 
 **启动 API 后端 (热重载模式):**
@@ -128,16 +135,19 @@ Capture -> Inbox -> Today -> Task Detail -> Focus -> Report / Me
 uv run alembic upgrade head
 uv run python scripts/dev_seed_demo.py
 uv run python scripts/smoke_p1_execution_loop.py
+uv run python scripts/smoke_p2_goal_insight_loop.py
 uv run python -m unittest discover -s tests
 ```
 
 `scripts/dev_seed_demo.py` 用于前端和手动体验，默认创建 `demo@chronos.local` 用户并输出 `X-User-Id`。
 `scripts/smoke_p1_execution_loop.py` 用于开发后快速防回归，每次默认创建一个独立 smoke 用户，不会重置数据库。
+`scripts/smoke_p2_goal_insight_loop.py` 用于验证 P2 Goals / Reports / Insights 合同，每次默认创建一个独立 smoke 用户，不会重置数据库。
 
 前端联调接口契约见：
 
 ```text
 docs/chronos-p1-frontend-api-contract.md
+docs/chronos-p2-frontend-api-contract.md
 ```
 
 ##  开发指南

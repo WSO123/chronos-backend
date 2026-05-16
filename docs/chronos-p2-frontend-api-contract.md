@@ -247,4 +247,5 @@ P2 新增字段：
 ```bash
 uv run python -m unittest discover -s tests
 uv run python scripts/smoke_p1_execution_loop.py
+uv run python scripts/smoke_p2_goal_insight_loop.py
 ```
