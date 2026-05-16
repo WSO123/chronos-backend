@@ -499,6 +499,47 @@ AI 测试默认用 mock provider。
 
 Migration 至少要能在本地数据库上 upgrade 成功。
 
+### 8.5 Smoke 与验证阶梯
+
+每次迭代完成后，按改动范围选择验证阶梯：
+
+```bash
+uv run python -m unittest discover -s tests
+uv run python -m compileall app tests scripts
+git diff --check
+```
+
+涉及数据库模型、索引、枚举或 migration 时，必须额外执行：
+
+```bash
+uv run alembic upgrade head
+```
+
+涉及核心执行闭环时，至少执行：
+
+```bash
+uv run python scripts/smoke_p1_execution_loop.py
+```
+
+涉及 P2 Goals / Strategy / Insights / Reports 时，额外执行：
+
+```bash
+uv run python scripts/smoke_p2_goal_insight_loop.py
+```
+
+涉及 P3 数据接入、精力、外部输入、提醒、调度 worker 或 notification 时，额外执行：
+
+```bash
+uv run python scripts/smoke_p3_natural_growth_loop.py
+```
+
+Smoke 脚本约束：
+
+- 必须创建独立 smoke 用户，不重置开发数据库。
+- 必须走公开 API 或已注册 worker task，不直接篡改业务状态。
+- 必须验证产品主路径，而不是只检查内部函数能运行。
+- 必须保持克制，不为了 smoke 引入只服务测试的业务字段。
+
 ---
 
 ## 9. 文档同步规范

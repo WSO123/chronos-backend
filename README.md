@@ -80,11 +80,18 @@ uv run python scripts/smoke_p1_execution_loop.py
 uv run python scripts/smoke_p2_goal_insight_loop.py
 ```
 
+跑一遍 P3 自然生长 smoke 验证：
+
+```bash
+uv run python scripts/smoke_p3_natural_growth_loop.py
+```
+
 这些 smoke 会通过 API 跑通：
 
 ```text
 Capture -> Inbox -> Today -> Task Detail -> Focus -> Daily Report -> Me
 P2: Goals -> Goal Detail / Timeline -> Reports / Insights -> Me
+P3: Data Source -> Capture / Inbox -> Today -> Energy -> Reminder Center -> Scheduler
 ```
 
 **启动 API 后端 (热重载模式):**
@@ -121,7 +128,7 @@ chronos-backend/
 └── uv.lock                 # 依赖版本锁定
 ```
 
-## P1 主链路验收
+## P1-P3 主链路验收
 
 本阶段优先保护 Chronos 的核心执行闭环，不追求复杂驾驶舱：
 
@@ -136,12 +143,16 @@ uv run alembic upgrade head
 uv run python scripts/dev_seed_demo.py
 uv run python scripts/smoke_p1_execution_loop.py
 uv run python scripts/smoke_p2_goal_insight_loop.py
+uv run python scripts/smoke_p3_natural_growth_loop.py
 uv run python -m unittest discover -s tests
+uv run python -m compileall app tests scripts
+git diff --check
 ```
 
 `scripts/dev_seed_demo.py` 用于前端和手动体验，默认创建 `demo@chronos.local` 用户并输出 `X-User-Id`。
 `scripts/smoke_p1_execution_loop.py` 用于开发后快速防回归，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_p2_goal_insight_loop.py` 用于验证 P2 Goals / Reports / Insights 合同，每次默认创建一个独立 smoke 用户，不会重置数据库。
+`scripts/smoke_p3_natural_growth_loop.py` 用于验证 P3 数据接入、精力、外部输入、提醒和调度契约，每次默认创建一个独立 smoke 用户，不会重置数据库。
 
 前端联调接口契约见：
 
