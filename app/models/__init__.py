@@ -5,6 +5,7 @@ from app.models.daily_plan import DailyPlan, DailyPlanItem, PlanRevision, Strate
 from app.models.focus_session import FocusSession
 from app.models.goal import Goal
 from app.models.inbox import InboxItem
+from app.models.report import DailyReport
 from app.models.task import Task
 from app.models.task_step import TaskStep
 from app.models.user import User, UserSettings
@@ -16,6 +17,7 @@ __all__ = [
     "CaptureInput",
     "DailyPlan",
     "DailyPlanItem",
+    "DailyReport",
     "FocusSession",
     "Goal",
     "InboxItem",
