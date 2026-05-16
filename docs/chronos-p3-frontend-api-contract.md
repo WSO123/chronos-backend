@@ -42,6 +42,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Create Manual Reminder | `POST /api/v1/reminders` | Ready |
 | Dismiss Reminder | `POST /api/v1/reminders/{id}/dismiss` | Ready |
 | Reminder Scheduler Plan | `GET /api/v1/scheduler/reminders` | Ready |
+| Reminder Celery Beat Proposal | `GET /api/v1/scheduler/reminders/celery-beat` | Ready |
 
 ## 3. Data Sources
 
@@ -783,6 +784,61 @@ Rules:
 - 这是 scheduler contract，不是 active scheduler。
 - `reminder.generate_execution` 必须在 Today active plan 已存在后 fanout，不能创建 Today 或 replan。
 - `reminder.dispatch_due` 必须保留 delivery provider 和 delivery attempt cooldown 语义。
+
+### GET `/api/v1/scheduler/reminders/celery-beat`
+
+返回 JSON-friendly Celery Beat 配置草案。该接口不修改 `celery_app.conf`，不启动 scheduler。
+
+Response:
+
+```json
+{
+  "timezone": "UTC",
+  "entries": [
+    {
+      "name": "reminder-generate-deadline-daily",
+      "task": "reminder.generate_deadline",
+      "schedule": {
+        "type": "crontab",
+        "minute": 30,
+        "hour": 23
+      },
+      "kwargs": {
+        "user_id": null,
+        "target_date": null,
+        "window_days": 1,
+        "reminder_hour": null
+      }
+    },
+    {
+      "name": "reminder-dispatch-due-every-5-minutes",
+      "task": "reminder.dispatch_due",
+      "schedule": {
+        "type": "interval",
+        "seconds": 300
+      },
+      "kwargs": {
+        "limit": 50,
+        "channel": null,
+        "now": null
+      }
+    }
+  ],
+  "excluded_entries": [
+    {
+      "task_name": "reminder.generate_execution",
+      "reason": "Requires per-user fanout after an active Today plan exists."
+    }
+  ],
+  "notes": []
+}
+```
+
+Rules:
+
+- Crontab 时间为 UTC。
+- 当前包含 deadline generation、due dispatch、delivery attempt cleanup。
+- Execution reminder generation 不直接进入 Beat，因为它需要 per-user fanout 且必须依赖已有 Today active plan。
 
 ## 11. 当前安全边界
 

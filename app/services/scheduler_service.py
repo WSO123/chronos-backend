@@ -85,5 +85,65 @@ class SchedulerService:
             ],
         }
 
+    def reminder_celery_beat_schedule(self) -> dict:
+        return {
+            "timezone": "UTC",
+            "entries": [
+                {
+                    "name": "reminder-generate-deadline-daily",
+                    "task": "reminder.generate_deadline",
+                    "schedule": {
+                        "type": "crontab",
+                        "minute": 30,
+                        "hour": 23,
+                    },
+                    "kwargs": {
+                        "user_id": None,
+                        "target_date": None,
+                        "window_days": 1,
+                        "reminder_hour": None,
+                    },
+                },
+                {
+                    "name": "reminder-dispatch-due-every-5-minutes",
+                    "task": "reminder.dispatch_due",
+                    "schedule": {
+                        "type": "interval",
+                        "seconds": 300,
+                    },
+                    "kwargs": {
+                        "limit": 50,
+                        "channel": None,
+                        "now": None,
+                    },
+                },
+                {
+                    "name": "reminder-cleanup-delivery-attempts-daily",
+                    "task": "reminder.cleanup_delivery_attempts",
+                    "schedule": {
+                        "type": "crontab",
+                        "minute": 10,
+                        "hour": 3,
+                    },
+                    "kwargs": {
+                        "retention_days": 30,
+                        "now": None,
+                        "limit": 500,
+                    },
+                },
+            ],
+            "excluded_entries": [
+                {
+                    "task_name": "reminder.generate_execution",
+                    "reason": "Requires per-user fanout after an active Today plan exists.",
+                }
+            ],
+            "notes": [
+                "This is a JSON-friendly Celery Beat proposal, not a running scheduler.",
+                "Crontab entries are expressed in UTC.",
+                "Execution reminder fanout should be implemented as a separate worker before Beat wiring.",
+            ],
+        }
+
 
 scheduler_service = SchedulerService()
