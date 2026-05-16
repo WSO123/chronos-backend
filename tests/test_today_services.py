@@ -70,6 +70,30 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(replanned["plan_version"], 2)
         self.assertEqual(replanned["sections"]["pinned_tasks"][0]["title"], "New urgent task")
 
+    def test_replan_preserves_completed_today_progress(self):
+        task = task_service.create_task(self.db, user_id=self.user.id, title="Already done today")
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        item_id = today["sections"]["recommended_tasks"][0]["daily_plan_item_id"]
+        planning_service.update_item_status(
+            self.db,
+            item_id=item_id,
+            user_id=self.user.id,
+            status=DailyPlanItemStatus.COMPLETED,
+        )
+
+        replanned = planning_service.replan_today(
+            self.db,
+            user_id=self.user.id,
+            plan_date=self.plan_date,
+            reason="Keep progress stable",
+        )
+
+        self.assertEqual(replanned["progress"]["completed_count"], 1)
+        self.assertEqual(replanned["progress"]["total_count"], 1)
+        self.assertEqual(replanned["progress"]["completion_rate"], 1.0)
+        self.assertEqual(replanned["sections"]["recommended_tasks"][0]["task_id"], task.id)
+        self.assertEqual(replanned["sections"]["recommended_tasks"][0]["item_status"], DailyPlanItemStatus.COMPLETED)
+
     def test_update_item_complete_syncs_task_progress_and_events(self):
         task = task_service.create_task(self.db, user_id=self.user.id, title="Finish from Today")
         today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
@@ -91,6 +115,32 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(refreshed_today["progress"]["completion_rate"], 1.0)
         self.assertIn("TASK_COMPLETED", {event.event_type for event in events})
         self.assertIn("DAILY_PLAN_ITEM_UPDATED", {event.event_type for event in events})
+
+    def test_update_item_planned_reactivates_postponed_task(self):
+        task = task_service.create_task(self.db, user_id=self.user.id, title="Bring back today")
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        item_id = today["sections"]["recommended_tasks"][0]["daily_plan_item_id"]
+        planning_service.update_item_status(
+            self.db,
+            item_id=item_id,
+            user_id=self.user.id,
+            status=DailyPlanItemStatus.POSTPONED,
+        )
+
+        updated_item = planning_service.update_item_status(
+            self.db,
+            item_id=item_id,
+            user_id=self.user.id,
+            status=DailyPlanItemStatus.PLANNED,
+        )
+        refreshed_task = self.db.get(Task, task.id)
+        refreshed_today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        events = self.db.query(ActivityEvent).filter(ActivityEvent.user_id == self.user.id).all()
+
+        self.assertEqual(updated_item["item_status"], DailyPlanItemStatus.PLANNED)
+        self.assertEqual(refreshed_task.status, TaskStatus.ACTIVE)
+        self.assertEqual(refreshed_today["sections"]["recommended_tasks"][0]["item_status"], DailyPlanItemStatus.PLANNED)
+        self.assertIn("TASK_ACTIVATED", {event.event_type for event in events})
 
 
 if __name__ == "__main__":

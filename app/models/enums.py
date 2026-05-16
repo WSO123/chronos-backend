@@ -68,6 +68,14 @@ class DailyPlanItemStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class FocusSessionStatus(StrEnum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    INTERRUPTED = "interrupted"
+    POSTPONED = "postponed"
+
+
 class CaptureInputType(StrEnum):
     TEXT = "text"
     VOICE = "voice"

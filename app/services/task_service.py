@@ -126,6 +126,8 @@ class TaskService:
         task_id: uuid.UUID,
         user_id: uuid.UUID,
         related_daily_plan_id: uuid.UUID | None = None,
+        related_focus_session_id: uuid.UUID | None = None,
+        actual_duration_min_delta: int = 0,
         commit: bool = True,
     ) -> Task:
         task = self._get_user_task(db, task_id=task_id, user_id=user_id)
@@ -137,6 +139,8 @@ class TaskService:
 
         task.status = TaskStatus.COMPLETED
         task.progress = Decimal("1.00")
+        if actual_duration_min_delta:
+            task.actual_duration_min += actual_duration_min_delta
         activity_event_service.add_event(
             db,
             user_id=user_id,
@@ -145,6 +149,8 @@ class TaskService:
             event_type="TASK_COMPLETED",
             related_task_id=task.id,
             related_daily_plan_id=related_daily_plan_id,
+            related_focus_session_id=related_focus_session_id,
+            payload={"actual_duration_min_delta": actual_duration_min_delta},
         )
         if commit:
             db.commit()
@@ -160,6 +166,8 @@ class TaskService:
         task_id: uuid.UUID,
         user_id: uuid.UUID,
         related_daily_plan_id: uuid.UUID | None = None,
+        related_focus_session_id: uuid.UUID | None = None,
+        actual_duration_min_delta: int = 0,
         commit: bool = True,
     ) -> Task:
         task = self._get_user_task(db, task_id=task_id, user_id=user_id)
@@ -170,12 +178,49 @@ class TaskService:
         )
 
         task.status = TaskStatus.POSTPONED
+        if actual_duration_min_delta:
+            task.actual_duration_min += actual_duration_min_delta
         activity_event_service.add_event(
             db,
             user_id=user_id,
             entity_type=EntityType.TASK,
             entity_id=task.id,
             event_type="TASK_POSTPONED",
+            related_task_id=task.id,
+            related_daily_plan_id=related_daily_plan_id,
+            related_focus_session_id=related_focus_session_id,
+            payload={"actual_duration_min_delta": actual_duration_min_delta},
+        )
+        if commit:
+            db.commit()
+            db.refresh(task)
+            return self.get_task(db, task_id=task.id, user_id=user_id)
+        db.flush()
+        return task
+
+    def activate_task(
+        self,
+        db: Session,
+        *,
+        task_id: uuid.UUID,
+        user_id: uuid.UUID,
+        related_daily_plan_id: uuid.UUID | None = None,
+        commit: bool = True,
+    ) -> Task:
+        task = self._get_user_task(db, task_id=task_id, user_id=user_id)
+        self._ensure_task_status(
+            task,
+            allowed={TaskStatus.POSTPONED},
+            action="marked planned",
+        )
+
+        task.status = TaskStatus.ACTIVE
+        activity_event_service.add_event(
+            db,
+            user_id=user_id,
+            entity_type=EntityType.TASK,
+            entity_id=task.id,
+            event_type="TASK_ACTIVATED",
             related_task_id=task.id,
             related_daily_plan_id=related_daily_plan_id,
         )

@@ -33,6 +33,8 @@ class PlannedTask:
     section: DailyPlanItemSection
     recommendation_reason: str
     estimated_duration_min: int
+    status: DailyPlanItemStatus | None = None
+    contributes_to_strategy: bool = True
 
 
 class PlanningService:
@@ -123,6 +125,28 @@ class PlanningService:
         db.refresh(item)
         return self._item_response(item)
 
+    def apply_focus_result(
+        self,
+        db: Session,
+        *,
+        item_id: uuid.UUID,
+        user_id: uuid.UUID,
+        status: DailyPlanItemStatus | None,
+        focus_minutes: int,
+    ) -> DailyPlanItem:
+        item = self._get_current_item_for_update(db, item_id=item_id, user_id=user_id)
+        plan = db.get(DailyPlan, item.daily_plan_id)
+        if plan is None or plan.user_id != user_id:
+            raise NotFoundError("Daily plan item not found")
+
+        if status is not None:
+            item.status = status
+        if focus_minutes:
+            plan.focus_minutes += focus_minutes
+        self._refresh_plan_stats(db, plan=plan, revision_id=plan.current_revision_id)
+        db.flush()
+        return item
+
     def _create_plan(
         self,
         db: Session,
@@ -168,20 +192,32 @@ class PlanningService:
         reason: str,
     ) -> PlanRevision:
         version = 1 if trigger == PlanRevisionTrigger.INITIAL else plan.current_version + 1
-        planned_tasks = self._planned_tasks(db, user_id=plan.user_id, plan_date=plan.plan_date)
+        remaining_tasks = self._planned_tasks(db, user_id=plan.user_id, plan_date=plan.plan_date)
+        completed_carryovers = self._completed_carryover_tasks(db, plan=plan)
+        remaining_task_ids = {planned.task.id for planned in remaining_tasks}
+        planned_tasks = remaining_tasks + [
+            planned for planned in completed_carryovers if planned.task.id not in remaining_task_ids
+        ]
         revision = PlanRevision(
             daily_plan_id=plan.id,
             version=version,
             trigger=trigger,
             created_by=ActorType.SYSTEM,
             reason=reason,
-            diff_payload={"task_ids": [str(planned.task.id) for planned in planned_tasks]},
+            diff_payload={
+                "task_ids": [str(planned.task.id) for planned in planned_tasks],
+                "completed_carryover_task_ids": [str(planned.task.id) for planned in completed_carryovers],
+            },
         )
         db.add(revision)
         db.flush()
 
         for sort_order, planned in enumerate(planned_tasks, start=1):
-            status = DailyPlanItemStatus.POSTPONED if planned.section == DailyPlanItemSection.ROLLED_OVER else DailyPlanItemStatus.PLANNED
+            status = planned.status or (
+                DailyPlanItemStatus.POSTPONED
+                if planned.section == DailyPlanItemSection.ROLLED_OVER
+                else DailyPlanItemStatus.PLANNED
+            )
             db.add(
                 DailyPlanItem(
                     daily_plan_id=plan.id,
@@ -195,7 +231,8 @@ class PlanningService:
                 )
             )
 
-        strategy_payload = self._strategy_for(planned_tasks)
+        strategy_tasks = [planned for planned in planned_tasks if planned.contributes_to_strategy]
+        strategy_payload = self._strategy_for(strategy_tasks)
         db.add(
             StrategySnapshot(
                 daily_plan_id=plan.id,
@@ -231,6 +268,27 @@ class PlanningService:
             for task in tasks
         ]
         return sorted(planned_tasks, key=self._planned_sort_key)
+
+    def _completed_carryover_tasks(self, db: Session, *, plan: DailyPlan) -> list[PlannedTask]:
+        carryovers: list[PlannedTask] = []
+        seen_task_ids: set[uuid.UUID] = set()
+        for item in self._current_items(db, plan=plan):
+            if item.task_id in seen_task_ids:
+                continue
+            if item.status != DailyPlanItemStatus.COMPLETED and item.task.status != TaskStatus.COMPLETED:
+                continue
+            seen_task_ids.add(item.task_id)
+            carryovers.append(
+                PlannedTask(
+                    task=item.task,
+                    section=item.section,
+                    recommendation_reason=item.recommendation_reason,
+                    estimated_duration_min=item.estimated_duration_min or item.task.estimated_duration_min or 25,
+                    status=DailyPlanItemStatus.COMPLETED,
+                    contributes_to_strategy=False,
+                )
+            )
+        return carryovers
 
     def _section_for(self, task: Task, *, plan_date: date) -> DailyPlanItemSection:
         if task.status == TaskStatus.POSTPONED:
@@ -434,6 +492,14 @@ class PlanningService:
         if status == DailyPlanItemStatus.PLANNED:
             if item.task.status == TaskStatus.COMPLETED:
                 raise InvalidStateError("completed task cannot be marked planned")
+            if item.task.status == TaskStatus.POSTPONED:
+                task_service.activate_task(
+                    db,
+                    task_id=item.task_id,
+                    user_id=user_id,
+                    related_daily_plan_id=plan.id,
+                    commit=False,
+                )
             item.status = DailyPlanItemStatus.PLANNED
             return
 

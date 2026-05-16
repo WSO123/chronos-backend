@@ -36,6 +36,8 @@ Capture / Inbox 已经能把输入确认生成 Task / Goal。下一步需要把 
 - 实现 `GET /api/v1/today`，首次打开当天 Today 时 lazy create active DailyPlan。
 - 实现 `POST /api/v1/today/replan`，按规则生成新的 plan revision。
 - 实现 `PATCH /api/v1/today/items/{item_id}`，支持 Today 内完成 / 延后 / 跳过等轻操作。
+- Replan 时保留当天已完成项，避免今日进度因重排回落。
+- Today item 从 postponed 改回 planned 时，同步 Task 回到 active。
 - P1 使用 rule planner，不接真实 LLM，不返回复杂评分细节。
 
 ### 非目标
@@ -92,6 +94,7 @@ Capture -> Inbox -> Today -> Task Detail -> Focus -> Report
 | DailyPlanItem | 保存任务顺序、section 和状态 | Must | 当前 revision 作为 Today 来源 |
 | Today API | 返回首页聚合数据 | Must | 轻量、克制 |
 | Today item 操作 | 完成 / 延后 / 跳过今日项 | Must | 同步 Task 状态 |
+| Replan 进度保护 | 已完成项在新 revision 中继续保留 | Must | 防止完成率回落 |
 
 ### 用户故事
 
@@ -206,8 +209,10 @@ P1 不接真实 LLM。`PlanningService` 使用 rule planner：
 - [x] 首次打开 Today 自动生成 DailyPlan。
 - [x] Today 返回推荐执行序列、策略摘要、进度和 quick actions。
 - [x] Replan 生成新的 PlanRevision。
+- [x] Replan 后当天已完成任务仍保留在当前 Today 进度中。
 - [x] Today item 完成时同步 Task.completed。
 - [x] Today item 延后时同步 Task.postponed。
+- [x] Today item 改回 planned 时同步 Task.active。
 - [x] 不同 `X-User-Id` 之间数据隔离。
 
 ### 数据验收
@@ -232,7 +237,9 @@ P1 不接真实 LLM。`PlanningService` 使用 rule planner：
 - [x] Today lazy create
 - [x] rule planner section 排序
 - [x] replan version 增长
+- [x] replan 保留已完成进度
 - [x] item complete 同步 Task 和事件
+- [x] item planned 重新激活 postponed Task
 
 ### API 测试
 
