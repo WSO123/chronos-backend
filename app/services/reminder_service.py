@@ -17,6 +17,7 @@ from app.models.enums import (
 )
 from app.models.goal import Goal
 from app.models.reminder import Reminder
+from app.models.reminder_delivery import ReminderDeliveryAttempt
 from app.models.task import Task
 from app.models.user import User, UserSettings
 from app.providers.notifications import NotificationDeliveryRequest, notification_delivery_registry
@@ -107,7 +108,7 @@ class ReminderService:
         limit: int = 50,
         channel: str | None = None,
     ) -> dict:
-        resolved_now = now or datetime.now(UTC)
+        resolved_now = self._normalize_datetime(now or datetime.now(UTC))
         if channel is not None and channel not in self.allowed_channels:
             raise ValidationDomainError(f"Reminder channel {channel} is not supported")
         stmt = (
@@ -125,9 +126,34 @@ class ReminderService:
         sent_reminders: list[Reminder] = []
         delivery_results: list[dict] = []
         skipped_count = 0
+        cooldown_count = 0
         for reminder in due_reminders:
+            cooldown_until = self._delivery_cooldown_until(db, reminder=reminder, now=resolved_now)
+            if cooldown_until is not None:
+                cooldown_count += 1
+                delivery_results.append(
+                    {
+                        "reminder_id": reminder.id,
+                        "channel": reminder.channel,
+                        "status": "cooldown",
+                        "provider": None,
+                        "reason": "retry_cooldown",
+                        "next_retry_at": cooldown_until,
+                    }
+                )
+                continue
             delivery_result = notification_delivery_registry.deliver(self._delivery_request_for(reminder))
-            delivery_results.append(self._delivery_result_to_dict(delivery_result))
+            next_retry_at = None
+            if delivery_result.status != "sent":
+                next_retry_at = resolved_now + timedelta(minutes=15)
+            self._record_delivery_attempt(
+                db,
+                reminder=reminder,
+                delivery_result=delivery_result,
+                attempted_at=resolved_now,
+                next_retry_at=next_retry_at,
+            )
+            delivery_results.append(self._delivery_result_to_dict(delivery_result, next_retry_at=next_retry_at))
             if delivery_result.status != "sent":
                 skipped_count += 1
                 continue
@@ -141,6 +167,7 @@ class ReminderService:
             "status": "dispatched",
             "sent_count": len(sent_reminders),
             "skipped_count": skipped_count,
+            "cooldown_count": cooldown_count,
             "channel": channel,
             "sent_at": resolved_now,
             "reminders": sent_reminders,
@@ -369,14 +396,62 @@ class ReminderService:
             metadata=reminder.reminder_metadata,
         )
 
-    def _delivery_result_to_dict(self, result) -> dict:
+    def _delivery_result_to_dict(self, result, *, next_retry_at: datetime | None = None) -> dict:
         return {
             "reminder_id": result.reminder_id,
             "channel": result.channel,
             "status": result.status,
             "provider": result.provider,
             "reason": result.reason,
+            "next_retry_at": next_retry_at,
         }
+
+    def _record_delivery_attempt(
+        self,
+        db: Session,
+        *,
+        reminder: Reminder,
+        delivery_result,
+        attempted_at: datetime,
+        next_retry_at: datetime | None,
+    ) -> None:
+        db.add(
+            ReminderDeliveryAttempt(
+                user_id=reminder.user_id,
+                reminder_id=reminder.id,
+                channel=reminder.channel,
+                provider=delivery_result.provider,
+                status=delivery_result.status,
+                reason=delivery_result.reason,
+                attempted_at=attempted_at,
+                next_retry_at=next_retry_at,
+                attempt_metadata={
+                    "title": reminder.title,
+                    "reminder_type": reminder.reminder_type,
+                },
+            )
+        )
+
+    def _delivery_cooldown_until(
+        self,
+        db: Session,
+        *,
+        reminder: Reminder,
+        now: datetime,
+    ) -> datetime | None:
+        stmt = (
+            select(ReminderDeliveryAttempt)
+            .where(ReminderDeliveryAttempt.reminder_id == reminder.id)
+            .order_by(ReminderDeliveryAttempt.attempted_at.desc())
+            .limit(1)
+        )
+        latest = db.scalars(stmt).first()
+        if latest is None or latest.status == "sent" or latest.next_retry_at is None:
+            return None
+        next_retry_at = latest.next_retry_at
+        if next_retry_at.tzinfo is None:
+            next_retry_at = next_retry_at.replace(tzinfo=UTC)
+        return next_retry_at if next_retry_at > now else None
 
     def _settings_for_user(self, db: Session, *, user_id: uuid.UUID) -> UserSettings:
         stmt = select(UserSettings).where(UserSettings.user_id == user_id)

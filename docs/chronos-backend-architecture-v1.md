@@ -720,6 +720,32 @@ Reminder {
 - `deadline` reminders 可由 Task / Goal deadline 规则生成。
 - `execution` reminders 可由已有 Today active plan 的 pinned / recommended planned items 规则生成，但不创建 Today、不 replan。
 
+### ReminderDeliveryAttempt
+
+```text
+ReminderDeliveryAttempt {
+  id
+  user_id
+  reminder_id
+  channel
+  provider
+  status                 // sent | skipped
+  reason
+  attempted_at
+  next_retry_at
+  metadata
+  created_at
+  updated_at
+}
+```
+
+说明：
+
+- 记录 reminder dispatch 的 delivery 尝试结果。
+- 当前用于避免未配置 push / email provider 被每次 dispatch 重复尝试。
+- `sent` attempt 对应 Reminder 状态流转为 `sent`。
+- `skipped` attempt 会设置轻量 cooldown，Reminder 保持 `scheduled`。
+
 ### CaptureInput
 
 ```text
@@ -1273,11 +1299,11 @@ POST /api/v1/reminders/{reminder_id}/dismiss
 说明：
 
 - P3 已支持 Reminder Center 的基础读取、手动创建和 dismiss。
-- P3 已支持 `reminder.dispatch_due` worker，扫描 due reminders，通过 notification delivery provider 后再决定是否标记 `sent`。
+- P3 已支持 `reminder.dispatch_due` worker，扫描 due reminders，通过 notification delivery provider 和 delivery attempt cooldown 后再决定是否标记 `sent`。
 - P3 已支持 `reminder.generate_deadline` worker，基于 Task / Goal deadline 生成 `deadline` reminders，并避免重复生成。
 - P3 已支持 `reminder.generate_execution` worker，基于已有 Today active plan 的 pinned / recommended planned items 生成 `execution` reminders，并避免重复生成。
 - P3 已支持 `/api/v1/me/settings` 读写提醒偏好，deadline / execution generator 会遵守全局通知开关、类型开关、channel 和默认提醒参数。
-- 当前只有 `in_app` delivery provider 会送达 Reminder Center 并标记 sent；`push` / `email` 在 provider 未配置时返回 skipped，保持 scheduled。
+- 当前只有 `in_app` delivery provider 会送达 Reminder Center 并标记 sent；`push` / `email` 在 provider 未配置时返回 skipped，保持 scheduled，并通过 `ReminderDeliveryAttempt.next_retry_at` 避免短时间重复尝试。
 - Reminder 可关联 Task 或 Goal，但不会改变 Task / Goal 状态。
 - Execution reminder generator 不会 lazy create Today plan，不会触发 replan，也不会改变 DailyPlan / DailyPlanItem 状态。
 

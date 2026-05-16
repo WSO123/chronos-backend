@@ -659,8 +659,9 @@ Rules:
 - 当前通过 notification delivery provider 决定是否标记 `sent`。
 - `in_app` provider 代表送达 Reminder Center，会标记 `sent` 并返回 reminder payload。
 - `push` / `email` provider 当前未配置，会返回 `skipped`，reminder 保持 `scheduled`，不会假装发送成功。
+- `push` / `email` skipped 后会记录 delivery attempt 和 `next_retry_at`，cooldown 内再次 dispatch 会返回 `cooldown`，不重复调用 provider。
 - `dismissed` / `canceled` / 已 `sent` 的 reminder 不会再次进入发送结果。
-- dispatch payload 会返回 `sent_count`、`skipped_count`、`reminders` 和 `delivery_results`。
+- dispatch payload 会返回 `sent_count`、`skipped_count`、`cooldown_count`、`reminders` 和 `delivery_results`。
 - `reminder.generate_deadline` 基于 Task / Goal deadline 生成 `deadline` reminders，并避免重复生成。
 - `reminder.generate_deadline` 当前只创建 scheduled reminders，不发送。
 - `reminder.generate_execution` 只读取已有 Today active plan，不 lazy create Today，也不触发 replan。
