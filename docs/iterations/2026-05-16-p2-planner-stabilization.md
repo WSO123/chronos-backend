@@ -38,14 +38,38 @@ P2 已经完成 Task Dependencies、Task Priority Adjustment、Strategy Detail �
 - 更新 P1/P2 frontend API contract。
 - 新增本迭代记录。
 
-## 3. 非目标
+## 3. 用户故事
+
+### 用户故事
+
+```text
+作为一个每天依赖 Chronos 决定先做什么的用户，
+我希望 Today 能理解任务之间的前后关系，
+以便我不会先开始一个其实还缺前置准备的任务。
+```
+
+```text
+作为一个会手动修正 AI 优先级判断的用户，
+我希望 Chronos 在后续编排中记住我的修正，
+以便系统越来越符合我对“重要任务”的判断，而不是每次都从零开始。
+```
+
+### 系统故事
+
+```text
+作为 Today planner，
+我需要读取任务依赖边和用户优先级修正事件，
+以便在不增加 Today 首屏复杂度的前提下，生成更可信的执行顺序。
+```
+
+## 4. 非目标
 
 - 不接真实 LLM。
 - 不做实时自动 replan。
 - 不在 Today 首屏展示 score factors。
 - 不做复杂依赖图调度、资源约束调度或日历时间块。
 
-## 4. 行为规则
+## 5. 行为规则
 
 | 信号 | 行为 |
 | --- | --- |
@@ -54,7 +78,7 @@ P2 已经完成 Task Dependencies、Task Priority Adjustment、Strategy Detail �
 | 用户调整 priority / value_level | 写入事件后，后续新计划或主动 replan 会读取该修正 |
 | Today 已有 active plan | 不静默改版，只同步任务状态；用户需要主动 replan 才改变顺序 |
 
-## 5. 验收标准
+## 6. 验收标准
 
 - 有依赖关系时，`prerequisite_task` 在 Today 中先于 `dependent_task`。
 - Strategy Detail 返回 `dependency_protected_count`。
@@ -62,7 +86,7 @@ P2 已经完成 Task Dependencies、Task Priority Adjustment、Strategy Detail �
 - Strategy Detail 返回 `user_adjusted_count`。
 - 原有 Today / Focus / Report 主链路测试继续通过。
 
-## 6. 验证结果
+## 7. 验证结果
 
 | 验证项 | 结果 |
 | --- | --- |
@@ -74,7 +98,7 @@ P2 已经完成 Task Dependencies、Task Priority Adjustment、Strategy Detail �
 | `scripts/smoke_p1_execution_loop.py` | OK |
 | `scripts/smoke_p2_goal_insight_loop.py` | OK |
 
-## 7. 风险与后续
+## 8. 风险与后续
 
 - 当前依赖排序仍是轻量拓扑深度，不处理复杂资源约束。
 - `TASK_PRIORITY_ADJUSTED` 当前只作为“用户修正”信号，不做长期学习权重。

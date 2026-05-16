@@ -76,6 +76,28 @@ External Source -> Capture / Inbox -> Today
 | Disconnect Data Source | 标记断开并关闭同步 | Must |
 | ActivityEvent | 记录连接、更新、断开事件 | Must |
 
+### 用户故事
+
+```text
+作为一个希望 Chronos 能逐步理解自己日程和外部信息的用户，
+我希望能在 Me / Settings 中看到日历、邮件、健康数据的连接状态，
+以便我知道哪些外部信息未来会被系统用于任务捕获、精力判断和每日编排。
+```
+
+```text
+作为一个不希望外部信息直接打乱计划的用户，
+我希望外部来源内容先进入 Capture / Inbox，
+以便我保留确认、编辑和归类的控制感。
+```
+
+### 开发者故事
+
+```text
+作为后续 Calendar / Email / Health worker 的开发者，
+我希望有统一的数据源连接模型，
+以便不同外部来源都能用一致的状态、授权范围和同步元数据进入后续处理流程。
+```
+
 ## 5. 后端设计
 
 ### 影响模块
