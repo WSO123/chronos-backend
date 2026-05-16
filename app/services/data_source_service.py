@@ -120,6 +120,34 @@ class DataSourceService:
             "items": items,
         }
 
+    def sync_connection_now(
+        self,
+        db: Session,
+        *,
+        connection_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> dict:
+        connection = self._get_user_connection(db, connection_id=connection_id, user_id=user_id)
+        if connection.source_type in {DataSourceType.CALENDAR, DataSourceType.EMAIL}:
+            from app.services.data_source_sync_service import data_source_sync_service
+
+            return data_source_sync_service.sync_connection(
+                db,
+                connection_id=connection.id,
+                user_id=user_id,
+                trigger="manual",
+            )
+        if connection.source_type == DataSourceType.HEALTH:
+            from app.services.health_sync_service import health_sync_service
+
+            return health_sync_service.sync_energy_metrics(
+                db,
+                connection_id=connection.id,
+                user_id=user_id,
+                trigger="manual",
+            )
+        raise ValidationDomainError(f"Source type {connection.source_type.value} is not syncable")
+
     def connect_source(
         self,
         db: Session,

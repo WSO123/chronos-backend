@@ -110,6 +110,36 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
         200,
         "connect calendar source",
     )
+    email_connection = _expect(
+        client.put(
+            "/api/v1/data-sources/email/gmail",
+            json={
+                "external_account_label": "chronos-p3-smoke@example.com",
+                "sync_enabled": True,
+                "connection_metadata": {
+                    "fake_items": [
+                        {
+                            "external_item_id": f"p3-smoke-email-{suffix}",
+                            "external_item_type": "email_message",
+                            "title": f"P3 smoke manual sync email {suffix}",
+                            "body": "Imported by an explicit manual sync action.",
+                        }
+                    ],
+                    "fake_next_cursor": f"p3-smoke-email-cursor-{suffix}",
+                },
+            },
+            headers=headers,
+        ),
+        200,
+        "connect email source",
+    )
+    manual_sync = _expect(
+        client.post(f"/api/v1/data-sources/{email_connection['id']}/sync", headers=headers),
+        200,
+        "manual sync email source",
+    )
+    if manual_sync["status"] != "synced" or manual_sync["imported_count"] != 1:
+        raise RuntimeError(f"manual email sync did not import one item: {manual_sync}")
     imported = _expect(
         client.post(
             "/api/v1/captures/external-imports",
@@ -175,7 +205,7 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
         200,
         "get data source sync summary",
     )
-    if sync_summary["connected_count"] != 2 or sync_summary["attention_count"] != 0:
+    if sync_summary["connected_count"] != 3 or sync_summary["attention_count"] != 0:
         raise RuntimeError(f"unexpected data source sync summary: {sync_summary}")
 
     execution_reminders = generate_execution_reminders.run(
@@ -283,6 +313,8 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
         "health_connection_id": health_connection["id"],
         "health_sync_run_id": health_sync["sync_run_id"],
         "calendar_connection_id": calendar_connection["id"],
+        "email_connection_id": email_connection["id"],
+        "manual_sync_run_id": manual_sync["sync_run_id"],
         "external_import_id": imported["import_record"]["id"],
         "inbox_item_id": imported["inbox_item"]["id"],
         "task_id": task_id,

@@ -96,6 +96,28 @@ class DataSourceSyncSummaryResponse(BaseModel):
     items: list[DataSourceSyncSummaryItemResponse]
 
 
+class DataSourceManualSyncResponse(BaseModel):
+    status: str
+    sync_run_id: uuid.UUID | None
+    skip_reason: str | None = None
+    error_message: str | None = None
+    connection_id: uuid.UUID
+    user_id: uuid.UUID
+    source_type: DataSourceType
+    provider: str
+    processed_count: int = 0
+    imported_count: int = 0
+    reused_count: int = 0
+    import_record_ids: list[uuid.UUID] = Field(default_factory=list)
+    energy_metric_ids: list[uuid.UUID] = Field(default_factory=list)
+    sync_cursor: str | None = None
+    last_sync_at: datetime | None = None
+    fetched_from_provider: bool = False
+    provider_mode: str | None = None
+    retryable: bool = False
+    next_retry_at: datetime | None = None
+
+
 class DataSourceSyncRunResponse(TimestampedResponse):
     user_id: uuid.UUID
     data_source_connection_id: uuid.UUID | None

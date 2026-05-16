@@ -128,6 +128,75 @@ class DataSourceServiceTests(unittest.TestCase):
         self.assertTrue(item["retryable"])
         self.assertEqual(item["latest_run_error_message"], "provider timeout")
 
+    def test_sync_connection_now_routes_calendar_to_capture_import(self):
+        connection = data_source_service.connect_source(
+            self.db,
+            user_id=self.user.id,
+            source_type=DataSourceType.CALENDAR,
+            provider="google_calendar",
+            connection_metadata={
+                "fake_items": [
+                    {
+                        "external_item_id": "manual-calendar-1",
+                        "title": "手动同步日历事项",
+                    }
+                ]
+            },
+        )
+
+        result = data_source_service.sync_connection_now(
+            self.db,
+            connection_id=connection.id,
+            user_id=self.user.id,
+        )
+
+        self.assertEqual(result["status"], "synced")
+        self.assertEqual(result["source_type"], DataSourceType.CALENDAR)
+        self.assertEqual(result["imported_count"], 1)
+        self.assertTrue(result["import_record_ids"])
+
+    def test_sync_connection_now_routes_health_to_energy_metric(self):
+        connection = data_source_service.connect_source(
+            self.db,
+            user_id=self.user.id,
+            source_type=DataSourceType.HEALTH,
+            provider="apple_health",
+            connection_metadata={
+                "fake_energy_metrics": [
+                    {
+                        "metric_date": "2026-05-17",
+                        "energy_score": 73,
+                    }
+                ]
+            },
+        )
+
+        result = data_source_service.sync_connection_now(
+            self.db,
+            connection_id=connection.id,
+            user_id=self.user.id,
+        )
+
+        self.assertEqual(result["status"], "synced")
+        self.assertEqual(result["source_type"], DataSourceType.HEALTH)
+        self.assertEqual(result["imported_count"], 1)
+        self.assertTrue(result["energy_metric_ids"])
+
+    def test_sync_connection_now_is_user_isolated(self):
+        connection = data_source_service.connect_source(
+            self.db,
+            user_id=self.user.id,
+            source_type=DataSourceType.EMAIL,
+            provider="gmail",
+        )
+
+        with self.assertRaises(NotFoundError):
+            data_source_service.sync_connection_now(
+                self.db,
+                connection_id=connection.id,
+                user_id=self.other_user.id,
+            )
+
     def test_update_and_disconnect_connection(self):
         connection = data_source_service.connect_source(
             self.db,

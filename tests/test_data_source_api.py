@@ -168,6 +168,40 @@ class DataSourceAPITests(unittest.TestCase):
         self.assertEqual(other_response.status_code, 200)
         self.assertEqual(other_response.json()["items"], [])
 
+    def test_manual_sync_connection_imports_items(self):
+        connect_response = self.client.put(
+            "/api/v1/data-sources/calendar/google_calendar",
+            json={
+                "connection_metadata": {
+                    "fake_items": [
+                        {
+                            "external_item_id": "api-manual-sync-calendar-1",
+                            "title": "手动同步 API 验证",
+                        }
+                    ]
+                }
+            },
+            headers=self.headers,
+        )
+        connection_id = connect_response.json()["id"]
+
+        response = self.client.post(f"/api/v1/data-sources/{connection_id}/sync", headers=self.headers)
+        other_response = self.client.post(f"/api/v1/data-sources/{connection_id}/sync", headers=self.other_headers)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "synced")
+        self.assertEqual(body["connection_id"], connection_id)
+        self.assertEqual(body["source_type"], "calendar")
+        self.assertEqual(body["imported_count"], 1)
+        self.assertTrue(body["import_record_ids"])
+        inbox_response = self.client.get("/api/v1/inbox", headers=self.headers)
+        self.assertEqual(inbox_response.status_code, 200)
+        self.assertEqual(len(inbox_response.json()), 1)
+        self.assertEqual(inbox_response.json()[0]["status"], "pending")
+        self.assertEqual(inbox_response.json()[0]["title"], "手动同步 API 验证")
+        self.assertEqual(other_response.status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

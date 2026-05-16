@@ -25,6 +25,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Connect Data Source Placeholder | `PUT /api/v1/data-sources/{source_type}/{provider}` | Ready |
 | Update Data Source Status | `PATCH /api/v1/data-sources/{connection_id}` | Ready |
 | Data Source Sync Summary | `GET /api/v1/data-sources/sync-summary` | Ready |
+| Manual Data Source Sync | `POST /api/v1/data-sources/{connection_id}/sync` | Ready |
 | Data Source Sync Runs | `GET /api/v1/data-sources/{connection_id}/sync-runs` | Ready |
 | Disconnect Data Source | `POST /api/v1/data-sources/{connection_id}/disconnect` | Ready |
 | External Capture Import | `POST /api/v1/captures/external-imports` | Ready |
@@ -175,6 +176,38 @@ Rules:
 - `attention_reason` 只用于轻量提示，可为 `needs_reauth` / `paused` / `disconnected` / `sync_disabled` / `latest_sync_failed`。
 - 不返回外部 payload、token 或完整 sync history。
 - 详细同步记录仍使用 `GET /data-sources/{connection_id}/sync-runs`。
+
+### POST `/api/v1/data-sources/{connection_id}/sync`
+
+用于用户在 Settings 中明确触发单个连接立即同步。
+
+Response key fields:
+
+```json
+{
+  "status": "synced",
+  "sync_run_id": "uuid",
+  "connection_id": "uuid",
+  "source_type": "calendar",
+  "provider": "google_calendar",
+  "processed_count": 1,
+  "imported_count": 1,
+  "reused_count": 0,
+  "import_record_ids": ["uuid"],
+  "energy_metric_ids": [],
+  "fetched_from_provider": true,
+  "provider_mode": "fake",
+  "retryable": false,
+  "next_retry_at": null
+}
+```
+
+Rules:
+
+- 只同步当前用户拥有的 connection。
+- Calendar / Email 仍进入 Capture / Inbox，不自动确认 Task / Goal。
+- Health 进入 EnergyDailyMetric，不创建 Task / Reminder / Today。
+- 当前是 fake provider 下的同步入口；真实 provider 前可改为异步 job。
 
 ### GET `/api/v1/data-sources/{connection_id}/sync-runs`
 

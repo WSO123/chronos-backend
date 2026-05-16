@@ -11,6 +11,7 @@ from app.schemas.data_sources import (
     DataSourceConnectionResponse,
     DataSourceConnectionUpdate,
     DataSourceListResponse,
+    DataSourceManualSyncResponse,
     DataSourceSyncRunResponse,
     DataSourceSyncSummaryResponse,
 )
@@ -73,6 +74,15 @@ def update_data_source_connection(
         user_id=user_id,
         updates=payload.model_dump(exclude_unset=True),
     )
+
+
+@router.post("/{connection_id}/sync", response_model=DataSourceManualSyncResponse)
+def sync_data_source_connection_now(
+    connection_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return data_source_service.sync_connection_now(db, connection_id=connection_id, user_id=user_id)
 
 
 @router.get("/{connection_id}/sync-runs", response_model=list[DataSourceSyncRunResponse])
