@@ -1110,6 +1110,7 @@ PATCH /api/v1/today/items/{item_id}
 - 包含 strategy summary、推荐任务序列、今日进度、Today Insights Preview、快速操作状态。
 - 不默认返回完整 AI 评分细节。
 - `GET /today/strategy` 返回 Strategy Detail，解释当前策略、PlanRevision、轻量 factors 和任务推荐理由。
+- P3 已在 Strategy Detail 增加只读 `energy` 解释块，说明 Energy 数据是否存在、推荐任务类型和是否已影响排序；当前 `applied_to_plan=false`，不自动重排。
 - `replan` 生成新的 PlanRevision；若异步执行，返回 `ai_job_id`。
 
 ### Tasks
@@ -1218,6 +1219,7 @@ GET /api/v1/energy/dashboard
 - `GET /dashboard` 返回趋势、今日精力摘要和轻量任务类型建议。
 - Health worker 占位同步通过 `health.sync_energy_connection` / `health.sync_ready_energy_connections` 写入 `EnergyDailyMetric`，当前 fake adapter 从 connection metadata 读取 `fake_energy_metrics`。
 - 当前不把 Energy 数据直接写入 Today 排序，只作为解释和后续策略输入。
+- `GET /today/strategy` 会读取同日 Energy metric 生成只读解释，但不会改变 DailyPlan / DailyPlanItem。
 
 ### Data Sources
 

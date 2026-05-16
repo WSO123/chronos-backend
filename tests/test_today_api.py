@@ -1,9 +1,11 @@
 import unittest
+from datetime import date
 
 from fastapi.testclient import TestClient
 
 from app.core.db import get_db
 from main import app
+from app.services.energy_service import energy_service
 from tests.db import TestingSessionLocal, override_get_db, reset_database
 from tests.factories import create_user
 
@@ -68,7 +70,35 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(body["task_rationales"][0]["title"], "Private strategy task")
         self.assertNotIn("Other strategy task", {item["title"] for item in body["task_rationales"]})
         self.assertTrue(body["explanation"])
+        self.assertEqual(body["energy"]["has_data"], False)
+        self.assertEqual(body["energy"]["applied_to_plan"], False)
+        self.assertEqual(body["energy"]["source"], "none")
         self.assertEqual(body["source"]["model_name"], "rule-planner")
+
+    def test_strategy_detail_returns_energy_explanation_without_reordering(self):
+        energy_service.upsert_daily_metric(
+            self.db,
+            user_id=self.user.id,
+            payload={"metric_date": date(2026, 5, 16), "energy_score": 88},
+        )
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Energy-aware but stable task", "priority": 1, "value_level": "high"},
+            headers=self.headers,
+        )
+        self.assertEqual(task_response.status_code, 201)
+
+        response = self.client.get("/api/v1/today/strategy?plan_date=2026-05-16", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["energy"]["has_data"], True)
+        self.assertEqual(body["energy"]["energy_level"], "high")
+        self.assertEqual(body["energy"]["recommended_mode"], "deep_work")
+        self.assertEqual(body["energy"]["source"], "energy_daily_metric")
+        self.assertEqual(body["energy"]["applied_to_plan"], False)
+        self.assertIn("不会自动", body["energy"]["explanation"])
+        self.assertEqual(body["task_rationales"][0]["title"], "Energy-aware but stable task")
 
     def test_replan_and_complete_today_item(self):
         self.client.post("/api/v1/tasks", json={"title": "First task"}, headers=self.headers)

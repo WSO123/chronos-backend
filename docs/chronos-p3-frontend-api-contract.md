@@ -35,6 +35,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Energy Dashboard | `GET /api/v1/energy/dashboard` | Ready |
 | Health Energy Sync Worker | `health.sync_energy_connection` | Ready |
 | Health Fake Provider Adapter | internal health provider registry | Ready |
+| Today Strategy Energy Explanation | `GET /api/v1/today/strategy` -> `energy` | Ready |
 | Notification Center | - | Not Started |
 
 ## 3. Data Sources
@@ -446,6 +447,32 @@ Frontend notes:
 - Energy Dashboard 可以展示睡眠趋势、压力趋势、精力曲线和任务类型建议。
 - Today 仍不直接依赖该接口改变排序；后续如接入 Today，只能作为解释性输入和可回滚的策略因子。
 - 文案应保持克制，避免用健康数据制造压力。
+
+### Today Strategy Energy Explanation
+
+`GET /api/v1/today/strategy` 在 P3 新增 `energy` 解释块：
+
+```json
+{
+  "energy": {
+    "has_data": true,
+    "metric_date": "2026-05-17",
+    "energy_score": 83,
+    "energy_level": "high",
+    "recommended_mode": "deep_work",
+    "explanation": "今天精力较好，适合保护深度任务；当前只作为解释，不会自动增加任务量。",
+    "applied_to_plan": false,
+    "source": "energy_daily_metric"
+  }
+}
+```
+
+Rules:
+
+- `energy` 只解释当天策略，不触发 replan。
+- 当前 `applied_to_plan=false`，表示 Energy 尚未参与 Today 排序。
+- 无 Energy 数据时返回 `has_data=false`、`source=none`，并说明 Today 仍基于任务价值、截止时间和依赖。
+- 前端不要把该字段放到 Today 首屏驾驶舱；它属于 Strategy Detail 的补充解释。
 
 ### Health worker placeholder
 

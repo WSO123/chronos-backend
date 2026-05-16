@@ -112,6 +112,17 @@ class StrategyDetailSourceResponse(BaseModel):
     generated_at: datetime
 
 
+class StrategyDetailEnergyResponse(BaseModel):
+    has_data: bool
+    metric_date: date
+    energy_score: int | None
+    energy_level: str
+    recommended_mode: str
+    explanation: str
+    applied_to_plan: bool
+    source: str
+
+
 class StrategyDetailResponse(BaseModel):
     date: date
     daily_plan_id: uuid.UUID
@@ -122,6 +133,7 @@ class StrategyDetailResponse(BaseModel):
     revision: StrategyDetailRevisionResponse
     factors: StrategyDetailFactorsResponse
     explanation: list[str]
+    energy: StrategyDetailEnergyResponse
     task_rationales: list[TodayTaskResponse]
     source: StrategyDetailSourceResponse
 

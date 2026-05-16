@@ -25,6 +25,7 @@ from app.models.task_dependency import TaskDependency
 from app.models.task import Task
 from app.models.user import User
 from app.services.activity_event_service import activity_event_service
+from app.services.energy_service import energy_service
 from app.services.errors import InvalidStateError, NotFoundError
 from app.services.task_service import task_service
 
@@ -552,6 +553,7 @@ class PlanningService:
             },
             "factors": factors,
             "explanation": self._strategy_explanation(strategy=strategy, factors=factors),
+            "energy": self._strategy_energy_explanation(db, plan=plan),
             "task_rationales": [self._item_response(item) for item in items],
             "source": {
                 "strategy_snapshot_id": strategy.id,
@@ -559,6 +561,31 @@ class PlanningService:
                 "prompt_version": strategy.prompt_version,
                 "generated_at": strategy.created_at,
             },
+        }
+
+    def _strategy_energy_explanation(self, db: Session, *, plan: DailyPlan) -> dict:
+        dashboard = energy_service.get_dashboard(db, user_id=plan.user_id, end_date=plan.plan_date, days=1)
+        summary = dashboard["summary"]
+        task_match = dashboard["task_match"]
+        has_data = dashboard["trends"][0]["has_data"]
+        level = summary["energy_level"]
+        if not has_data:
+            explanation = "今天没有精力数据，排序仍只基于任务价值、截止时间和依赖。"
+        elif level == "low":
+            explanation = "今天精力偏低，适合轻量推进；当前只作为解释，不会自动重排 Today。"
+        elif level == "high":
+            explanation = "今天精力较好，适合保护深度任务；当前只作为解释，不会自动增加任务量。"
+        else:
+            explanation = "今天精力状态可用，适合保持稳定节奏；当前不会自动改变任务顺序。"
+        return {
+            "has_data": has_data,
+            "metric_date": plan.plan_date,
+            "energy_score": summary["energy_score"],
+            "energy_level": level,
+            "recommended_mode": task_match["recommended_mode"],
+            "explanation": explanation,
+            "applied_to_plan": False,
+            "source": "energy_daily_metric" if has_data else "none",
         }
 
     def _strategy_factors(self, *, plan: DailyPlan, items: list[DailyPlanItem], score_factors: dict) -> dict:
