@@ -347,10 +347,11 @@ P1 后端边界：
 
 P2 后端扩展：
 
-- Goal Progress
-- Goal Task List
-- Dependency
-- Goal AI Suggestion
+- Goal Progress（已支持）
+- Goal Progress Timeline（已支持）
+- Goal Task List（已支持）
+- Dependency（已支持任务依赖边）
+- Goal AI Suggestion（已支持规则版）
 - 高价值目标分析
 
 ---

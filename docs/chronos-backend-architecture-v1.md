@@ -1422,12 +1422,15 @@ P1 不是以“接口都写完”为验收，而是以核心闭环跑通为验�
 
 ### P2：目标与洞察增强
 
-- Goal Detail
-- Goal Progress
+- Today Insights Preview（已支持轻量规则预览）
+- Task Priority Adjustment（已支持用户修正事件）
+- Goal Detail（已支持聚合详情）
+- Goal Progress / Timeline（Timeline 已支持轻量事件聚合）
 - Dependency（已支持任务依赖边和 Goal Detail 依赖图）
 - Weekly Report（已支持轻量聚合）
 - Monthly Report（已支持轻量聚合）
 - Insight Detail（已支持轻量规则聚合）
+- Me Insights Overview（已支持轻量 highlights）
 - Strategy Detail（已支持当前 Today 策略解释）
 - 滚动策略解释
 - 高价值任务分析
