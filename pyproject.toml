@@ -1,7 +1,7 @@
 [project]
-name = "note-backend"
+name = "chronos-backend"
 version = "0.1.0"
-description = "Add your description here"
+description = "Chronos AI Execution OS backend"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

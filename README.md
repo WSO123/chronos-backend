@@ -1,6 +1,6 @@
-# Chronos Backend AI - 后端
+# Chronos Backend - 后端
 
-这是一个基于 **FastAPI + LangGraph** 的后端系统。
+这是 Chronos AI Execution OS 的后端系统，基于 **FastAPI + SQLAlchemy + Celery** 构建。
 
 ##  项目亮点与架构哲学
 
@@ -68,7 +68,7 @@ uv run celery -A app.core.celery.celery_app worker --loglevel=info
 ##  项目结构说明
 
 ```text
-note-backend/
+chronos-backend/
 ├── app/
 │   ├── api/                # 接口层：处理 HTTP 请求，不做复杂逻辑
 │   ├── core/               # 核心层：全局配置、数据库连接、Celery 配置
