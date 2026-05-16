@@ -588,7 +588,22 @@ Frontend notes:
 
 - Reminder Center 可放在 Today Header 的提醒入口或 Me / Settings。
 - Today 首屏只展示提醒入口和必要数量，不展开完整列表。
-- 自动提醒生成、推送发送、系统定时扫描在后续 worker 迭代实现。
+- 自动提醒生成、真实 push/email 发送在后续 worker 迭代实现。
+
+### Reminder worker placeholder
+
+Celery task:
+
+```text
+reminder.dispatch_due(limit=50, channel=null, now=null)
+```
+
+Rules:
+
+- 扫描 `status=scheduled` 且 `scheduled_for <= now` 的 reminders。
+- 可用 `channel` 限定 `in_app` / `push` / `email`。
+- 当前只把 due reminder 标记为 `sent` 并返回 reminder payload，不调用真实推送服务。
+- `dismissed` / `canceled` / 已 `sent` 的 reminder 不会再次进入发送结果。
 
 ## 9. 当前安全边界
 

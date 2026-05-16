@@ -89,6 +89,43 @@ class ReminderService:
         db.refresh(reminder)
         return reminder
 
+    def dispatch_due_reminders(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+        limit: int = 50,
+        channel: str | None = None,
+    ) -> dict:
+        resolved_now = now or datetime.now(UTC)
+        if channel is not None and channel not in self.allowed_channels:
+            raise ValidationDomainError(f"Reminder channel {channel} is not supported")
+        stmt = (
+            select(Reminder)
+            .where(
+                Reminder.status == "scheduled",
+                Reminder.scheduled_for <= resolved_now,
+            )
+            .order_by(Reminder.scheduled_for, Reminder.created_at)
+            .limit(min(max(limit, 1), 100))
+        )
+        if channel is not None:
+            stmt = stmt.where(Reminder.channel == channel)
+        due_reminders = list(db.scalars(stmt).all())
+        for reminder in due_reminders:
+            reminder.status = "sent"
+            reminder.sent_at = resolved_now
+        db.commit()
+        for reminder in due_reminders:
+            db.refresh(reminder)
+        return {
+            "status": "dispatched",
+            "sent_count": len(due_reminders),
+            "channel": channel,
+            "sent_at": resolved_now,
+            "reminders": due_reminders,
+        }
+
     def to_response(self, reminder: Reminder) -> dict:
         return {
             "id": reminder.id,

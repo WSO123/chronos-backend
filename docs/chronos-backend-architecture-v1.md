@@ -1262,6 +1262,7 @@ POST /api/v1/reminders/{reminder_id}/dismiss
 说明：
 
 - P3 已支持 Reminder Center 的基础读取、手动创建和 dismiss。
+- P3 已支持 `reminder.dispatch_due` worker，占位扫描 due reminders 并标记 `sent`。
 - 当前不做真实 push/email 发送，不自动生成提醒。
 - Reminder 可关联 Task 或 Goal，但不会改变 Task / Goal 状态。
 - 后续 deadline / execution 自动提醒 worker 应写入该模型。

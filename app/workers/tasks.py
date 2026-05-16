@@ -9,6 +9,7 @@ from app.core.celery import celery_app
 from app.core.db import SessionLocal
 from app.services.data_source_sync_service import data_source_sync_service
 from app.services.health_sync_service import health_sync_service
+from app.services.reminder_service import reminder_service
 
 
 @celery_app.task(name="data_source.sync_connection")
@@ -66,6 +67,26 @@ def sync_ready_health_energy_connections(limit: int = 50) -> dict:
     db = SessionLocal()
     try:
         result = health_sync_service.sync_ready_energy_connections(db, limit=limit)
+        return _json_ready(result)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="reminder.dispatch_due")
+def dispatch_due_reminders(
+    limit: int = 50,
+    channel: str | None = None,
+    now: str | None = None,
+) -> dict:
+    db = SessionLocal()
+    try:
+        result = reminder_service.dispatch_due_reminders(
+            db,
+            limit=limit,
+            channel=channel,
+            now=datetime.fromisoformat(now) if now else None,
+        )
+        result["reminders"] = [reminder_service.to_response(reminder) for reminder in result["reminders"]]
         return _json_ready(result)
     finally:
         db.close()
