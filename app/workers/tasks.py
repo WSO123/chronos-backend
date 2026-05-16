@@ -114,6 +114,30 @@ def generate_deadline_reminders(
         db.close()
 
 
+@celery_app.task(name="reminder.generate_execution")
+def generate_execution_reminders(
+    user_id: str,
+    plan_date: str,
+    limit: int = 3,
+    start_hour: int = 9,
+    spacing_minutes: int = 45,
+) -> dict:
+    db = SessionLocal()
+    try:
+        result = reminder_service.generate_execution_reminders(
+            db,
+            user_id=uuid.UUID(user_id),
+            plan_date=date.fromisoformat(plan_date),
+            limit=limit,
+            start_hour=start_hour,
+            spacing_minutes=spacing_minutes,
+        )
+        result["reminders"] = [reminder_service.to_response(reminder) for reminder in result["reminders"]]
+        return _json_ready(result)
+    finally:
+        db.close()
+
+
 def _json_ready(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _json_ready(item) for key, item in value.items()}

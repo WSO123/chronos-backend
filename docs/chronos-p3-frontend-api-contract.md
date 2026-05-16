@@ -516,7 +516,7 @@ Fake health metadata example:
 
 ## 8. Reminder Center
 
-Reminder Center 是 P3 自动提醒能力的承接层。当前只做提醒记录、列表、手动创建和 dismiss，不做真实推送，不自动生成提醒。
+Reminder Center 是 P3 自动提醒能力的承接层。当前只做提醒记录、列表、手动创建、dismiss 和 worker 规则生成，不做真实推送。
 
 ### GET `/api/v1/reminders`
 
@@ -588,15 +588,16 @@ Frontend notes:
 
 - Reminder Center 可放在 Today Header 的提醒入口或 Me / Settings。
 - Today 首屏只展示提醒入口和必要数量，不展开完整列表。
-- 自动提醒生成、真实 push/email 发送在后续 worker 迭代实现。
+- 真实 push/email 发送在后续 delivery provider 迭代实现。
 
-### Reminder worker placeholder
+### Reminder workers
 
 Celery task:
 
 ```text
 reminder.dispatch_due(limit=50, channel=null, now=null)
 reminder.generate_deadline(user_id=null, target_date=null, window_days=1, reminder_hour=9)
+reminder.generate_execution(user_id, plan_date, limit=3, start_hour=9, spacing_minutes=45)
 ```
 
 Rules:
@@ -607,6 +608,10 @@ Rules:
 - `dismissed` / `canceled` / 已 `sent` 的 reminder 不会再次进入发送结果。
 - `reminder.generate_deadline` 基于 Task / Goal deadline 生成 `deadline` reminders，并避免重复生成。
 - `reminder.generate_deadline` 当前只创建 scheduled reminders，不发送。
+- `reminder.generate_execution` 只读取已有 Today active plan，不 lazy create Today，也不触发 replan。
+- `reminder.generate_execution` 基于 pinned / recommended 且仍为 planned 的 DailyPlanItem 生成 `execution` reminders。
+- `reminder.generate_execution` 按用户时区从 `plan_date + start_hour` 开始，以 `spacing_minutes` 间隔生成 scheduled reminders，默认最多 3 条。
+- `reminder.generate_execution` 使用 task + scheduled_for 幂等检查，重复运行不会重复生成。
 
 ## 9. 当前安全边界
 

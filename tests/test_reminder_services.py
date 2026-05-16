@@ -2,13 +2,15 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
+from app.models.daily_plan import DailyPlan
 from app.models.reminder import Reminder
 from app.models.enums import TaskStatus
 from app.services.errors import NotFoundError, ValidationDomainError
 from app.services.goal_service import goal_service
+from app.services.planning_service import planning_service
 from app.services.reminder_service import reminder_service
 from app.services.task_service import task_service
-from app.workers.tasks import dispatch_due_reminders, generate_deadline_reminders
+from app.workers.tasks import dispatch_due_reminders, generate_deadline_reminders, generate_execution_reminders
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
 
@@ -219,6 +221,86 @@ class ReminderServiceTests(unittest.TestCase):
         self.assertEqual(result["created_count"], 1)
         self.assertEqual(result["reminders"][0]["reminder_type"], "deadline")
         self.assertEqual(result["reminders"][0]["task_id"] is not None, True)
+
+    def test_generate_execution_reminders_uses_existing_today_plan_once(self):
+        plan_date = datetime(2026, 5, 17, tzinfo=UTC).date()
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Pinned execution task",
+            priority=1,
+        )
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Recommended execution task",
+            priority=3,
+        )
+        planning_service.get_today(self.db, user_id=self.user.id, plan_date=plan_date)
+
+        first = reminder_service.generate_execution_reminders(
+            self.db,
+            user_id=self.user.id,
+            plan_date=plan_date,
+            limit=2,
+        )
+        second = reminder_service.generate_execution_reminders(
+            self.db,
+            user_id=self.user.id,
+            plan_date=plan_date,
+            limit=2,
+        )
+
+        self.assertEqual(first["status"], "generated")
+        self.assertEqual(first["created_count"], 2)
+        self.assertEqual(second["created_count"], 0)
+        self.assertEqual(second["skipped_existing_count"], 2)
+        self.assertEqual(
+            self.db.query(Reminder).filter(Reminder.reminder_type == "execution").count(),
+            2,
+        )
+        self.assertTrue(all(reminder.task_id for reminder in first["reminders"]))
+        self.assertTrue(all(reminder.reminder_metadata["generator"] == "execution_v1" for reminder in first["reminders"]))
+        self.assertEqual(
+            {reminder.reminder_metadata["section"] for reminder in first["reminders"]},
+            {"pinned", "recommended"},
+        )
+
+    def test_generate_execution_reminders_does_not_create_today_plan(self):
+        plan_date = datetime(2026, 5, 17, tzinfo=UTC).date()
+
+        result = reminder_service.generate_execution_reminders(
+            self.db,
+            user_id=self.user.id,
+            plan_date=plan_date,
+        )
+
+        self.assertEqual(result["status"], "no_plan")
+        self.assertEqual(result["created_count"], 0)
+        self.assertEqual(self.db.query(DailyPlan).count(), 0)
+        self.assertEqual(self.db.query(Reminder).count(), 0)
+
+    def test_generate_execution_reminders_worker_returns_json_ready_payload(self):
+        plan_date = datetime(2026, 5, 17, tzinfo=UTC).date()
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Worker execution task",
+            priority=1,
+        )
+        planning_service.get_today(self.db, user_id=self.user.id, plan_date=plan_date)
+
+        with patch("app.workers.tasks.SessionLocal", TestingSessionLocal):
+            result = generate_execution_reminders.run(
+                user_id=str(self.user.id),
+                plan_date=plan_date.isoformat(),
+                limit=1,
+            )
+
+        self.assertEqual(result["status"], "generated")
+        self.assertEqual(result["created_count"], 1)
+        self.assertEqual(result["reminders"][0]["reminder_type"], "execution")
+        self.assertTrue(result["reminders"][0]["task_id"])
 
 
 if __name__ == "__main__":

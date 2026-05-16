@@ -7,7 +7,14 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.enums import GoalStatus, TaskStatus
+from app.models.daily_plan import DailyPlan, DailyPlanItem
+from app.models.enums import (
+    DailyPlanItemSection,
+    DailyPlanItemStatus,
+    DailyPlanStatus,
+    GoalStatus,
+    TaskStatus,
+)
 from app.models.goal import Goal
 from app.models.reminder import Reminder
 from app.models.task import Task
@@ -197,6 +204,83 @@ class ReminderService:
             "reminders": created,
         }
 
+    def generate_execution_reminders(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        plan_date: date,
+        limit: int = 3,
+        start_hour: int = 9,
+        spacing_minutes: int = 45,
+    ) -> dict:
+        user = self._ensure_user(db, user_id=user_id)
+        limit = min(max(limit, 1), 10)
+        start_hour = min(max(start_hour, 0), 23)
+        spacing_minutes = min(max(spacing_minutes, 15), 180)
+        plan = self._active_plan_for_date(db, user_id=user_id, plan_date=plan_date)
+        if plan is None:
+            return {
+                "status": "no_plan",
+                "created_count": 0,
+                "skipped_existing_count": 0,
+                "plan_date": plan_date,
+                "reminders": [],
+            }
+
+        items = self._execution_candidate_items(db, plan=plan, limit=limit)
+        created: list[Reminder] = []
+        skipped_existing_count = 0
+        for index, item in enumerate(items):
+            scheduled_for = self._execution_scheduled_for(
+                user_timezone=user.timezone,
+                plan_date=plan_date,
+                start_hour=start_hour,
+                spacing_minutes=spacing_minutes,
+                index=index,
+            )
+            if self._execution_reminder_exists(
+                db,
+                user_id=user_id,
+                task_id=item.task_id,
+                scheduled_for=scheduled_for,
+            ):
+                skipped_existing_count += 1
+                continue
+            reminder = Reminder(
+                user_id=user_id,
+                task_id=item.task_id,
+                goal_id=None,
+                title=f"Start: {item.task.title}",
+                message="A gentle execution reminder from today's sequence.",
+                reminder_type="execution",
+                status="scheduled",
+                scheduled_for=scheduled_for,
+                channel="in_app",
+                source="worker",
+                reminder_metadata={
+                    "generator": "execution_v1",
+                    "daily_plan_id": str(plan.id),
+                    "daily_plan_item_id": str(item.id),
+                    "plan_date": plan_date.isoformat(),
+                    "section": item.section.value,
+                    "sort_order": item.sort_order,
+                },
+            )
+            db.add(reminder)
+            created.append(reminder)
+        db.commit()
+        for reminder in created:
+            db.refresh(reminder)
+        return {
+            "status": "generated",
+            "created_count": len(created),
+            "skipped_existing_count": skipped_existing_count,
+            "plan_date": plan_date,
+            "daily_plan_id": plan.id,
+            "reminders": created,
+        }
+
     def to_response(self, reminder: Reminder) -> dict:
         return {
             "id": reminder.id,
@@ -344,6 +428,73 @@ class ReminderService:
     def _deadline_message(self, *, entity_type: str, deadline: date) -> str:
         target = "task" if entity_type == "task" else "goal"
         return f"This {target} is due on {deadline.isoformat()}. Keep the reminder gentle and actionable."
+
+    def _active_plan_for_date(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        plan_date: date,
+    ) -> DailyPlan | None:
+        stmt = select(DailyPlan).where(
+            DailyPlan.user_id == user_id,
+            DailyPlan.plan_date == plan_date,
+            DailyPlan.status == DailyPlanStatus.ACTIVE,
+        )
+        return db.scalars(stmt).first()
+
+    def _execution_candidate_items(
+        self,
+        db: Session,
+        *,
+        plan: DailyPlan,
+        limit: int,
+    ) -> list[DailyPlanItem]:
+        stmt = (
+            select(DailyPlanItem)
+            .where(
+                DailyPlanItem.daily_plan_id == plan.id,
+                DailyPlanItem.plan_revision_id == plan.current_revision_id,
+                DailyPlanItem.status == DailyPlanItemStatus.PLANNED,
+                DailyPlanItem.section.in_([DailyPlanItemSection.PINNED, DailyPlanItemSection.RECOMMENDED]),
+            )
+            .order_by(DailyPlanItem.sort_order)
+            .limit(limit)
+        )
+        return list(db.scalars(stmt).all())
+
+    def _execution_scheduled_for(
+        self,
+        *,
+        user_timezone: str,
+        plan_date: date,
+        start_hour: int,
+        spacing_minutes: int,
+        index: int,
+    ) -> datetime:
+        try:
+            timezone = ZoneInfo(user_timezone)
+        except ZoneInfoNotFoundError:
+            timezone = ZoneInfo("UTC")
+        local_start = datetime.combine(plan_date, time(hour=start_hour), tzinfo=timezone)
+        return (local_start + timedelta(minutes=spacing_minutes * index)).astimezone(UTC)
+
+    def _execution_reminder_exists(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        task_id: uuid.UUID,
+        scheduled_for: datetime,
+    ) -> bool:
+        stmt = select(Reminder.id).where(
+            Reminder.user_id == user_id,
+            Reminder.task_id == task_id,
+            Reminder.reminder_type == "execution",
+            Reminder.source == "worker",
+            Reminder.scheduled_for == scheduled_for,
+        )
+        return db.scalars(stmt).first() is not None
 
 
 reminder_service = ReminderService()

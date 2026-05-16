@@ -708,6 +708,8 @@ Reminder {
 - 当前只记录提醒和用户 dismiss，不执行真实推送。
 - 一个 reminder 最多关联一个 Task 或一个 Goal。
 - Reminder 不改变 Task / Goal / Today 状态。
+- `deadline` reminders 可由 Task / Goal deadline 规则生成。
+- `execution` reminders 可由已有 Today active plan 的 pinned / recommended planned items 规则生成，但不创建 Today、不 replan。
 
 ### CaptureInput
 
@@ -1264,9 +1266,10 @@ POST /api/v1/reminders/{reminder_id}/dismiss
 - P3 已支持 Reminder Center 的基础读取、手动创建和 dismiss。
 - P3 已支持 `reminder.dispatch_due` worker，占位扫描 due reminders 并标记 `sent`。
 - P3 已支持 `reminder.generate_deadline` worker，基于 Task / Goal deadline 生成 `deadline` reminders，并避免重复生成。
-- 当前不做真实 push/email 发送，不自动生成提醒。
+- P3 已支持 `reminder.generate_execution` worker，基于已有 Today active plan 的 pinned / recommended planned items 生成 `execution` reminders，并避免重复生成。
+- 当前不做真实 push/email 发送。
 - Reminder 可关联 Task 或 Goal，但不会改变 Task / Goal 状态。
-- 后续 deadline / execution 自动提醒 worker 应写入该模型。
+- Execution reminder generator 不会 lazy create Today plan，不会触发 replan，也不会改变 DailyPlan / DailyPlanItem 状态。
 
 ### Data Sources
 
