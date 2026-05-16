@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
 import uuid
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.enums import GoalStatus, TaskStatus
 from app.models.goal import Goal
 from app.models.reminder import Reminder
 from app.models.task import Task
@@ -126,6 +128,75 @@ class ReminderService:
             "reminders": due_reminders,
         }
 
+    def generate_deadline_reminders(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID | None = None,
+        target_date: date | None = None,
+        window_days: int = 1,
+        reminder_hour: int = 9,
+    ) -> dict:
+        resolved_date = target_date or date.today()
+        window_days = min(max(window_days, 1), 14)
+        reminder_hour = min(max(reminder_hour, 0), 23)
+        users = [self._ensure_user(db, user_id=user_id)] if user_id is not None else self._active_users(db)
+        created: list[Reminder] = []
+        skipped_existing_count = 0
+        for user in users:
+            due_end = resolved_date + timedelta(days=window_days - 1)
+            candidates = self._deadline_candidates(
+                db,
+                user_id=user.id,
+                start_date=resolved_date,
+                end_date=due_end,
+            )
+            for entity_type, entity in candidates:
+                scheduled_for = self._deadline_scheduled_for(
+                    user_timezone=user.timezone,
+                    deadline=entity.deadline,
+                    reminder_hour=reminder_hour,
+                )
+                if self._deadline_reminder_exists(
+                    db,
+                    user_id=user.id,
+                    entity_type=entity_type,
+                    entity_id=entity.id,
+                    scheduled_for=scheduled_for,
+                ):
+                    skipped_existing_count += 1
+                    continue
+                reminder = Reminder(
+                    user_id=user.id,
+                    task_id=entity.id if entity_type == "task" else None,
+                    goal_id=entity.id if entity_type == "goal" else None,
+                    title=self._deadline_title(entity_type=entity_type, title=entity.title),
+                    message=self._deadline_message(entity_type=entity_type, deadline=entity.deadline),
+                    reminder_type="deadline",
+                    status="scheduled",
+                    scheduled_for=scheduled_for,
+                    channel="in_app",
+                    source="worker",
+                    reminder_metadata={
+                        "generator": "deadline_v1",
+                        "entity_type": entity_type,
+                        "deadline": entity.deadline.isoformat(),
+                    },
+                )
+                db.add(reminder)
+                created.append(reminder)
+        db.commit()
+        for reminder in created:
+            db.refresh(reminder)
+        return {
+            "status": "generated",
+            "created_count": len(created),
+            "skipped_existing_count": skipped_existing_count,
+            "target_date": resolved_date,
+            "window_days": window_days,
+            "reminders": created,
+        }
+
     def to_response(self, reminder: Reminder) -> dict:
         return {
             "id": reminder.id,
@@ -151,6 +222,10 @@ class ReminderService:
         if user is None:
             raise NotFoundError("User not found")
         return user
+
+    def _active_users(self, db: Session) -> list[User]:
+        stmt = select(User).where(User.is_active.is_(True)).order_by(User.created_at)
+        return list(db.scalars(stmt).all())
 
     def _ensure_task(self, db: Session, *, user_id: uuid.UUID, task_id: uuid.UUID) -> Task:
         task = db.get(Task, task_id)
@@ -201,6 +276,74 @@ class ReminderService:
             Reminder.scheduled_for < datetime.now(UTC),
         )
         return len(list(db.scalars(stmt).all()))
+
+    def _deadline_candidates(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        start_date: date,
+        end_date: date,
+    ) -> list[tuple[str, Task | Goal]]:
+        task_stmt = (
+            select(Task)
+            .where(
+                Task.user_id == user_id,
+                Task.deadline >= start_date,
+                Task.deadline <= end_date,
+                Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.ARCHIVED]),
+            )
+            .order_by(Task.deadline, Task.created_at)
+        )
+        goal_stmt = (
+            select(Goal)
+            .where(
+                Goal.user_id == user_id,
+                Goal.deadline >= start_date,
+                Goal.deadline <= end_date,
+                Goal.status == GoalStatus.ACTIVE,
+            )
+            .order_by(Goal.deadline, Goal.created_at)
+        )
+        candidates: list[tuple[str, Task | Goal]] = [("task", task) for task in db.scalars(task_stmt).all()]
+        candidates.extend(("goal", goal) for goal in db.scalars(goal_stmt).all())
+        return candidates
+
+    def _deadline_scheduled_for(self, *, user_timezone: str, deadline: date, reminder_hour: int) -> datetime:
+        try:
+            timezone = ZoneInfo(user_timezone)
+        except ZoneInfoNotFoundError:
+            timezone = ZoneInfo("UTC")
+        return datetime.combine(deadline, time(hour=reminder_hour), tzinfo=timezone).astimezone(UTC)
+
+    def _deadline_reminder_exists(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        entity_type: str,
+        entity_id: uuid.UUID,
+        scheduled_for: datetime,
+    ) -> bool:
+        stmt = select(Reminder.id).where(
+            Reminder.user_id == user_id,
+            Reminder.reminder_type == "deadline",
+            Reminder.source == "worker",
+            Reminder.scheduled_for == scheduled_for,
+        )
+        if entity_type == "task":
+            stmt = stmt.where(Reminder.task_id == entity_id)
+        else:
+            stmt = stmt.where(Reminder.goal_id == entity_id)
+        return db.scalars(stmt).first() is not None
+
+    def _deadline_title(self, *, entity_type: str, title: str) -> str:
+        prefix = "Task deadline" if entity_type == "task" else "Goal deadline"
+        return f"{prefix}: {title}"
+
+    def _deadline_message(self, *, entity_type: str, deadline: date) -> str:
+        target = "task" if entity_type == "task" else "goal"
+        return f"This {target} is due on {deadline.isoformat()}. Keep the reminder gentle and actionable."
 
 
 reminder_service = ReminderService()

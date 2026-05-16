@@ -92,6 +92,28 @@ def dispatch_due_reminders(
         db.close()
 
 
+@celery_app.task(name="reminder.generate_deadline")
+def generate_deadline_reminders(
+    user_id: str | None = None,
+    target_date: str | None = None,
+    window_days: int = 1,
+    reminder_hour: int = 9,
+) -> dict:
+    db = SessionLocal()
+    try:
+        result = reminder_service.generate_deadline_reminders(
+            db,
+            user_id=uuid.UUID(user_id) if user_id else None,
+            target_date=date.fromisoformat(target_date) if target_date else None,
+            window_days=window_days,
+            reminder_hour=reminder_hour,
+        )
+        result["reminders"] = [reminder_service.to_response(reminder) for reminder in result["reminders"]]
+        return _json_ready(result)
+    finally:
+        db.close()
+
+
 def _json_ready(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _json_ready(item) for key, item in value.items()}

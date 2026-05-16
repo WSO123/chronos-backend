@@ -3,10 +3,12 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from app.models.reminder import Reminder
+from app.models.enums import TaskStatus
 from app.services.errors import NotFoundError, ValidationDomainError
+from app.services.goal_service import goal_service
 from app.services.reminder_service import reminder_service
 from app.services.task_service import task_service
-from app.workers.tasks import dispatch_due_reminders
+from app.workers.tasks import dispatch_due_reminders, generate_deadline_reminders
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
 
@@ -149,6 +151,74 @@ class ReminderServiceTests(unittest.TestCase):
         self.assertEqual(result["sent_count"], 1)
         self.assertEqual(result["reminders"][0]["id"], str(reminder.id))
         self.assertEqual(result["reminders"][0]["status"], "sent")
+
+    def test_generate_deadline_reminders_creates_task_and_goal_reminders_once(self):
+        target_date = datetime(2026, 5, 17, tzinfo=UTC).date()
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Due task",
+            deadline=target_date,
+        )
+        completed_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Completed due task",
+            deadline=target_date,
+        )
+        completed_task.status = TaskStatus.COMPLETED
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Due goal",
+            deadline=target_date,
+        )
+        self.db.commit()
+
+        first = reminder_service.generate_deadline_reminders(
+            self.db,
+            user_id=self.user.id,
+            target_date=target_date,
+            window_days=1,
+        )
+        second = reminder_service.generate_deadline_reminders(
+            self.db,
+            user_id=self.user.id,
+            target_date=target_date,
+            window_days=1,
+        )
+
+        reminders = self.db.query(Reminder).order_by(Reminder.title).all()
+        self.assertEqual(first["created_count"], 2)
+        self.assertEqual(first["skipped_existing_count"], 0)
+        self.assertEqual(second["created_count"], 0)
+        self.assertEqual(second["skipped_existing_count"], 2)
+        self.assertEqual(len(reminders), 2)
+        self.assertEqual({reminder.task_id for reminder in reminders}, {task.id, None})
+        self.assertEqual({reminder.goal_id for reminder in reminders}, {goal.id, None})
+        self.assertTrue(all(reminder.reminder_type == "deadline" for reminder in reminders))
+        self.assertTrue(all(reminder.source == "worker" for reminder in reminders))
+
+    def test_generate_deadline_reminders_worker_returns_json_ready_payload(self):
+        target_date = datetime(2026, 5, 17, tzinfo=UTC).date()
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Worker due task",
+            deadline=target_date,
+        )
+
+        with patch("app.workers.tasks.SessionLocal", TestingSessionLocal):
+            result = generate_deadline_reminders.run(
+                user_id=str(self.user.id),
+                target_date=target_date.isoformat(),
+                window_days=1,
+            )
+
+        self.assertEqual(result["status"], "generated")
+        self.assertEqual(result["created_count"], 1)
+        self.assertEqual(result["reminders"][0]["reminder_type"], "deadline")
+        self.assertEqual(result["reminders"][0]["task_id"] is not None, True)
 
 
 if __name__ == "__main__":

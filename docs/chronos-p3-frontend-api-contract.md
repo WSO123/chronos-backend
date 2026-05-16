@@ -596,6 +596,7 @@ Celery task:
 
 ```text
 reminder.dispatch_due(limit=50, channel=null, now=null)
+reminder.generate_deadline(user_id=null, target_date=null, window_days=1, reminder_hour=9)
 ```
 
 Rules:
@@ -604,6 +605,8 @@ Rules:
 - 可用 `channel` 限定 `in_app` / `push` / `email`。
 - 当前只把 due reminder 标记为 `sent` 并返回 reminder payload，不调用真实推送服务。
 - `dismissed` / `canceled` / 已 `sent` 的 reminder 不会再次进入发送结果。
+- `reminder.generate_deadline` 基于 Task / Goal deadline 生成 `deadline` reminders，并避免重复生成。
+- `reminder.generate_deadline` 当前只创建 scheduled reminders，不发送。
 
 ## 9. 当前安全边界
 
