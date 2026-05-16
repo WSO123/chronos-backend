@@ -1216,6 +1216,7 @@ GET /api/v1/energy/dashboard
 - P3 已支持 Energy Dashboard 的日级睡眠、压力、精力聚合数据。
 - `PUT /daily-metrics` 可用于手动 check-in、测试导入或后续 Health provider worker。
 - `GET /dashboard` 返回趋势、今日精力摘要和轻量任务类型建议。
+- Health worker 占位同步通过 `health.sync_energy_connection` / `health.sync_ready_energy_connections` 写入 `EnergyDailyMetric`，当前 fake adapter 从 connection metadata 读取 `fake_energy_metrics`。
 - 当前不把 Energy 数据直接写入 Today 排序，只作为解释和后续策略输入。
 
 ### Data Sources
@@ -1238,6 +1239,7 @@ POST  /api/v1/data-sources/{connection_id}/disconnect
 - Worker 写入 `DataSourceSyncRun`，并同步记录 `DATA_SOURCE_SYNCED` / `DATA_SOURCE_SYNC_SKIPPED` / `DATA_SOURCE_SYNC_FAILED`。
 - 批量 worker 中单个连接失败不会中断整批同步；失败连接返回 `failed` 结果并通过 `failed_connection_count` 汇总。
 - `GET /data-sources/{id}/sync-runs` 只读返回最近同步记录，服务 Settings / 调试观测，不触发同步。
+- Health worker 复用 `DataSourceSyncRun` 做同步观测，但导入目标是 `EnergyDailyMetric`，不是 Capture / Inbox。
 
 ### Insights
 
@@ -1642,7 +1644,7 @@ P1 不是以“接口都写完”为验收，而是以核心闭环跑通为验�
 - 图片输入
 - 日历接入（已支持 Data Source 连接状态底座和 External Capture Import，真实第三方同步待后续）
 - 邮件接入（已支持 Data Source 连接状态底座和 External Capture Import，真实第三方同步待后续）
-- 睡眠 / 压力数据接入（已支持 Health 连接状态底座和 EnergyDailyMetric 日级聚合，真实平台同步待后续）
+- 睡眠 / 压力数据接入（已支持 Health 连接状态底座、fake health worker 和 EnergyDailyMetric 日级聚合，真实平台同步待后续）
 - Energy Dashboard（已支持轻量趋势和任务类型建议）
 - 自动提醒增强
 - 来源内容关联

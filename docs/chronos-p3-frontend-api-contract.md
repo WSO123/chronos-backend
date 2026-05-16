@@ -33,6 +33,8 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Calendar / Email Fake Provider Adapter | internal provider registry | Ready |
 | Energy Daily Metric Upsert | `PUT /api/v1/energy/daily-metrics` | Ready |
 | Energy Dashboard | `GET /api/v1/energy/dashboard` | Ready |
+| Health Energy Sync Worker | `health.sync_energy_connection` | Ready |
+| Health Fake Provider Adapter | internal health provider registry | Ready |
 | Notification Center | - | Not Started |
 
 ## 3. Data Sources
@@ -444,6 +446,44 @@ Frontend notes:
 - Energy Dashboard 可以展示睡眠趋势、压力趋势、精力曲线和任务类型建议。
 - Today 仍不直接依赖该接口改变排序；后续如接入 Today，只能作为解释性输入和可回滚的策略因子。
 - 文案应保持克制，避免用健康数据制造压力。
+
+### Health worker placeholder
+
+Celery tasks:
+
+```text
+health.sync_energy_connection(connection_id, metrics=null, end_date=null, days=7)
+health.sync_ready_energy_connections(limit=50)
+```
+
+Worker rules:
+
+- 只处理 `source_type=health`、`status=connected`、`sync_enabled=true` 的连接。
+- `metrics=null` 时通过 health provider adapter 拉取日级聚合数据；当前 fake adapter 从 `connection_metadata.fake_energy_metrics` 读取。
+- `metrics=[...]` 时使用调用方传入的规范化 daily metric。
+- Health worker 写入 `EnergyDailyMetric`，不会创建 `ExternalCaptureImport`、`CaptureInput` 或 `InboxItem`。
+- 同步会记录 `DataSourceSyncRun` 和 `DATA_SOURCE_SYNCED` / `DATA_SOURCE_SYNC_SKIPPED` / `DATA_SOURCE_SYNC_FAILED`。
+- fake provider 可读取 `connection_metadata.fake_next_cursor` 作为下一次 cursor。
+
+Fake health metadata example:
+
+```json
+{
+  "connection_metadata": {
+    "fake_energy_metrics": [
+      {
+        "external_metric_id": "health-2026-05-17",
+        "metric_date": "2026-05-17",
+        "sleep_minutes": 450,
+        "sleep_quality_score": 82,
+        "stress_score": 30,
+        "energy_score": 83
+      }
+    ],
+    "fake_next_cursor": "health-cursor-2"
+  }
+}
+```
 
 ## 8. 当前安全边界
 
