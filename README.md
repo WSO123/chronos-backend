@@ -134,6 +134,12 @@ uv run python -m unittest discover -s tests
 `scripts/dev_seed_demo.py` 用于前端和手动体验，默认创建 `demo@chronos.local` 用户并输出 `X-User-Id`。
 `scripts/smoke_p1_execution_loop.py` 用于开发后快速防回归，每次默认创建一个独立 smoke 用户，不会重置数据库。
 
+前端联调接口契约见：
+
+```text
+docs/chronos-p1-frontend-api-contract.md
+```
+
 ##  开发指南
 
 ### 添加新依赖

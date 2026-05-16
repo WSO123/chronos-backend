@@ -1,0 +1,737 @@
+# Chronos P1 Frontend API Contract
+
+> 版本：v1
+> 日期：2026-05-16
+> 适用范围：P1 backend -> frontend handoff
+
+---
+
+## 1. 文档目的
+
+这份文档把当前后端能力按 Chronos 的前端页面和核心用户路径整理出来，供前端开发、联调和后续迭代对齐使用。
+
+Chronos P1 的主路径是：
+
+```text
+Capture -> Inbox -> Today -> Task Detail -> Focus -> Daily Report -> Me
+```
+
+接口设计要服务一个产品判断：前端默认呈现清晰、轻量、可行动的信息，不把 AI 中间过程、调度细节和报表解释堆给用户。
+
+---
+
+## 2. 全局约定
+
+### Base URL
+
+```text
+/api/v1
+```
+
+本地开发：
+
+```text
+http://localhost:8000/api/v1
+```
+
+### Auth / User Context
+
+P1 暂未接真实登录，所有业务接口都必须传：
+
+```http
+X-User-Id: <user_uuid>
+```
+
+本地可通过以下命令创建用户和 demo 数据：
+
+```bash
+uv run python scripts/dev_seed_user.py
+uv run python scripts/dev_seed_demo.py
+```
+
+### Error Shape
+
+所有显式业务错误统一返回：
+
+```json
+{
+  "error": {
+    "code": "INVALID_STATE",
+    "message": "completed task cannot be postponed",
+    "details": {}
+  }
+}
+```
+
+常见错误码：
+
+| code | HTTP | 前端处理建议 |
+| --- | --- | --- |
+| `MISSING_USER_ID` | 400 | 开发态提示缺少 `X-User-Id` |
+| `INVALID_USER_ID` | 400 | 用户上下文损坏，回到开发态入口 |
+| `USER_NOT_FOUND` | 404 | 当前 user 不存在，重新 seed / 登录 |
+| `NOT_FOUND` | 404 | 资源不存在或不属于当前用户 |
+| `INVALID_STATE` | 400 | 按钮状态过期，刷新当前页面 |
+| `VALIDATION_ERROR` | 400 | 业务字段不合法 |
+| `REQUEST_VALIDATION_ERROR` | 422 | 请求结构不符合 schema |
+
+### Data Format
+
+- `id`：UUID string。
+- `date`：`YYYY-MM-DD`。
+- `datetime`：ISO datetime string。
+- enum：全部使用 lowercase string，例如 `active`、`completed`、`high`。
+- 列表接口当前使用 `limit` / `offset`，默认 `limit=50`。
+
+---
+
+## 3. 页面到接口映射
+
+| 前端页面 / 场景 | 主要接口 | P1 状态 |
+| --- | --- | --- |
+| Global Capture | `POST /captures` | Ready |
+| Inbox | `GET /inbox`, `PATCH /inbox/{id}`, `POST /inbox/{id}/confirm` | Ready |
+| Today | `GET /today`, `POST /today/replan`, `PATCH /today/items/{id}` | Ready |
+| Task Detail | `GET /tasks/{id}`, `POST /tasks/{id}/breakdown`, steps / complete / postpone | Ready |
+| Focus | `POST /focus-sessions`, complete / interrupt / postpone | Ready |
+| Daily Report | `GET /reports/daily`, `POST /reports/daily/generate` | Ready |
+| Me Overview | `GET /me/overview` | Ready |
+| Goals | `GET /goals`, `POST /goals`, `GET /goals/{id}` | Backend Ready, P2 UI |
+| AIJob Status | `GET /ai-jobs/{id}` | Backend Ready, mostly debug / future UI |
+
+---
+
+## 4. Capture
+
+### POST `/captures`
+
+用于全局 Capture 的文本输入。P1 只支持 text，voice / image 是 P3 以后。
+
+Request:
+
+```json
+{
+  "raw_text": "todo 写完今天的 PRD 梳理"
+}
+```
+
+Response key fields:
+
+```json
+{
+  "capture": {
+    "id": "uuid",
+    "input_type": "text",
+    "raw_text": "todo 写完今天的 PRD 梳理",
+    "source": "manual",
+    "status": "parsed"
+  },
+  "parse_result": {
+    "result_type": "task",
+    "title": "todo 写完今天的 PRD 梳理",
+    "estimated_duration_min": 25,
+    "suggested_priority": 3,
+    "confidence": "0.68"
+  },
+  "inbox_item": {
+    "id": "uuid",
+    "item_type": "task",
+    "status": "pending"
+  }
+}
+```
+
+Frontend notes:
+
+- Capture 成功后可以直接跳 Inbox，也可以用轻提示告诉用户“已放入待处理”。
+- 不要把 `raw_model_output` 展示给用户，它是调试信息。
+
+### GET `/captures/{capture_id}`
+
+用于调试或详情回溯。P1 正常前端路径通常不需要主动进入 Capture Detail。
+
+---
+
+## 5. Inbox
+
+### GET `/inbox`
+
+Query:
+
+```text
+status=pending
+include_all=false
+limit=50
+offset=0
+```
+
+Response:
+
+```json
+[
+  {
+    "id": "uuid",
+    "item_type": "task",
+    "title": "todo 写完今天的 PRD 梳理",
+    "suggested_goal_id": null,
+    "suggested_priority": 3,
+    "suggested_deadline": null,
+    "status": "pending",
+    "result_entity_type": null,
+    "result_entity_id": null
+  }
+]
+```
+
+### PATCH `/inbox/{item_id}`
+
+用于用户确认前编辑 AI 解析结果。
+
+Request:
+
+```json
+{
+  "item_type": "task",
+  "title": "写完今天的 PRD 梳理",
+  "suggested_priority": 2,
+  "suggested_deadline": "2026-05-16"
+}
+```
+
+Allowed `item_type`:
+
+```text
+task | goal | idea | unknown
+```
+
+P1 只有 `task` / `goal` 可以 confirm。
+
+### POST `/inbox/{item_id}/confirm`
+
+确认后会生成 Task 或 Goal。
+
+Response:
+
+```json
+{
+  "inbox_item": {
+    "id": "uuid",
+    "status": "confirmed",
+    "result_entity_type": "task",
+    "result_entity_id": "uuid"
+  },
+  "result_entity_type": "task",
+  "result_entity_id": "uuid"
+}
+```
+
+Frontend notes:
+
+- `result_entity_type=task` 后可以跳 Task Detail 或回 Today。
+- `result_entity_type=goal` 后 P1 可以轻提示创建成功；完整 Goal Detail 是 P2。
+- 已确认 / 已丢弃 item 不可再编辑确认，前端应禁用操作。
+
+### POST `/inbox/{item_id}/discard`
+
+丢弃待处理输入。
+
+---
+
+## 6. Today
+
+### GET `/today`
+
+Query:
+
+```text
+plan_date=YYYY-MM-DD  // optional
+```
+
+Response shape:
+
+```json
+{
+  "date": "2026-05-16",
+  "greeting": "Ready when you are.",
+  "daily_plan_id": "uuid",
+  "plan_version": 1,
+  "strategy": {
+    "summary": "Use a steady order...",
+    "mode": "normal",
+    "primary_reason": "The sequence balances value, priority, and deadlines."
+  },
+  "progress": {
+    "completed_count": 0,
+    "total_count": 3,
+    "focus_minutes": 0,
+    "completion_rate": 0.0
+  },
+  "sections": {
+    "pinned_tasks": [],
+    "recommended_tasks": [],
+    "low_priority_tasks": [],
+    "rolled_over_tasks": []
+  },
+  "quick_actions": {
+    "can_replan": true,
+    "can_capture": true,
+    "can_view_report": true
+  }
+}
+```
+
+Task item fields:
+
+```json
+{
+  "daily_plan_item_id": "uuid",
+  "task_id": "uuid",
+  "title": "Prepare the P1 execution loop demo",
+  "goal_id": "uuid",
+  "sort_order": 1,
+  "section": "pinned",
+  "recommendation_reason": "High-value task protected from being crowded out by lighter work.",
+  "estimated_duration_min": 70,
+  "item_status": "planned",
+  "task_status": "active",
+  "priority": 1,
+  "value_level": "high",
+  "deadline": "2026-05-16"
+}
+```
+
+Frontend notes:
+
+- Today 首页优先渲染 `strategy.summary`、`pinned_tasks`、`recommended_tasks` 和进度。
+- `recommendation_reason` 是解释文案，可在轻提示 / 展开区展示，不要让它抢占任务列表。
+- `rolled_over_tasks` 默认可以弱化或折叠。
+
+### POST `/today/replan`
+
+Request:
+
+```json
+{
+  "reason": "User requested Today replan"
+}
+```
+
+返回新的 Today response。P1 是 rule planner，不接真实 LLM。
+
+### PATCH `/today/items/{item_id}`
+
+Request:
+
+```json
+{
+  "status": "postponed"
+}
+```
+
+Allowed status:
+
+```text
+planned | completed | postponed | skipped
+```
+
+Frontend notes:
+
+- Today 快速完成 / 延后可用该接口。
+- 如果用户要进入专注态，优先进入 Task Detail，再 Start Focus。
+
+---
+
+## 7. Task Detail
+
+### GET `/tasks/{task_id}`
+
+Task Detail 是 Today / Goals 到 Focus 的承接层。P1 响应已经聚合了 Goal、AI info、Today context、Focus state 和可执行 actions。
+
+Response key fields:
+
+```json
+{
+  "id": "uuid",
+  "title": "Prepare the P1 execution loop demo",
+  "goal_id": "uuid",
+  "estimated_duration_min": 70,
+  "actual_duration_min": 0,
+  "priority": 1,
+  "value_level": "high",
+  "deadline": "2026-05-16",
+  "progress": "0.00",
+  "status": "active",
+  "source": "manual",
+  "steps": [],
+  "goal": {
+    "id": "uuid",
+    "title": "Ship Chronos P1 execution loop",
+    "deadline": "2026-05-30",
+    "value_level": "high"
+  },
+  "ai_info": {
+    "recommended_duration_min": 70,
+    "priority": 1,
+    "value_level": "high",
+    "execution_suggestion": "Start with one clear next action."
+  },
+  "today_context": {
+    "daily_plan_id": "uuid",
+    "daily_plan_item_id": "uuid",
+    "plan_date": "2026-05-16",
+    "plan_version": 1,
+    "section": "pinned",
+    "item_status": "planned",
+    "sort_order": 1,
+    "recommendation_reason": "High-value task protected..."
+  },
+  "focus_state": {
+    "active_focus_session_id": null,
+    "is_currently_focusing_this_task": false
+  },
+  "actions": {
+    "can_start_focus": true,
+    "can_complete": true,
+    "can_postpone": true,
+    "can_edit": true
+  }
+}
+```
+
+Frontend notes:
+
+- 操作按钮以 `actions` 为准，不要只靠 `status` 自己推断。
+- `today_context.daily_plan_item_id` 用于 Start Focus 时绑定 Today item。
+- `ai_info.execution_suggestion` 是轻量建议，不要做成大段解释。
+
+### POST `/tasks/{task_id}/breakdown`
+
+P1 rule/mock 拆解任务步骤，不接真实 LLM。
+
+Response:
+
+```json
+{
+  "ai_job": {
+    "id": "uuid",
+    "job_type": "task_breakdown",
+    "status": "succeeded_with_fallback",
+    "result_entity_type": "task",
+    "result_entity_id": "uuid",
+    "error_message": null,
+    "job_metadata": {
+      "mode": "sync_rule_mock",
+      "fallback_reason": "rule_mock_breakdown",
+      "created_step_ids": ["uuid"]
+    }
+  },
+  "created_steps": [
+    {
+      "id": "uuid",
+      "task_id": "uuid",
+      "title": "Clarify the finished state",
+      "sort_order": 1,
+      "is_completed": false,
+      "completed_at": null
+    }
+  ]
+}
+```
+
+Frontend notes:
+
+- 如果 `created_steps=[]` 且 `fallback_reason=existing_steps_preserved`，说明已有步骤，前端展示已有步骤即可。
+- 已完成 / 归档任务不可拆解，后端返回 `INVALID_STATE`。
+- P1 不需要把 `AIJob` 暴露成用户页面，可作为调试和未来 loading 状态底座。
+
+### Task actions
+
+| Method | Path | 用途 |
+| --- | --- | --- |
+| `PATCH` | `/tasks/{task_id}` | 编辑任务基础字段 |
+| `POST` | `/tasks/{task_id}/complete` | 直接完成任务 |
+| `POST` | `/tasks/{task_id}/postpone` | 直接延后任务 |
+| `POST` | `/tasks/{task_id}/steps` | 手动添加步骤 |
+| `POST` | `/tasks/{task_id}/steps/{step_id}/complete` | 完成步骤 |
+| `GET` | `/tasks/{task_id}/events` | 调试 / 活动历史 |
+
+---
+
+## 8. Focus
+
+### POST `/focus-sessions`
+
+Request:
+
+```json
+{
+  "task_id": "uuid",
+  "daily_plan_item_id": "uuid",
+  "planned_duration_min": 25
+}
+```
+
+Response:
+
+```json
+{
+  "id": "uuid",
+  "task_id": "uuid",
+  "daily_plan_id": "uuid",
+  "daily_plan_item_id": "uuid",
+  "started_at": "2026-05-16T10:00:00Z",
+  "ended_at": null,
+  "planned_duration_min": 25,
+  "actual_duration_min": 0,
+  "status": "active",
+  "interruption_reason": null
+}
+```
+
+Frontend notes:
+
+- 同一用户同一时间只能有一个 active focus session。
+- 如果存在 active session，Task Detail 的 `actions.can_start_focus=false`。
+
+### Finish Focus
+
+| Method | Path | Request | 状态结果 |
+| --- | --- | --- | --- |
+| `POST` | `/focus-sessions/{session_id}/complete` | `{ "actual_duration_min": 25 }` | `completed`，任务完成 |
+| `POST` | `/focus-sessions/{session_id}/interrupt` | `{ "actual_duration_min": 10, "interruption_reason": "..." }` | `interrupted`，任务回到 active |
+| `POST` | `/focus-sessions/{session_id}/postpone` | `{ "actual_duration_min": 10, "interruption_reason": "..." }` | `postponed`，任务延后 |
+
+---
+
+## 9. Daily Report
+
+### GET `/reports/daily`
+
+Query:
+
+```text
+report_date=YYYY-MM-DD  // optional
+```
+
+如果当日没有 report，会生成一个。
+
+### POST `/reports/daily/generate`
+
+强制重新生成当日 Daily Report。
+
+Response key fields:
+
+```json
+{
+  "id": "uuid",
+  "report_date": "2026-05-16",
+  "daily_plan_id": "uuid",
+  "completed_task_count": 1,
+  "postponed_task_count": 0,
+  "interrupted_count": 0,
+  "focus_minutes": 25,
+  "completion_rate": 1.0,
+  "ai_summary": "今天完成了主要执行动作。",
+  "ai_suggestions": ["保持高价值任务优先。"],
+  "generated_from_plan_version": 1
+}
+```
+
+Frontend notes:
+
+- P1 Daily Report 可以作为完成 Focus 后的轻量复盘入口。
+- `ai_suggestions` 是短建议列表，不要做成复杂洞察页；Weekly / Monthly 是 P2。
+
+---
+
+## 10. Me
+
+### GET `/me/overview`
+
+Query:
+
+```text
+today=YYYY-MM-DD  // optional
+```
+
+Response:
+
+```json
+{
+  "profile": {
+    "user_id": "uuid",
+    "name": "Chronos Demo",
+    "timezone": "Asia/Shanghai",
+    "current_streak_days": 1
+  },
+  "today": {
+    "date": "2026-05-16",
+    "completed_task_count": 1,
+    "planned_task_count": 3,
+    "completion_rate": 0.33,
+    "focus_minutes": 25
+  },
+  "week": {
+    "week_start": "2026-05-11",
+    "week_end": "2026-05-17",
+    "focus_minutes": 25
+  },
+  "goals": {
+    "active_goal_count": 1,
+    "completed_goal_count": 0
+  },
+  "tasks": {
+    "active_task_count": 2,
+    "postponed_task_count": 1,
+    "completed_task_count": 1
+  },
+  "reports": {
+    "daily_report_available": true,
+    "daily_report_id": "uuid"
+  },
+  "settings": {
+    "notification_enabled": true,
+    "focus_mode_default_minutes": 25
+  }
+}
+```
+
+Frontend notes:
+
+- P1 Me 是数据收敛页，不是完整洞察中心。
+- Insights、Energy、Social 入口可以保留占位，但不要调用不存在的 P2/P3/P4 API。
+
+---
+
+## 11. Goals
+
+Goals 是 P2 一级 Tab，但 P1 后端已经提供轻量 Goal API，主要用于 Task 归属和后续 Goals 页面。
+
+| Method | Path | 用途 |
+| --- | --- | --- |
+| `POST` | `/goals` | 创建目标 |
+| `GET` | `/goals` | 目标列表 |
+| `GET` | `/goals/{goal_id}` | 目标详情基础信息 |
+| `PATCH` | `/goals/{goal_id}` | 编辑目标基础字段 |
+
+Goal fields:
+
+```json
+{
+  "id": "uuid",
+  "title": "Ship Chronos P1 execution loop",
+  "description": "Demo goal",
+  "deadline": "2026-05-30",
+  "value_level": "high",
+  "status": "active"
+}
+```
+
+P2 尚未实现：
+
+- Goal Detail 聚合。
+- Goal progress timeline。
+- Dependency map。
+- AI suggestion for goal.
+
+---
+
+## 12. AIJob
+
+### GET `/ai-jobs/{job_id}`
+
+用于查询 AI / fallback job 状态。P1 主要给 Task Breakdown 使用。
+
+Response key fields:
+
+```json
+{
+  "id": "uuid",
+  "job_type": "task_breakdown",
+  "status": "succeeded_with_fallback",
+  "input_entity_type": "task",
+  "input_entity_id": "uuid",
+  "result_entity_type": "task",
+  "result_entity_id": "uuid",
+  "provider": "rule",
+  "model": "task-breakdown-rule",
+  "prompt_version": "p1-rule-v1",
+  "retry_count": 0,
+  "job_metadata": {}
+}
+```
+
+Frontend notes:
+
+- P1 不建议做 AIJob 列表页。
+- 未来真实 LLM / async worker 接入后，前端可以用它支持 loading、失败、重试提示。
+
+---
+
+## 13. 推荐前端调用流程
+
+### 输入闭环
+
+```text
+POST /captures
+-> show parsed inbox item
+-> optional PATCH /inbox/{id}
+-> POST /inbox/{id}/confirm
+-> if task: GET /tasks/{task_id}
+-> if goal: show created state / later enter Goals
+```
+
+### 今日执行闭环
+
+```text
+GET /today
+-> user taps task
+-> GET /tasks/{task_id}
+-> optional POST /tasks/{task_id}/breakdown
+-> POST /focus-sessions
+-> POST /focus-sessions/{id}/complete | interrupt | postpone
+-> GET /today
+-> GET /reports/daily
+```
+
+### 复盘闭环
+
+```text
+GET /reports/daily
+GET /me/overview
+```
+
+---
+
+## 14. P1 前端不要依赖的内容
+
+以下是后续阶段能力，前端 P1 可以保留入口或占位，但不要假设后端已完成：
+
+- Voice / Image capture。
+- Calendar / Email / Health 数据接入。
+- Weekly / Monthly report。
+- Insight detail。
+- Energy dashboard。
+- Social / Groups / Friends。
+- Goal detail aggregate。
+- Dependency view。
+- Notification center。
+- AIJob list / cancel / retry。
+- 真实 LLM planning / task breakdown。
+
+---
+
+## 15. 本地验收命令
+
+```bash
+uv run alembic upgrade head
+uv run python scripts/dev_seed_demo.py
+uv run python scripts/smoke_p1_execution_loop.py
+uv run python -m unittest discover -s tests
+```
+
+本地 API 文档：
+
+```text
+http://localhost:8000/docs
+```
