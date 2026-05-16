@@ -10,6 +10,7 @@ from app.models.focus_session import FocusSession
 from app.models.goal import Goal
 from app.models.inbox import InboxItem
 from app.models.report import DailyReport
+from app.models.reminder import Reminder
 from app.models.task import Task
 from app.models.task_dependency import TaskDependency
 from app.models.task_step import TaskStep
@@ -31,6 +32,7 @@ __all__ = [
     "Goal",
     "InboxItem",
     "PlanRevision",
+    "Reminder",
     "StrategySnapshot",
     "Task",
     "TaskDependency",

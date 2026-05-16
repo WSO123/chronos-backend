@@ -36,7 +36,9 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Health Energy Sync Worker | `health.sync_energy_connection` | Ready |
 | Health Fake Provider Adapter | internal health provider registry | Ready |
 | Today Strategy Energy Explanation | `GET /api/v1/today/strategy` -> `energy` | Ready |
-| Notification Center | - | Not Started |
+| Reminder Center | `GET /api/v1/reminders` | Ready |
+| Create Manual Reminder | `POST /api/v1/reminders` | Ready |
+| Dismiss Reminder | `POST /api/v1/reminders/{id}/dismiss` | Ready |
 
 ## 3. Data Sources
 
@@ -512,7 +514,83 @@ Fake health metadata example:
 }
 ```
 
-## 8. 当前安全边界
+## 8. Reminder Center
+
+Reminder Center 是 P3 自动提醒能力的承接层。当前只做提醒记录、列表、手动创建和 dismiss，不做真实推送，不自动生成提醒。
+
+### GET `/api/v1/reminders`
+
+Query:
+
+```text
+status=scheduled
+limit=50
+offset=0
+```
+
+Response:
+
+```json
+{
+  "reminders": [
+    {
+      "id": "uuid",
+      "task_id": "uuid",
+      "goal_id": null,
+      "title": "Start gently",
+      "message": "Begin the next task",
+      "reminder_type": "execution",
+      "status": "scheduled",
+      "scheduled_for": "2026-05-17T09:00:00Z",
+      "channel": "in_app",
+      "source": "manual",
+      "dismissed_at": null,
+      "sent_at": null,
+      "reminder_metadata": {}
+    }
+  ],
+  "scheduled_count": 1,
+  "overdue_count": 0
+}
+```
+
+### POST `/api/v1/reminders`
+
+Request:
+
+```json
+{
+  "title": "Start gently",
+  "message": "Begin the next task",
+  "reminder_type": "execution",
+  "scheduled_for": "2026-05-17T09:00:00Z",
+  "channel": "in_app",
+  "source": "manual",
+  "task_id": "uuid",
+  "goal_id": null,
+  "reminder_metadata": {}
+}
+```
+
+Rules:
+
+- 当前支持 `reminder_type=execution | deadline | system | team`。
+- 当前支持 `channel=in_app | push | email`，但不会真实发送。
+- 一个 reminder 最多关联一个 task 或一个 goal。
+- 关联 task / goal 时必须属于当前用户。
+- 创建后状态为 `scheduled`。
+
+### POST `/api/v1/reminders/{id}/dismiss`
+
+将 pending center 中的 reminder 标记为 `dismissed`。
+
+Frontend notes:
+
+- Reminder Center 可放在 Today Header 的提醒入口或 Me / Settings。
+- Today 首屏只展示提醒入口和必要数量，不展开完整列表。
+- 自动提醒生成、推送发送、系统定时扫描在后续 worker 迭代实现。
+
+## 9. 当前安全边界
 
 - 仍使用开发态 `X-User-Id` 用户上下文。
 - 不保存外部平台 access token / refresh token。

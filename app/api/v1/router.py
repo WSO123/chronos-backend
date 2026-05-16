@@ -10,6 +10,7 @@ from app.api.v1 import (
     inbox,
     insights,
     me,
+    reminders,
     reports,
     tasks,
     today,
@@ -25,6 +26,7 @@ api_router.include_router(goals.router)
 api_router.include_router(inbox.router)
 api_router.include_router(insights.router)
 api_router.include_router(me.router)
+api_router.include_router(reminders.router)
 api_router.include_router(reports.router)
 api_router.include_router(tasks.router)
 api_router.include_router(today.router)

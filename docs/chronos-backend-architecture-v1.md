@@ -679,6 +679,36 @@ EnergyDailyMetric {
 - Health 数据不进入 Capture / Inbox，也不直接生成 Task。
 - 当前 `energy_score` 可由睡眠和压力轻量推导；后续真实 Health provider 可写入同一模型。
 
+### Reminder
+
+```text
+Reminder {
+  id
+  user_id
+  task_id
+  goal_id
+  title
+  message
+  reminder_type          // execution | deadline | system | team
+  status                 // scheduled | sent | dismissed | canceled
+  scheduled_for
+  channel                // in_app | push | email
+  source                 // manual | system | ai | worker
+  dismissed_at
+  sent_at
+  metadata
+  created_at
+  updated_at
+}
+```
+
+说明：
+
+- Reminder 是 P3 自动提醒和提醒中心的承接层。
+- 当前只记录提醒和用户 dismiss，不执行真实推送。
+- 一个 reminder 最多关联一个 Task 或一个 Goal。
+- Reminder 不改变 Task / Goal / Today 状态。
+
 ### CaptureInput
 
 ```text
@@ -1221,6 +1251,21 @@ GET /api/v1/energy/dashboard
 - 当前不把 Energy 数据直接写入 Today 排序，只作为解释和后续策略输入。
 - `GET /today/strategy` 会读取同日 Energy metric 生成只读解释，但不会改变 DailyPlan / DailyPlanItem。
 
+### Reminders
+
+```text
+GET  /api/v1/reminders
+POST /api/v1/reminders
+POST /api/v1/reminders/{reminder_id}/dismiss
+```
+
+说明：
+
+- P3 已支持 Reminder Center 的基础读取、手动创建和 dismiss。
+- 当前不做真实 push/email 发送，不自动生成提醒。
+- Reminder 可关联 Task 或 Goal，但不会改变 Task / Goal 状态。
+- 后续 deadline / execution 自动提醒 worker 应写入该模型。
+
 ### Data Sources
 
 ```text
@@ -1648,7 +1693,7 @@ P1 不是以“接口都写完”为验收，而是以核心闭环跑通为验�
 - 邮件接入（已支持 Data Source 连接状态底座和 External Capture Import，真实第三方同步待后续）
 - 睡眠 / 压力数据接入（已支持 Health 连接状态底座、fake health worker 和 EnergyDailyMetric 日级聚合，真实平台同步待后续）
 - Energy Dashboard（已支持轻量趋势和任务类型建议）
-- 自动提醒增强
+- 自动提醒增强（已支持 Reminder Center 基础模型和手动提醒，自动生成 / 推送待后续）
 - 来源内容关联
 
 ### P4：轻社交与协作
