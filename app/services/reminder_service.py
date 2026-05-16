@@ -391,6 +391,35 @@ class ReminderService:
             "reminders": created,
         }
 
+    def cleanup_delivery_attempts(
+        self,
+        db: Session,
+        *,
+        retention_days: int = 30,
+        now: datetime | None = None,
+        limit: int = 500,
+    ) -> dict:
+        resolved_now = self._normalize_datetime(now or datetime.now(UTC))
+        retention_days = min(max(retention_days, 1), 365)
+        limit = min(max(limit, 1), 1000)
+        cutoff = resolved_now - timedelta(days=retention_days)
+        stmt = (
+            select(ReminderDeliveryAttempt)
+            .where(ReminderDeliveryAttempt.attempted_at < cutoff)
+            .order_by(ReminderDeliveryAttempt.attempted_at)
+            .limit(limit)
+        )
+        attempts = list(db.scalars(stmt).all())
+        for attempt in attempts:
+            db.delete(attempt)
+        db.commit()
+        return {
+            "status": "cleaned",
+            "deleted_count": len(attempts),
+            "retention_days": retention_days,
+            "cutoff": cutoff,
+        }
+
     def to_response(self, reminder: Reminder) -> dict:
         return {
             "id": reminder.id,

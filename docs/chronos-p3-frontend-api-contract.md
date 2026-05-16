@@ -688,6 +688,7 @@ Celery task:
 reminder.dispatch_due(limit=50, channel=null, now=null)
 reminder.generate_deadline(user_id=null, target_date=null, window_days=1, reminder_hour=9)
 reminder.generate_execution(user_id, plan_date, limit=3, start_hour=9, spacing_minutes=45)
+reminder.cleanup_delivery_attempts(retention_days=30, now=null, limit=500)
 ```
 
 Rules:
@@ -707,6 +708,7 @@ Rules:
 - `reminder.generate_execution` 按用户时区从 `plan_date + start_hour` 开始，以 `spacing_minutes` 间隔生成 scheduled reminders，默认最多 3 条。
 - `reminder.generate_execution` 使用 task + scheduled_for 幂等检查，重复运行不会重复生成。
 - deadline / execution generator 会读取 `/me/settings` 的通知开关、类型开关、channel 和默认提醒参数；worker 参数可覆盖默认时间参数。
+- `reminder.cleanup_delivery_attempts` 只删除旧 delivery attempts，不删除 Reminder 主记录；`retention_days` 默认 30 天。
 
 ## 10. Reminder Scheduler Plan
 
@@ -756,6 +758,18 @@ Response:
         "limit": 50,
         "channel": null,
         "now": null
+      },
+      "guardrails": []
+    },
+    {
+      "task_name": "reminder.cleanup_delivery_attempts",
+      "cadence": "daily",
+      "scope": "old_delivery_attempts",
+      "enabled": true,
+      "payload_template": {
+        "retention_days": 30,
+        "now": null,
+        "limit": 500
       },
       "guardrails": []
     }

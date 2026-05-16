@@ -12,7 +12,12 @@ from app.services.goal_service import goal_service
 from app.services.planning_service import planning_service
 from app.services.reminder_service import reminder_service
 from app.services.task_service import task_service
-from app.workers.tasks import dispatch_due_reminders, generate_deadline_reminders, generate_execution_reminders
+from app.workers.tasks import (
+    cleanup_delivery_attempts,
+    dispatch_due_reminders,
+    generate_deadline_reminders,
+    generate_execution_reminders,
+)
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
 
@@ -264,6 +269,72 @@ class ReminderServiceTests(unittest.TestCase):
             .count(),
             2,
         )
+
+    def test_cleanup_delivery_attempts_deletes_old_attempts_only(self):
+        now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)
+        reminder = reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={"title": "Attempt cleanup reminder", "scheduled_for": now},
+        )
+        old_attempt = ReminderDeliveryAttempt(
+            user_id=self.user.id,
+            reminder_id=reminder.id,
+            channel="in_app",
+            provider="reminder_center",
+            status="sent",
+            attempted_at=now - timedelta(days=31),
+            attempt_metadata={},
+        )
+        recent_attempt = ReminderDeliveryAttempt(
+            user_id=self.user.id,
+            reminder_id=reminder.id,
+            channel="in_app",
+            provider="reminder_center",
+            status="sent",
+            attempted_at=now - timedelta(days=1),
+            attempt_metadata={},
+        )
+        self.db.add_all([old_attempt, recent_attempt])
+        self.db.commit()
+
+        result = reminder_service.cleanup_delivery_attempts(self.db, retention_days=30, now=now)
+
+        self.assertEqual(result["status"], "cleaned")
+        self.assertEqual(result["deleted_count"], 1)
+        self.assertIsNone(self.db.get(ReminderDeliveryAttempt, old_attempt.id))
+        self.assertIsNotNone(self.db.get(ReminderDeliveryAttempt, recent_attempt.id))
+        self.assertIsNotNone(self.db.get(Reminder, reminder.id))
+
+    def test_cleanup_delivery_attempts_worker_returns_json_ready_payload(self):
+        now = datetime(2026, 5, 17, 9, 0, tzinfo=UTC)
+        reminder = reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={"title": "Worker cleanup reminder", "scheduled_for": now},
+        )
+        self.db.add(
+            ReminderDeliveryAttempt(
+                user_id=self.user.id,
+                reminder_id=reminder.id,
+                channel="in_app",
+                provider="reminder_center",
+                status="sent",
+                attempted_at=now - timedelta(days=31),
+                attempt_metadata={},
+            )
+        )
+        self.db.commit()
+
+        with patch("app.workers.tasks.SessionLocal", TestingSessionLocal):
+            result = cleanup_delivery_attempts.run(
+                retention_days=30,
+                now=now.isoformat(),
+            )
+
+        self.assertEqual(result["status"], "cleaned")
+        self.assertEqual(result["deleted_count"], 1)
+        self.assertEqual(result["cutoff"], (now - timedelta(days=30)).isoformat())
 
     def test_generate_deadline_reminders_creates_task_and_goal_reminders_once(self):
         target_date = datetime(2026, 5, 17, tzinfo=UTC).date()

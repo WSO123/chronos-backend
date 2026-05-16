@@ -60,6 +60,23 @@ class SchedulerService:
                         "Honors ReminderDeliveryAttempt cooldown for skipped external channels.",
                     ],
                 },
+                {
+                    "task_name": "reminder.cleanup_delivery_attempts",
+                    "cadence": "daily",
+                    "schedule_hint": "Remove old delivery attempts after retention window.",
+                    "scope": "old_delivery_attempts",
+                    "enabled": True,
+                    "payload_template": {
+                        "retention_days": 30,
+                        "now": None,
+                        "limit": 500,
+                    },
+                    "guardrails": [
+                        "Deletes delivery attempts only; never deletes reminders.",
+                        "Clamps retention_days to 1..365 and limit to 1..1000.",
+                        "Run during low-traffic windows.",
+                    ],
+                },
             ],
             "notes": [
                 "This is a scheduler contract, not an active Celery Beat configuration.",

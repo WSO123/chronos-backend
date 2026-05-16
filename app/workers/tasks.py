@@ -138,6 +138,25 @@ def generate_execution_reminders(
         db.close()
 
 
+@celery_app.task(name="reminder.cleanup_delivery_attempts")
+def cleanup_delivery_attempts(
+    retention_days: int = 30,
+    now: str | None = None,
+    limit: int = 500,
+) -> dict:
+    db = SessionLocal()
+    try:
+        result = reminder_service.cleanup_delivery_attempts(
+            db,
+            retention_days=retention_days,
+            now=datetime.fromisoformat(now) if now else None,
+            limit=limit,
+        )
+        return _json_ready(result)
+    finally:
+        db.close()
+
+
 def _json_ready(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _json_ready(item) for key, item in value.items()}

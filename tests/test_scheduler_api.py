@@ -31,6 +31,7 @@ class SchedulerAPITests(unittest.TestCase):
         self.assertIn("reminder.generate_deadline", task_names)
         self.assertIn("reminder.generate_execution", task_names)
         self.assertIn("reminder.dispatch_due", task_names)
+        self.assertIn("reminder.cleanup_delivery_attempts", task_names)
         self.assertTrue(body["notes"])
 
 

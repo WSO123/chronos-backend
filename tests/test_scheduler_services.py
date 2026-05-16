@@ -12,6 +12,7 @@ class SchedulerServiceTests(unittest.TestCase):
         self.assertIn("reminder.generate_deadline", entries)
         self.assertIn("reminder.generate_execution", entries)
         self.assertIn("reminder.dispatch_due", entries)
+        self.assertIn("reminder.cleanup_delivery_attempts", entries)
         self.assertEqual(entries["reminder.generate_execution"]["scope"], "per_user_with_active_today_plan")
         self.assertTrue(
             any(
@@ -23,6 +24,12 @@ class SchedulerServiceTests(unittest.TestCase):
             any(
                 "cooldown" in guardrail
                 for guardrail in entries["reminder.dispatch_due"]["guardrails"]
+            )
+        )
+        self.assertTrue(
+            any(
+                "never deletes reminders" in guardrail
+                for guardrail in entries["reminder.cleanup_delivery_attempts"]["guardrails"]
             )
         )
 
