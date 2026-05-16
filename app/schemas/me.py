@@ -44,6 +44,8 @@ class MeReportsOverviewResponse(BaseModel):
 class MeSettingsOverviewResponse(BaseModel):
     notification_enabled: bool
     focus_mode_default_minutes: int
+    reminder_execution_enabled: bool
+    reminder_deadline_enabled: bool
 
 
 class MeInsightHighlightResponse(BaseModel):

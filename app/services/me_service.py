@@ -91,6 +91,8 @@ class MeService:
             "settings": {
                 "notification_enabled": settings.notification_enabled if settings else True,
                 "focus_mode_default_minutes": settings.focus_mode_default_minutes if settings else 25,
+                "reminder_execution_enabled": settings.reminder_execution_enabled if settings else True,
+                "reminder_deadline_enabled": settings.reminder_deadline_enabled if settings else True,
             },
         }
 

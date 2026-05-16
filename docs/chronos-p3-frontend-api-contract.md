@@ -36,6 +36,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Health Energy Sync Worker | `health.sync_energy_connection` | Ready |
 | Health Fake Provider Adapter | internal health provider registry | Ready |
 | Today Strategy Energy Explanation | `GET /api/v1/today/strategy` -> `energy` | Ready |
+| Notification Settings | `GET /api/v1/me/settings` / `PATCH /api/v1/me/settings` | Ready |
 | Reminder Center | `GET /api/v1/reminders` | Ready |
 | Create Manual Reminder | `POST /api/v1/reminders` | Ready |
 | Dismiss Reminder | `POST /api/v1/reminders/{id}/dismiss` | Ready |
@@ -514,7 +515,58 @@ Fake health metadata example:
 }
 ```
 
-## 8. Reminder Center
+## 8. Notification Settings
+
+用于 Me / Settings 的通知设置入口。它控制自动 reminder generator 的默认行为，不触发真实推送。
+
+### GET `/api/v1/me/settings`
+
+Response:
+
+```json
+{
+  "notification_enabled": true,
+  "reminder_execution_enabled": true,
+  "reminder_deadline_enabled": true,
+  "reminder_channel_in_app_enabled": true,
+  "reminder_channel_push_enabled": false,
+  "reminder_channel_email_enabled": false,
+  "execution_reminder_limit": 3,
+  "execution_reminder_start_hour": 9,
+  "execution_reminder_spacing_minutes": 45,
+  "deadline_reminder_hour": 9,
+  "focus_mode_default_minutes": 25,
+  "planning_preference": "normal",
+  "ai_strategy_preference": "balanced"
+}
+```
+
+### PATCH `/api/v1/me/settings`
+
+Request 支持局部更新：
+
+```json
+{
+  "notification_enabled": true,
+  "reminder_execution_enabled": true,
+  "reminder_deadline_enabled": true,
+  "reminder_channel_in_app_enabled": true,
+  "execution_reminder_limit": 2,
+  "execution_reminder_start_hour": 10,
+  "execution_reminder_spacing_minutes": 60,
+  "deadline_reminder_hour": 8
+}
+```
+
+Rules:
+
+- `notification_enabled=false` 会让自动 execution / deadline generator 返回 disabled 或跳过用户。
+- `reminder_execution_enabled=false` 只关闭 execution reminder generator。
+- `reminder_deadline_enabled=false` 只关闭 deadline reminder generator。
+- 至少保留一个 reminder channel，不允许 in_app / push / email 全部关闭。
+- 当前 channel 只影响 reminder 记录上的 `channel` 字段，不触发真实发送。
+
+## 9. Reminder Center
 
 Reminder Center 是 P3 自动提醒能力的承接层。当前只做提醒记录、列表、手动创建、dismiss 和 worker 规则生成，不做真实推送。
 
@@ -612,15 +664,16 @@ Rules:
 - `reminder.generate_execution` 基于 pinned / recommended 且仍为 planned 的 DailyPlanItem 生成 `execution` reminders。
 - `reminder.generate_execution` 按用户时区从 `plan_date + start_hour` 开始，以 `spacing_minutes` 间隔生成 scheduled reminders，默认最多 3 条。
 - `reminder.generate_execution` 使用 task + scheduled_for 幂等检查，重复运行不会重复生成。
+- deadline / execution generator 会读取 `/me/settings` 的通知开关、类型开关、channel 和默认提醒参数；worker 参数可覆盖默认时间参数。
 
-## 9. 当前安全边界
+## 10. 当前安全边界
 
 - 仍使用开发态 `X-User-Id` 用户上下文。
 - 不保存外部平台 access token / refresh token。
 - 当前不接真实第三方 API。
 - 外部来源任务只进入 Capture / Inbox，由用户确认后再生成 Task / Goal。
 
-## 8. 后续 P3
+## 11. 后续 P3
 
 - 真实 Calendar / Email provider adapter。
 - 定时调度与失败重试策略。

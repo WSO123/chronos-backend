@@ -18,7 +18,7 @@ from app.models.enums import (
 from app.models.goal import Goal
 from app.models.reminder import Reminder
 from app.models.task import Task
-from app.models.user import User
+from app.models.user import User, UserSettings
 from app.services.errors import InvalidStateError, NotFoundError, ValidationDomainError
 
 
@@ -142,15 +142,27 @@ class ReminderService:
         user_id: uuid.UUID | None = None,
         target_date: date | None = None,
         window_days: int = 1,
-        reminder_hour: int = 9,
+        reminder_hour: int | None = None,
     ) -> dict:
         resolved_date = target_date or date.today()
         window_days = min(max(window_days, 1), 14)
-        reminder_hour = min(max(reminder_hour, 0), 23)
         users = [self._ensure_user(db, user_id=user_id)] if user_id is not None else self._active_users(db)
         created: list[Reminder] = []
         skipped_existing_count = 0
+        skipped_disabled_count = 0
         for user in users:
+            settings = self._settings_for_user(db, user_id=user.id)
+            if not self._reminder_type_enabled(settings=settings, reminder_type="deadline"):
+                skipped_disabled_count += 1
+                continue
+            resolved_reminder_hour = min(
+                max(
+                    reminder_hour if reminder_hour is not None else settings.deadline_reminder_hour,
+                    0,
+                ),
+                23,
+            )
+            channel = self._preferred_channel(settings)
             due_end = resolved_date + timedelta(days=window_days - 1)
             candidates = self._deadline_candidates(
                 db,
@@ -162,7 +174,7 @@ class ReminderService:
                 scheduled_for = self._deadline_scheduled_for(
                     user_timezone=user.timezone,
                     deadline=entity.deadline,
-                    reminder_hour=reminder_hour,
+                    reminder_hour=resolved_reminder_hour,
                 )
                 if self._deadline_reminder_exists(
                     db,
@@ -182,7 +194,7 @@ class ReminderService:
                     reminder_type="deadline",
                     status="scheduled",
                     scheduled_for=scheduled_for,
-                    channel="in_app",
+                    channel=channel,
                     source="worker",
                     reminder_metadata={
                         "generator": "deadline_v1",
@@ -199,6 +211,7 @@ class ReminderService:
             "status": "generated",
             "created_count": len(created),
             "skipped_existing_count": skipped_existing_count,
+            "skipped_disabled_count": skipped_disabled_count,
             "target_date": resolved_date,
             "window_days": window_days,
             "reminders": created,
@@ -210,14 +223,36 @@ class ReminderService:
         *,
         user_id: uuid.UUID,
         plan_date: date,
-        limit: int = 3,
-        start_hour: int = 9,
-        spacing_minutes: int = 45,
+        limit: int | None = None,
+        start_hour: int | None = None,
+        spacing_minutes: int | None = None,
     ) -> dict:
         user = self._ensure_user(db, user_id=user_id)
-        limit = min(max(limit, 1), 10)
-        start_hour = min(max(start_hour, 0), 23)
-        spacing_minutes = min(max(spacing_minutes, 15), 180)
+        settings = self._settings_for_user(db, user_id=user_id)
+        if not self._reminder_type_enabled(settings=settings, reminder_type="execution"):
+            return {
+                "status": "disabled",
+                "created_count": 0,
+                "skipped_existing_count": 0,
+                "plan_date": plan_date,
+                "reminders": [],
+            }
+        limit = min(max(limit if limit is not None else settings.execution_reminder_limit, 1), 10)
+        start_hour = min(
+            max(
+                start_hour if start_hour is not None else settings.execution_reminder_start_hour,
+                0,
+            ),
+            23,
+        )
+        spacing_minutes = min(
+            max(
+                spacing_minutes if spacing_minutes is not None else settings.execution_reminder_spacing_minutes,
+                15,
+            ),
+            180,
+        )
+        channel = self._preferred_channel(settings)
         plan = self._active_plan_for_date(db, user_id=user_id, plan_date=plan_date)
         if plan is None:
             return {
@@ -256,7 +291,7 @@ class ReminderService:
                 reminder_type="execution",
                 status="scheduled",
                 scheduled_for=scheduled_for,
-                channel="in_app",
+                channel=channel,
                 source="worker",
                 reminder_metadata={
                     "generator": "execution_v1",
@@ -310,6 +345,32 @@ class ReminderService:
     def _active_users(self, db: Session) -> list[User]:
         stmt = select(User).where(User.is_active.is_(True)).order_by(User.created_at)
         return list(db.scalars(stmt).all())
+
+    def _settings_for_user(self, db: Session, *, user_id: uuid.UUID) -> UserSettings:
+        stmt = select(UserSettings).where(UserSettings.user_id == user_id)
+        settings = db.scalars(stmt).first()
+        if settings is not None:
+            return settings
+        settings = UserSettings(user_id=user_id)
+        db.add(settings)
+        db.flush()
+        return settings
+
+    def _reminder_type_enabled(self, *, settings: UserSettings, reminder_type: str) -> bool:
+        if not settings.notification_enabled:
+            return False
+        if reminder_type == "execution":
+            return settings.reminder_execution_enabled
+        if reminder_type == "deadline":
+            return settings.reminder_deadline_enabled
+        return True
+
+    def _preferred_channel(self, settings: UserSettings) -> str:
+        if settings.reminder_channel_in_app_enabled:
+            return "in_app"
+        if settings.reminder_channel_push_enabled:
+            return "push"
+        return "email"
 
     def _ensure_task(self, db: Session, *, user_id: uuid.UUID, task_id: uuid.UUID) -> Task:
         task = db.get(Task, task_id)

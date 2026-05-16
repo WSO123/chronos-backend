@@ -5,6 +5,7 @@ from unittest.mock import patch
 from app.models.daily_plan import DailyPlan
 from app.models.reminder import Reminder
 from app.models.enums import TaskStatus
+from app.models.user import UserSettings
 from app.services.errors import NotFoundError, ValidationDomainError
 from app.services.goal_service import goal_service
 from app.services.planning_service import planning_service
@@ -301,6 +302,89 @@ class ReminderServiceTests(unittest.TestCase):
         self.assertEqual(result["created_count"], 1)
         self.assertEqual(result["reminders"][0]["reminder_type"], "execution")
         self.assertTrue(result["reminders"][0]["task_id"])
+
+    def test_generate_execution_reminders_respects_disabled_preference(self):
+        plan_date = datetime(2026, 5, 17, tzinfo=UTC).date()
+        self.db.add(UserSettings(user_id=self.user.id, reminder_execution_enabled=False))
+        self.db.commit()
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Muted execution task",
+            priority=1,
+        )
+        planning_service.get_today(self.db, user_id=self.user.id, plan_date=plan_date)
+
+        result = reminder_service.generate_execution_reminders(
+            self.db,
+            user_id=self.user.id,
+            plan_date=plan_date,
+        )
+
+        self.assertEqual(result["status"], "disabled")
+        self.assertEqual(result["created_count"], 0)
+        self.assertEqual(self.db.query(Reminder).filter(Reminder.reminder_type == "execution").count(), 0)
+
+    def test_generate_execution_reminders_uses_settings_defaults(self):
+        plan_date = datetime(2026, 5, 17, tzinfo=UTC).date()
+        self.db.add(
+            UserSettings(
+                user_id=self.user.id,
+                reminder_channel_in_app_enabled=False,
+                reminder_channel_push_enabled=True,
+                execution_reminder_limit=1,
+                execution_reminder_start_hour=10,
+                execution_reminder_spacing_minutes=30,
+            )
+        )
+        self.db.commit()
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Settings execution task 1",
+            priority=1,
+        )
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Settings execution task 2",
+            priority=2,
+        )
+        planning_service.get_today(self.db, user_id=self.user.id, plan_date=plan_date)
+
+        result = reminder_service.generate_execution_reminders(
+            self.db,
+            user_id=self.user.id,
+            plan_date=plan_date,
+        )
+
+        scheduled_for = result["reminders"][0].scheduled_for
+        if scheduled_for.tzinfo is None:
+            scheduled_for = scheduled_for.replace(tzinfo=UTC)
+        self.assertEqual(result["created_count"], 1)
+        self.assertEqual(result["reminders"][0].channel, "push")
+        self.assertEqual(scheduled_for, datetime(2026, 5, 17, 2, 0, tzinfo=UTC))
+
+    def test_generate_deadline_reminders_respects_disabled_preference(self):
+        target_date = datetime(2026, 5, 17, tzinfo=UTC).date()
+        self.db.add(UserSettings(user_id=self.user.id, reminder_deadline_enabled=False))
+        self.db.commit()
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Muted deadline task",
+            deadline=target_date,
+        )
+
+        result = reminder_service.generate_deadline_reminders(
+            self.db,
+            user_id=self.user.id,
+            target_date=target_date,
+        )
+
+        self.assertEqual(result["created_count"], 0)
+        self.assertEqual(result["skipped_disabled_count"], 1)
+        self.assertEqual(self.db.query(Reminder).filter(Reminder.reminder_type == "deadline").count(), 0)
 
 
 if __name__ == "__main__":

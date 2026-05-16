@@ -546,6 +546,15 @@ UserSettings {
   id
   user_id
   notification_enabled
+  reminder_execution_enabled
+  reminder_deadline_enabled
+  reminder_channel_in_app_enabled
+  reminder_channel_push_enabled
+  reminder_channel_email_enabled
+  execution_reminder_limit
+  execution_reminder_start_hour
+  execution_reminder_spacing_minutes
+  deadline_reminder_hour
   focus_mode_default_minutes
   planning_preference
   ai_strategy_preference
@@ -1267,6 +1276,7 @@ POST /api/v1/reminders/{reminder_id}/dismiss
 - P3 已支持 `reminder.dispatch_due` worker，占位扫描 due reminders 并标记 `sent`。
 - P3 已支持 `reminder.generate_deadline` worker，基于 Task / Goal deadline 生成 `deadline` reminders，并避免重复生成。
 - P3 已支持 `reminder.generate_execution` worker，基于已有 Today active plan 的 pinned / recommended planned items 生成 `execution` reminders，并避免重复生成。
+- P3 已支持 `/api/v1/me/settings` 读写提醒偏好，deadline / execution generator 会遵守全局通知开关、类型开关、channel 和默认提醒参数。
 - 当前不做真实 push/email 发送。
 - Reminder 可关联 Task 或 Goal，但不会改变 Task / Goal 状态。
 - Execution reminder generator 不会 lazy create Today plan，不会触发 replan，也不会改变 DailyPlan / DailyPlanItem 状态。

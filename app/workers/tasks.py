@@ -97,7 +97,7 @@ def generate_deadline_reminders(
     user_id: str | None = None,
     target_date: str | None = None,
     window_days: int = 1,
-    reminder_hour: int = 9,
+    reminder_hour: int | None = None,
 ) -> dict:
     db = SessionLocal()
     try:
@@ -118,9 +118,9 @@ def generate_deadline_reminders(
 def generate_execution_reminders(
     user_id: str,
     plan_date: str,
-    limit: int = 3,
-    start_hour: int = 9,
-    spacing_minutes: int = 45,
+    limit: int | None = None,
+    start_hour: int | None = None,
+    spacing_minutes: int | None = None,
 ) -> dict:
     db = SessionLocal()
     try:

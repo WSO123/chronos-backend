@@ -863,7 +863,9 @@ Response:
   },
   "settings": {
     "notification_enabled": true,
-    "focus_mode_default_minutes": 25
+    "focus_mode_default_minutes": 25,
+    "reminder_execution_enabled": true,
+    "reminder_deadline_enabled": true
   }
 }
 ```

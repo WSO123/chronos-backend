@@ -47,6 +47,15 @@ class UserSettings(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
     notification_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    reminder_execution_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    reminder_deadline_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    reminder_channel_in_app_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    reminder_channel_push_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    reminder_channel_email_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    execution_reminder_limit: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    execution_reminder_start_hour: Mapped[int] = mapped_column(Integer, default=9, nullable=False)
+    execution_reminder_spacing_minutes: Mapped[int] = mapped_column(Integer, default=45, nullable=False)
+    deadline_reminder_hour: Mapped[int] = mapped_column(Integer, default=9, nullable=False)
     focus_mode_default_minutes: Mapped[int] = mapped_column(Integer, default=25, nullable=False)
     planning_preference: Mapped[PlanningPreference] = mapped_column(
         Enum(
