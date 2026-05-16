@@ -119,7 +119,15 @@ class TaskService:
         db.refresh(task)
         return self.get_task(db, task_id=task.id, user_id=user_id)
 
-    def complete_task(self, db: Session, *, task_id: uuid.UUID, user_id: uuid.UUID) -> Task:
+    def complete_task(
+        self,
+        db: Session,
+        *,
+        task_id: uuid.UUID,
+        user_id: uuid.UUID,
+        related_daily_plan_id: uuid.UUID | None = None,
+        commit: bool = True,
+    ) -> Task:
         task = self._get_user_task(db, task_id=task_id, user_id=user_id)
         self._ensure_task_status(
             task,
@@ -136,12 +144,24 @@ class TaskService:
             entity_id=task.id,
             event_type="TASK_COMPLETED",
             related_task_id=task.id,
+            related_daily_plan_id=related_daily_plan_id,
         )
-        db.commit()
-        db.refresh(task)
-        return self.get_task(db, task_id=task.id, user_id=user_id)
+        if commit:
+            db.commit()
+            db.refresh(task)
+            return self.get_task(db, task_id=task.id, user_id=user_id)
+        db.flush()
+        return task
 
-    def postpone_task(self, db: Session, *, task_id: uuid.UUID, user_id: uuid.UUID) -> Task:
+    def postpone_task(
+        self,
+        db: Session,
+        *,
+        task_id: uuid.UUID,
+        user_id: uuid.UUID,
+        related_daily_plan_id: uuid.UUID | None = None,
+        commit: bool = True,
+    ) -> Task:
         task = self._get_user_task(db, task_id=task_id, user_id=user_id)
         self._ensure_task_status(
             task,
@@ -157,10 +177,14 @@ class TaskService:
             entity_id=task.id,
             event_type="TASK_POSTPONED",
             related_task_id=task.id,
+            related_daily_plan_id=related_daily_plan_id,
         )
-        db.commit()
-        db.refresh(task)
-        return self.get_task(db, task_id=task.id, user_id=user_id)
+        if commit:
+            db.commit()
+            db.refresh(task)
+            return self.get_task(db, task_id=task.id, user_id=user_id)
+        db.flush()
+        return task
 
     def create_step(
         self,

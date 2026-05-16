@@ -41,6 +41,33 @@ class TaskSource(StrEnum):
     CALENDAR = "calendar"
 
 
+class DailyPlanStatus(StrEnum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    CLOSED = "closed"
+
+
+class PlanRevisionTrigger(StrEnum):
+    INITIAL = "initial"
+    REPLAN = "replan"
+    MANUAL_ADJUST = "manual_adjust"
+    SYSTEM_REFRESH = "system_refresh"
+
+
+class DailyPlanItemSection(StrEnum):
+    PINNED = "pinned"
+    RECOMMENDED = "recommended"
+    LOW_PRIORITY = "low_priority"
+    ROLLED_OVER = "rolled_over"
+
+
+class DailyPlanItemStatus(StrEnum):
+    PLANNED = "planned"
+    COMPLETED = "completed"
+    POSTPONED = "postponed"
+    SKIPPED = "skipped"
+
+
 class CaptureInputType(StrEnum):
     TEXT = "text"
     VOICE = "voice"
