@@ -590,6 +590,15 @@ uv run python scripts/compare_planner_eval_jsonl.py /tmp/chronos-planner-eval-ba
 
 `--fail-on-regression` 只用于显式比较流程，不进入默认 CI / `verify_local`。默认行为应保持“报告差异”，避免评估工具反过来阻塞日常开发节奏。
 
+需要检查当前 eval 是否符合 golden baseline policy 时，使用：
+
+```bash
+uv run python scripts/check_planner_eval_policy.py /tmp/chronos-planner-eval.jsonl
+uv run python scripts/verify_local.py --planner-eval-policy
+```
+
+Planner eval policy 只作为手动 / 发布前 gate：`regressed` 必须修复或显式更新 evaluator 预期，`changed` 必须记录原因和结论，默认不纳入基础 CI。
+
 涉及 Daily Planner Agent shell 或 LLM provider 时，额外执行：
 
 ```bash

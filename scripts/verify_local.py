@@ -51,6 +51,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run deterministic Planning Engine evaluation scenarios.",
     )
+    parser.add_argument(
+        "--planner-eval-policy",
+        action="store_true",
+        help="Run Planning Engine evaluation JSONL and check it against the golden baseline policy.",
+    )
     return parser.parse_args()
 
 
@@ -73,7 +78,28 @@ def _build_steps(args: argparse.Namespace) -> list[VerificationStep]:
     selected_smoke = ["p1", "p2", "p3"] if args.all_smoke else args.smoke
     for smoke in _unique_preserving_order(selected_smoke):
         steps.append(_smoke_step(smoke))
-    if args.planner_eval:
+    if args.planner_eval_policy:
+        policy_eval_path = "/tmp/chronos-planner-eval-policy.jsonl"
+        steps.extend(
+            [
+                VerificationStep(
+                    "Planning Engine evaluation JSONL",
+                    [
+                        sys.executable,
+                        "scripts/evaluate_planning_engine.py",
+                        "--run-id",
+                        "policy-check",
+                        "--jsonl-output",
+                        policy_eval_path,
+                    ],
+                ),
+                VerificationStep(
+                    "Planning Engine golden policy check",
+                    [sys.executable, "scripts/check_planner_eval_policy.py", policy_eval_path],
+                ),
+            ]
+        )
+    elif args.planner_eval:
         steps.append(
             VerificationStep(
                 "Planning Engine evaluation",

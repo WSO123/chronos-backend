@@ -64,4 +64,5 @@ Planner eval JSONL 对比：
 uv run python scripts/evaluate_planning_engine.py --run-id baseline --jsonl-output /tmp/chronos-planner-baseline.jsonl
 uv run python scripts/evaluate_planning_engine.py --run-id candidate --jsonl-output /tmp/chronos-planner-candidate.jsonl
 uv run python scripts/compare_planner_eval_jsonl.py /tmp/chronos-planner-baseline.jsonl /tmp/chronos-planner-candidate.jsonl
+uv run python scripts/check_planner_eval_policy.py /tmp/chronos-planner-candidate.jsonl
 ```

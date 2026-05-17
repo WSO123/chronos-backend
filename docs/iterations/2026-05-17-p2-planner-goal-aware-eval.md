@@ -319,5 +319,5 @@ git diff --check
 ## 13. 后续迭代建议
 
 1. 增加验收记录生成脚本，从 smoke JSON 和 compare JSON 自动生成 Markdown 草稿。
-2. 增加 planner eval 对比 golden baseline 文档，记录可接受的 changed / regression 标准。
+2. 已在后续迭代补充 planner eval golden baseline policy，记录可接受的 changed / regression 标准。
 3. 为 Today Strategy Detail 增加更清晰的 goal-aware explanation 文案，但仍不进入 Today 首屏。

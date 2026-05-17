@@ -152,6 +152,12 @@ uv run python scripts/evaluate_planning_engine.py --run-id <candidate-run-id> --
 uv run python scripts/compare_planner_eval_jsonl.py /tmp/chronos-planner-baseline.jsonl /tmp/chronos-planner-candidate.jsonl
 ```
 
+### Golden policy check
+
+```bash
+uv run python scripts/check_planner_eval_policy.py /tmp/chronos-planner-candidate.jsonl
+```
+
 结果摘要：
 
 ```json
@@ -217,6 +223,7 @@ uv run python scripts/compare_planner_eval_jsonl.py /tmp/chronos-planner-baselin
 - [ ] Prompt version / checksum 与预期一致。
 - [ ] task ids 未变化。
 - [ ] `compare_planner_eval_jsonl.py` 没有 regression。
+- [ ] `check_planner_eval_policy.py` 没有 regression；如为 changed，已记录原因和结论。
 - [ ] Fallback 仍可用。
 
 ### 可以接受但需要记录

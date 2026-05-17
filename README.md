@@ -132,6 +132,7 @@ uv run python scripts/smoke_p3_natural_growth_loop.py
 uv run python scripts/evaluate_planning_engine.py
 uv run python scripts/evaluate_planning_engine.py --jsonl-output /tmp/chronos-planner-eval.jsonl
 uv run python scripts/compare_planner_eval_jsonl.py /tmp/chronos-planner-eval-baseline.jsonl /tmp/chronos-planner-eval-candidate.jsonl
+uv run python scripts/check_planner_eval_policy.py /tmp/chronos-planner-eval.jsonl
 ```
 
 也可以用统一验证入口跑基础检查和指定 smoke：
@@ -139,6 +140,7 @@ uv run python scripts/compare_planner_eval_jsonl.py /tmp/chronos-planner-eval-ba
 ```bash
 uv run python scripts/verify_local.py --smoke p3
 uv run python scripts/verify_local.py --planner-eval
+uv run python scripts/verify_local.py --planner-eval-policy
 ```
 
 这些 smoke 会通过 API 跑通：
@@ -212,6 +214,7 @@ git diff --check
 `scripts/smoke_p3_natural_growth_loop.py` 用于验证 P3 数据接入、精力、外部输入、提醒、Me 入口状态和调度契约，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/evaluate_planning_engine.py` 用于验证 Planning Engine 的固定场景排序、容量、Energy、依赖、用户修正、行为反馈、Goal 价值和超期 Goal 恢复，使用测试数据库，不污染开发数据库；可选 `--jsonl-output` 会写出离线评估记录，便于后续比较 provider / prompt。
 `scripts/compare_planner_eval_jsonl.py` 用于比较两份 Planning Engine eval JSONL，输出 scenario 通过状态、排序、容量和 `item_signals` 差异；默认只报告结果，`--fail-on-regression` 可作为显式手动 gate。
+`scripts/check_planner_eval_policy.py` 用于把一次 Planning Engine eval JSONL 与 [planner eval golden baseline](./docs/planner-eval-baselines/README.md) 对齐，识别缺失场景、失败场景、字段丢失和 baseline 变更。
 `scripts/verify_local.py` 用于编排本地验证阶梯，例如 `uv run python scripts/verify_local.py --all-smoke --planner-eval`。
 
 前端联调接口契约见：
