@@ -9,6 +9,7 @@ from app.core.db import get_db
 from app.schemas.today import (
     StrategyDetailResponse,
     TodayItemUpdate,
+    TodayPlanningSignalsPrepareResponse,
     TodayReplanRequest,
     TodayResponse,
     TodayTaskResponse,
@@ -48,6 +49,23 @@ def replan_today(
         user_id=user_id,
         plan_date=plan_date,
         reason=payload.reason if payload else None,
+    )
+
+
+@router.post("/planning-signals", response_model=TodayPlanningSignalsPrepareResponse)
+def prepare_today_planning_signals(
+    plan_date: date | None = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=20),
+    replan: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return planning_service.prepare_today_planning_signals(
+        db,
+        user_id=user_id,
+        plan_date=plan_date,
+        limit=limit,
+        replan=replan,
     )
 
 

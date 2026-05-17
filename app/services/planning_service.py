@@ -46,6 +46,7 @@ from app.services.ai_job_service import ai_job_service
 from app.services.energy_service import energy_service
 from app.services.errors import InvalidStateError, NotFoundError
 from app.services.task_service import task_service
+from app.services.task_planning_signal_service import task_planning_signal_service
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,61 @@ class PlanningService:
             db.commit()
         return self._build_today_response(db, plan=plan)
 
+    def prepare_today_planning_signals(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        plan_date: date | None = None,
+        limit: int = 10,
+        replan: bool = True,
+    ) -> dict:
+        resolved_date = self._resolve_plan_date(db, user_id=user_id, plan_date=plan_date)
+        today = self.get_today(db, user_id=user_id, plan_date=resolved_date)
+        task_ids = self._task_ids_for_signal_preparation(today=today, limit=limit)
+        generated_results: list[dict] = []
+        existing_count = 0
+
+        for task_id in task_ids:
+            if task_planning_signal_service.latest_signal(db, task_id=task_id, user_id=user_id) is not None:
+                existing_count += 1
+                continue
+            generated_results.append(
+                task_planning_signal_service.generate_signal(db, task_id=task_id, user_id=user_id)
+            )
+
+        replanned = False
+        if generated_results and replan:
+            today = self.replan_today(
+                db,
+                user_id=user_id,
+                plan_date=resolved_date,
+                reason="AI semantic planning signals refreshed",
+            )
+            replanned = True
+        else:
+            today = self.get_today(db, user_id=user_id, plan_date=resolved_date)
+
+        return {
+            "plan_date": resolved_date,
+            "task_count": len(task_ids),
+            "generated_count": len(generated_results),
+            "existing_count": existing_count,
+            "skipped_count": max(0, len(task_ids) - existing_count - len(generated_results)),
+            "replanned": replanned,
+            "planning_signal_ids": [
+                result["planning_signal"]["id"]
+                for result in generated_results
+                if result.get("planning_signal")
+            ],
+            "ai_job_ids": [
+                result["ai_job"]["id"]
+                for result in generated_results
+                if result.get("ai_job")
+            ],
+            "today": today,
+        }
+
     def describe_task_today_impact(
         self,
         db: Session,
@@ -177,6 +233,22 @@ class PlanningService:
             replanned=False,
             reason="already_in_today_plan" if current_item else "not_in_today_plan",
         )
+
+    def _task_ids_for_signal_preparation(self, *, today: dict, limit: int) -> list[uuid.UUID]:
+        task_ids: list[uuid.UUID] = []
+        seen: set[uuid.UUID] = set()
+        for section_key in ("pinned_tasks", "recommended_tasks", "low_priority_tasks"):
+            for item in today["sections"][section_key]:
+                if item["item_status"] in {DailyPlanItemStatus.COMPLETED, DailyPlanItemStatus.SKIPPED}:
+                    continue
+                task_id = item["task_id"]
+                if task_id in seen:
+                    continue
+                task_ids.append(task_id)
+                seen.add(task_id)
+                if len(task_ids) >= limit:
+                    return task_ids
+        return task_ids
 
     def get_current_today_item_for_task(
         self,

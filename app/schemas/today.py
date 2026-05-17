@@ -199,6 +199,18 @@ class TodayReplanRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
 
 
+class TodayPlanningSignalsPrepareResponse(BaseModel):
+    plan_date: date
+    task_count: int
+    generated_count: int
+    existing_count: int
+    skipped_count: int
+    replanned: bool
+    planning_signal_ids: list[uuid.UUID] = Field(default_factory=list)
+    ai_job_ids: list[uuid.UUID] = Field(default_factory=list)
+    today: TodayResponse
+
+
 class TodayItemUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -53,6 +53,7 @@ Capture -> Inbox -> Today -> Task Detail -> Focus -> Report
 | Inbox 确认 Task / Goal | L3 | Task 确认可返回 `today_impact`，重复 confirm 保持幂等 | Goal confirm 后与 Goal Detail 的体验还可继续细化 |
 | Inbox -> Today 滚动纳入 | L3 | active Today 存在时通过 `system_refresh` 纳入新任务；无 plan 时不隐式创建 | 需要 smoke 场景长期覆盖 |
 | Planning Engine / Today 编排 | L3 | 确定性排序是 source of truth，读取价值、deadline、剩余估时、依赖、用户修正、执行反馈、容量、Energy 和 TaskPlanningSignal 语义信号 | 后续继续补边界场景和回归基线，不让 LLM 接管排序 |
+| Today AI signal preparation | L2-L3 | Today 可受控生成缺失 TaskPlanningSignal，并在有新信号时 deterministic replan | 不做首屏静默 provider 狂跑，保留成本和信任边界 |
 | Today 快速操作 | L2-L3 | 完成 / 延后等动作已影响 plan item 和执行事件 | 可继续补完整主线 smoke，覆盖更多 action 组合 |
 | Task Detail 承接层 | L3 | 聚合 Goal、AI info、Today context、Focus state 和 actions | 避免继续堆成信息仓库 |
 | Task Detail -> Focus | L3 | 未传 `daily_plan_item_id` 时后端会自动绑定当前 Today 中同任务 item | 任务不在 Today 时仍允许 Focus，但要保持 report 口径清晰 |

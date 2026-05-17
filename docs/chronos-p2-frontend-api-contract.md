@@ -257,6 +257,43 @@ P2 新增字段：
 - `selected_for_today=false` 且 `rollover_reason=capacity` 表示任务被系统滚动到未来，不代表任务被用户手动延后；此时 `item_status` 仍可为 `planned`，前端应以 `section=rolled_over` 判断展示位置。
 - 若 `capacity_status=overloaded`，Today 可在 Insights Preview 展示一条轻量风险提示，但不要展示完整容量面板。
 
+### POST `/api/v1/today/planning-signals`
+
+为当前 Today 主序列准备缺失的 TaskPlanningSignal，并在生成新信号后触发一次 deterministic replan。
+
+Query：
+
+- `plan_date?: YYYY-MM-DD`
+- `limit?: number`，默认 10，范围 1-20。
+- `replan?: boolean`，默认 true。
+
+Response：
+
+```json
+{
+  "plan_date": "2026-05-16",
+  "task_count": 2,
+  "generated_count": 1,
+  "existing_count": 1,
+  "skipped_count": 0,
+  "replanned": true,
+  "planning_signal_ids": ["uuid"],
+  "ai_job_ids": ["uuid"],
+  "today": {
+    "date": "2026-05-16",
+    "plan_version": 2,
+    "sections": {}
+  }
+}
+```
+
+前端约束：
+
+- 这是受控的 AI 准备动作，不是 Today 首屏自动狂跑 provider。
+- 生成的是 TaskPlanningSignal；LLM 不直接改 Task / Goal / DailyPlan 排序。
+- 如果 `generated_count=0`，默认不 replan，避免无意义刷新。
+- 如果 `replanned=true`，前端直接使用 response 内的 `today` 刷新页面。
+
 ## 4. Task Detail
 
 ### POST `/api/v1/tasks/{task_id}/planning-signal`
