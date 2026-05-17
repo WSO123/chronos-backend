@@ -54,10 +54,10 @@ Capture -> Inbox -> Today -> Task Detail -> Focus -> Report
 | Inbox -> Today 滚动纳入 | L3 | active Today 存在时通过 `system_refresh` 纳入新任务；无 plan 时不隐式创建 | 需要 smoke 场景长期覆盖 |
 | Planning Engine / Today 编排 | L3 | 确定性排序是 source of truth，读取价值、deadline、剩余估时、依赖、用户修正、执行反馈、容量、Energy 和 fresh TaskPlanningSignal 语义信号 | 后续继续补边界场景和回归基线，不让 LLM 接管排序 |
 | Today AI signal preparation | L3 | Today 可受控生成缺失 / 过期 TaskPlanningSignal，并在有新信号时 deterministic replan | 不做首屏静默 provider 狂跑，保留成本和信任边界 |
-| Today 快速操作 | L2-L3 | 完成 / 延后等动作已影响 plan item 和执行事件 | 可继续补完整主线 smoke，覆盖更多 action 组合 |
+| Today 快速操作 | L3 | 完成 / 延后等动作已影响 plan item 和执行事件；最小推进切片完成时只记录 Task partial progress | 可继续补完整主线 smoke，覆盖更多 action 组合 |
 | Task Detail 承接层 | L3 | 聚合 Goal、AI info、Today context、Focus state 和 actions | 避免继续堆成信息仓库 |
 | Task Detail -> Focus | L3 | 未传 `daily_plan_item_id` 时后端会自动绑定当前 Today 中同任务 item | 任务不在 Today 时仍允许 Focus，但要保持 report 口径清晰 |
-| Focus 执行状态 | L3 | FocusSession、Task、DailyPlanItem、ActivityEvent 保持一致 | 后续可继续扩充部分完成，但不做复杂控制面板 |
+| Focus 执行状态 | L3 | FocusSession、Task、DailyPlanItem、ActivityEvent 保持一致；最小推进切片不会误完成整个 Task | 后续只补必要状态边界，不做复杂控制面板 |
 | Daily Report | L3 | GET 会自动刷新关键指标，避免旧数据 | 周/月报告仍是 P2 聚合，不替代 Today |
 | Me 基础数据 | L2 | 已能承接基础数据反馈 | 不把 Me 扩成 P3/P4 入口大杂烩 |
 
@@ -76,7 +76,7 @@ P2 只保留和执行主线强相关的部分：Goals、依赖、洞察、解释
 | Priority / Value Adjustment | L3 | 用户调整当前 Today 任务会触发 `manual_adjust` revision，并返回 `today_impact` | 不做复杂手动排序系统 |
 | Strategy Detail | L3 | 解释 Planning Engine 结果、依赖保护、用户修正、容量状态和 agent review | 不进入 Today 首屏 |
 | Task Semantic Planning Signal | L2-L3 | 能把任务语义、目标对齐、复杂度、语义估时和最小推进动作写入可追踪信号，并被 Today 评分读取 | 后续需要补自动刷新策略 |
-| Minimum Viable Progress | L2-L3 | 大任务带有语义信号时，Today 可只安排今日最小推进切片，不覆盖 Task 原估时 | 后续需要把 Focus 实际结果用于校准切片大小 |
+| Minimum Viable Progress | L3 | 大任务带有语义信号时，Today 可只安排今日最小推进切片；完成切片记录部分进度，不覆盖 Task 原估时或误完成 Task | 后续可继续优化切片大小学习策略 |
 | Execution Feedback Calibration | L2-L3 | Replan 时会读取 Task 实际投入时间，把 Today 估时校准为剩余工作量，并在 Strategy Detail 解释 | 先不自动改 Task 原估时，避免系统过度自作主张 |
 | Insights / Weekly / Monthly | L2 | 作为复盘与趋势入口可用 | 不能替代 Today 的每日执行决策 |
 

@@ -503,6 +503,7 @@ Planning Engine v1 已使用的信号：
 - Planning Engine 只读取 fresh TaskPlanningSignal，并在 `DailyPlanItem.score_breakdown` 写入 `semantic_signal_applied`、`semantic_total_score`、`goal_alignment_signal_score`、`semantic_priority_signal_score`、`semantic_minimum_viable_step` 等分项。
 - Today 可通过 `POST /api/v1/today/planning-signals` 刷新缺失或 stale signal；刷新后仍由 deterministic Planning Engine replan。
 - 如果任务明显大于今日容量且存在 `minimum_viable_step`，Planning Engine 可以在 DailyPlanItem 层使用 planned slice duration，并在 `score_breakdown` 保留 `original_estimated_duration_min`、`planned_duration_min`、`minimum_viable_progress_applied`；这不会覆盖 Task 原估时。
+- 完成 `minimum_viable_progress_applied=true` 的 DailyPlanItem 只记录 Task partial progress 和执行时长，不会把整个 Task 标记 completed；完整任务完成仍走普通 completion 规则。
 - 高 goal alignment 且阻塞风险高的任务可以进入 protected section，但仍由 Planning Engine 决定，不由 LLM 直接排序。
 
 失败 fallback：

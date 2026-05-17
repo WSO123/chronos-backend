@@ -1,13 +1,16 @@
 import unittest
 from datetime import date
+from decimal import Decimal
 
 from app.models.activity_event import ActivityEvent
-from app.models.enums import DailyPlanItemStatus, FocusSessionStatus, TaskStatus
+from app.models.enums import DailyPlanItemStatus, FocusSessionStatus, TaskStatus, ValueLevel
 from app.models.focus_session import FocusSession
 from app.models.task import Task
 from app.services.errors import InvalidStateError
 from app.services.focus_service import focus_service
+from app.services.goal_service import goal_service
 from app.services.planning_service import planning_service
+from app.services.task_planning_signal_service import task_planning_signal_service
 from app.services.task_service import task_service
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
@@ -83,6 +86,55 @@ class FocusServiceTests(unittest.TestCase):
         self.assertEqual(refreshed_today["progress"]["completed_count"], 1)
         self.assertEqual(refreshed_today["progress"]["focus_minutes"], 14)
         self.assertEqual(refreshed_today["sections"]["recommended_tasks"][0]["item_status"], DailyPlanItemStatus.COMPLETED)
+
+    def test_complete_minimum_viable_focus_records_partial_task_progress(self):
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Focus slice goal",
+            value_level=ValueLevel.HIGH,
+        )
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="完成一个很大的专注任务",
+            estimated_duration_min=180,
+            priority=4,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task_planning_signal_service.generate_signal(self.db, task_id=task.id, user_id=self.user.id)
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        item = today["sections"]["pinned_tasks"][0]
+        session = focus_service.start_session(
+            self.db,
+            user_id=self.user.id,
+            task_id=task.id,
+            daily_plan_item_id=item["daily_plan_item_id"],
+            planned_duration_min=item["estimated_duration_min"],
+        )
+
+        completed = focus_service.complete_session(
+            self.db,
+            session_id=session.id,
+            user_id=self.user.id,
+            actual_duration_min=40,
+        )
+        refreshed_task = self.db.get(Task, task.id)
+        refreshed_today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        events = self.db.query(ActivityEvent).filter(ActivityEvent.user_id == self.user.id).all()
+
+        self.assertTrue(item["score_breakdown"]["minimum_viable_progress_applied"])
+        self.assertEqual(completed.status, FocusSessionStatus.COMPLETED)
+        self.assertEqual(refreshed_task.status, TaskStatus.ACTIVE)
+        self.assertEqual(refreshed_task.progress, Decimal("0.25"))
+        self.assertEqual(refreshed_task.actual_duration_min, 40)
+        self.assertEqual(refreshed_today["progress"]["completed_count"], 1)
+        self.assertEqual(refreshed_today["progress"]["focus_minutes"], 40)
+        self.assertEqual(refreshed_today["sections"]["pinned_tasks"][0]["item_status"], DailyPlanItemStatus.COMPLETED)
+        event_types = {event.event_type for event in events}
+        self.assertIn("TASK_PARTIAL_PROGRESS_RECORDED", event_types)
+        self.assertNotIn("TASK_COMPLETED", event_types)
 
     def test_interrupt_focus_returns_task_to_active_and_keeps_item_planned(self):
         task = task_service.create_task(self.db, user_id=self.user.id, title="Interruptible task")

@@ -310,6 +310,54 @@ class TaskService:
         db.flush()
         return task
 
+    def record_partial_progress(
+        self,
+        db: Session,
+        *,
+        task_id: uuid.UUID,
+        user_id: uuid.UUID,
+        progress_delta: Decimal,
+        related_daily_plan_id: uuid.UUID | None = None,
+        related_focus_session_id: uuid.UUID | None = None,
+        actual_duration_min_delta: int = 0,
+        commit: bool = True,
+    ) -> Task:
+        task = self._get_user_task(db, task_id=task_id, user_id=user_id)
+        self._ensure_task_status(
+            task,
+            allowed={TaskStatus.ACTIVE, TaskStatus.IN_FOCUS, TaskStatus.POSTPONED},
+            action="partial progress recorded",
+        )
+
+        previous_progress = Decimal(task.progress or 0)
+        normalized_delta = max(Decimal("0.00"), progress_delta).quantize(Decimal("0.01"))
+        task.progress = min(Decimal("0.99"), previous_progress + normalized_delta)
+        task.status = TaskStatus.ACTIVE
+        if actual_duration_min_delta:
+            task.actual_duration_min += actual_duration_min_delta
+        activity_event_service.add_event(
+            db,
+            user_id=user_id,
+            entity_type=EntityType.TASK,
+            entity_id=task.id,
+            event_type="TASK_PARTIAL_PROGRESS_RECORDED",
+            related_task_id=task.id,
+            related_daily_plan_id=related_daily_plan_id,
+            related_focus_session_id=related_focus_session_id,
+            payload={
+                "progress_delta": float(normalized_delta),
+                "previous_progress": float(previous_progress),
+                "current_progress": float(task.progress),
+                "actual_duration_min_delta": actual_duration_min_delta,
+            },
+        )
+        if commit:
+            db.commit()
+            db.refresh(task)
+            return self.get_task(db, task_id=task.id, user_id=user_id)
+        db.flush()
+        return task
+
     def postpone_task(
         self,
         db: Session,

@@ -1,5 +1,6 @@
 import unittest
 from datetime import date, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 import uuid
 
@@ -1061,6 +1062,52 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(refreshed_today["progress"]["completion_rate"], 1.0)
         self.assertIn("TASK_COMPLETED", {event.event_type for event in events})
         self.assertIn("DAILY_PLAN_ITEM_UPDATED", {event.event_type for event in events})
+
+    def test_update_minimum_viable_item_records_partial_task_progress(self):
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Large high value goal",
+            value_level=ValueLevel.HIGH,
+        )
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="完成一个很大的高价值方案",
+            estimated_duration_min=180,
+            priority=4,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task_planning_signal_service.generate_signal(self.db, task_id=task.id, user_id=self.user.id)
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        item = today["sections"]["pinned_tasks"][0]
+
+        updated_item = planning_service.update_item_status(
+            self.db,
+            item_id=item["daily_plan_item_id"],
+            user_id=self.user.id,
+            status=DailyPlanItemStatus.COMPLETED,
+        )
+        refreshed_task = self.db.get(Task, task.id)
+        replanned = planning_service.replan_today(
+            self.db,
+            user_id=self.user.id,
+            plan_date=self.plan_date,
+            reason="Keep completed slice stable",
+        )
+        events = self.db.query(ActivityEvent).filter(ActivityEvent.user_id == self.user.id).all()
+
+        self.assertTrue(item["score_breakdown"]["minimum_viable_progress_applied"])
+        self.assertEqual(updated_item["item_status"], DailyPlanItemStatus.COMPLETED)
+        self.assertEqual(refreshed_task.status, TaskStatus.ACTIVE)
+        self.assertEqual(refreshed_task.progress, Decimal("0.25"))
+        self.assertEqual(replanned["progress"]["completed_count"], 1)
+        self.assertEqual(replanned["sections"]["pinned_tasks"][0]["task_id"], task.id)
+        self.assertEqual(replanned["sections"]["pinned_tasks"][0]["item_status"], DailyPlanItemStatus.COMPLETED)
+        event_types = {event.event_type for event in events}
+        self.assertIn("TASK_PARTIAL_PROGRESS_RECORDED", event_types)
+        self.assertNotIn("TASK_COMPLETED", event_types)
 
     def test_update_item_planned_reactivates_postponed_task(self):
         task = task_service.create_task(self.db, user_id=self.user.id, title="Bring back today")

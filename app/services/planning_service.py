@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal
 from math import ceil
 from time import perf_counter
 import uuid
@@ -478,6 +479,29 @@ class PlanningService:
         db.flush()
         return item
 
+    def minimum_viable_progress_delta_for_item(self, item: DailyPlanItem) -> Decimal | None:
+        score_breakdown = item.score_breakdown or {}
+        if not score_breakdown.get("minimum_viable_progress_applied"):
+            return None
+
+        planned_duration = int(
+            score_breakdown.get("planned_duration_min")
+            or item.estimated_duration_min
+            or 0
+        )
+        original_duration = int(
+            score_breakdown.get("original_estimated_duration_min")
+            or score_breakdown.get("base_estimated_duration_min")
+            or item.task.estimated_duration_min
+            or 0
+        )
+        if planned_duration <= 0 or original_duration <= 0:
+            return Decimal("0.10")
+        if planned_duration >= original_duration:
+            return None
+        ratio = Decimal(planned_duration) / Decimal(original_duration)
+        return max(Decimal("0.01"), min(Decimal("0.99"), ratio)).quantize(Decimal("0.01"))
+
     def _create_plan(
         self,
         db: Session,
@@ -525,10 +549,10 @@ class PlanningService:
         version = 1 if trigger == PlanRevisionTrigger.INITIAL else plan.current_version + 1
         remaining_tasks = self._planned_tasks(db, user_id=plan.user_id, plan_date=plan.plan_date)
         completed_carryovers = self._completed_carryover_tasks(db, plan=plan)
-        remaining_task_ids = {planned.task.id for planned in remaining_tasks}
-        planned_tasks = remaining_tasks + [
-            planned for planned in completed_carryovers if planned.task.id not in remaining_task_ids
-        ]
+        completed_task_ids = {planned.task.id for planned in completed_carryovers}
+        planned_tasks = [
+            planned for planned in remaining_tasks if planned.task.id not in completed_task_ids
+        ] + completed_carryovers
         revision = PlanRevision(
             daily_plan_id=plan.id,
             version=version,
@@ -2684,13 +2708,24 @@ class PlanningService:
     ) -> None:
         if status == DailyPlanItemStatus.COMPLETED:
             if item.task.status != TaskStatus.COMPLETED:
-                task_service.complete_task(
-                    db,
-                    task_id=item.task_id,
-                    user_id=user_id,
-                    related_daily_plan_id=plan.id,
-                    commit=False,
-                )
+                progress_delta = self.minimum_viable_progress_delta_for_item(item)
+                if progress_delta is None:
+                    task_service.complete_task(
+                        db,
+                        task_id=item.task_id,
+                        user_id=user_id,
+                        related_daily_plan_id=plan.id,
+                        commit=False,
+                    )
+                else:
+                    task_service.record_partial_progress(
+                        db,
+                        task_id=item.task_id,
+                        user_id=user_id,
+                        related_daily_plan_id=plan.id,
+                        progress_delta=progress_delta,
+                        commit=False,
+                    )
             item.status = DailyPlanItemStatus.COMPLETED
             return
 

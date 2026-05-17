@@ -112,15 +112,28 @@ class FocusService:
         session.status = FocusSessionStatus.COMPLETED
         session.ended_at = utc_now()
         session.actual_duration_min = actual_minutes
-        task_service.complete_task(
-            db,
-            task_id=session.task_id,
-            user_id=user_id,
-            related_daily_plan_id=session.daily_plan_id,
-            related_focus_session_id=session.id,
-            actual_duration_min_delta=actual_minutes,
-            commit=False,
-        )
+        progress_delta = self._minimum_viable_progress_delta(db, session=session, user_id=user_id)
+        if progress_delta is None:
+            task_service.complete_task(
+                db,
+                task_id=session.task_id,
+                user_id=user_id,
+                related_daily_plan_id=session.daily_plan_id,
+                related_focus_session_id=session.id,
+                actual_duration_min_delta=actual_minutes,
+                commit=False,
+            )
+        else:
+            task_service.record_partial_progress(
+                db,
+                task_id=session.task_id,
+                user_id=user_id,
+                related_daily_plan_id=session.daily_plan_id,
+                related_focus_session_id=session.id,
+                progress_delta=progress_delta,
+                actual_duration_min_delta=actual_minutes,
+                commit=False,
+            )
         self._sync_daily_plan_item(
             db,
             session=session,
@@ -287,6 +300,18 @@ class FocusService:
             status=status,
             focus_minutes=focus_minutes,
         )
+
+    def _minimum_viable_progress_delta(
+        self,
+        db: Session,
+        *,
+        session: FocusSession,
+        user_id: uuid.UUID,
+    ):
+        if session.daily_plan_item_id is None:
+            return None
+        item = self._get_current_item(db, item_id=session.daily_plan_item_id, user_id=user_id)
+        return planning_service.minimum_viable_progress_delta_for_item(item)
 
     def _actual_minutes(self, session: FocusSession, *, actual_duration_min: int | None) -> int:
         if actual_duration_min is not None:
