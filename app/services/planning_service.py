@@ -32,6 +32,7 @@ from app.models.enums import (
     DailyPlanItemStatus,
     DailyPlanStatus,
     EntityType,
+    GoalStatus,
     PlanningPreference,
     PlanRevisionTrigger,
     TaskStatus,
@@ -938,6 +939,13 @@ class PlanningService:
             task.id,
             {"completed": 0, "postponed": 0, "interrupted": 0},
         )
+        goal_progress = signals["goal_progress_by_task_id"].get(
+            task.id,
+            self._empty_goal_progress_profile(
+                goal_id=task.goal_id,
+                value_level=task.goal.value_level if task.goal else None,
+            ),
+        )
         value_score = {ValueLevel.HIGH: 30, ValueLevel.MEDIUM: 18, ValueLevel.LOW: 8}[task.value_level]
         goal_value_score = self._goal_value_score(task)
         urgency_score = self._urgency_score(task=task, plan_date=context.plan_date)
@@ -948,6 +956,7 @@ class PlanningService:
         if task.id in signals["blocked_task_ids"]:
             dependency_score -= 10
         goal_next_action_score = 10 if task.id in signals["goal_next_action_task_ids"] else 0
+        goal_progress_score = int(goal_progress.get("score") or 0)
         duration_fit_score = self._duration_fit_score(estimated_minutes, capacity=context.daily_capacity_minutes)
         energy_fit_score = self._energy_fit_score(
             estimated_minutes,
@@ -977,6 +986,7 @@ class PlanningService:
             + goal_urgency_score
             + dependency_score
             + goal_next_action_score
+            + goal_progress_score
             + duration_fit_score
             + energy_fit_score
             + behavior_feedback_score
@@ -998,6 +1008,7 @@ class PlanningService:
             "goal_urgency_score": int(goal_urgency_score),
             "dependency_score": int(dependency_score),
             "goal_next_action_score": int(goal_next_action_score),
+            "goal_progress_score": int(goal_progress_score),
             "duration_fit_score": int(duration_fit_score),
             "energy_fit_score": int(energy_fit_score),
             "behavior_feedback_score": int(behavior_feedback_score),
@@ -1012,6 +1023,7 @@ class PlanningService:
             "energy_level": context.energy_level,
             "energy_applied": context.energy_has_data,
             "behavior": behavior,
+            **self._goal_progress_score_breakdown(goal_progress),
             **self._personalization_score_breakdown(personalization),
         }
 
@@ -1326,6 +1338,7 @@ class PlanningService:
                 "unlocking_task_ids": set(),
                 "blocked_task_ids": set(),
                 "goal_next_action_task_ids": set(),
+                "goal_progress_by_task_id": {},
                 "adjusted_task_ids": set(),
                 "behavior_by_task_id": {},
                 "semantic_by_task_id": {},
@@ -1374,6 +1387,13 @@ class PlanningService:
             tasks=tasks,
             blocked_task_ids=blocked_task_ids,
             depth_by_task_id=depth_by_task_id,
+            plan_date=plan_date,
+        )
+        goal_progress_by_task_id = self._goal_progress_by_task_id(
+            db,
+            user_id=user_id,
+            tasks=tasks,
+            goal_next_action_task_ids=goal_next_action_task_ids,
             plan_date=plan_date,
         )
 
@@ -1451,10 +1471,194 @@ class PlanningService:
             "unlocking_task_ids": unlocking_task_ids,
             "blocked_task_ids": blocked_task_ids,
             "goal_next_action_task_ids": goal_next_action_task_ids,
+            "goal_progress_by_task_id": goal_progress_by_task_id,
             "adjusted_task_ids": adjusted_task_ids,
             "behavior_by_task_id": behavior_by_task_id,
             "semantic_by_task_id": semantic_by_task_id,
             "personalization_by_task_id": personalization_by_task_id,
+        }
+
+    def _goal_progress_by_task_id(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        tasks: list[Task],
+        goal_next_action_task_ids: set[uuid.UUID],
+        plan_date: date,
+    ) -> dict[uuid.UUID, dict]:
+        if not goal_next_action_task_ids:
+            return {}
+
+        goal_by_id = {
+            task.goal_id: task.goal
+            for task in tasks
+            if task.goal_id is not None
+            and task.goal is not None
+            and task.goal.status == GoalStatus.ACTIVE
+            and task.id in goal_next_action_task_ids
+        }
+        goal_ids = {goal_id for goal_id in goal_by_id if goal_id is not None}
+        if not goal_ids:
+            return {}
+
+        goal_tasks = list(
+            db.scalars(
+                select(Task).where(
+                    Task.user_id == user_id,
+                    Task.goal_id.in_(goal_ids),
+                    Task.status != TaskStatus.ARCHIVED,
+                )
+            ).all()
+        )
+        tasks_by_goal_id: dict[uuid.UUID, list[Task]] = {}
+        for goal_task in goal_tasks:
+            if goal_task.goal_id is None:
+                continue
+            tasks_by_goal_id.setdefault(goal_task.goal_id, []).append(goal_task)
+
+        profile_by_goal_id = {
+            goal_id: self._goal_progress_profile(
+                goal=goal,
+                tasks=tasks_by_goal_id.get(goal_id, []),
+                plan_date=plan_date,
+            )
+            for goal_id, goal in goal_by_id.items()
+            if goal_id is not None and goal is not None
+        }
+
+        return {
+            task.id: profile_by_goal_id.get(
+                task.goal_id,
+                self._empty_goal_progress_profile(
+                    goal_id=task.goal_id,
+                    value_level=task.goal.value_level if task.goal else None,
+                ),
+            )
+            for task in tasks
+            if task.goal_id is not None and task.id in goal_next_action_task_ids
+        }
+
+    def _goal_progress_profile(self, *, goal, tasks: list[Task], plan_date: date) -> dict:
+        if not tasks:
+            return self._empty_goal_progress_profile(goal_id=goal.id, value_level=goal.value_level)
+
+        total_task_count = len(tasks)
+        completed_task_count = 0
+        progress_sum = 0.0
+        remaining_estimated_minutes = 0
+
+        for task in tasks:
+            if task.status == TaskStatus.COMPLETED:
+                completed_task_count += 1
+                progress_sum += 1.0
+                continue
+            task_progress = max(0.0, min(1.0, float(task.progress or 0)))
+            progress_sum += task_progress
+            base_estimate = int(task.estimated_duration_min or 25)
+            remaining_estimated_minutes += max(15, ceil(base_estimate * (1 - task_progress)))
+
+        completion_rate = round(progress_sum / total_task_count, 2) if total_task_count else 0.0
+        unfinished_task_count = max(0, total_task_count - completed_task_count)
+        days_until_deadline = (goal.deadline - plan_date).days if goal.deadline is not None else None
+        score = 0
+        reason_key = "steady_goal_progress"
+        pressure_level = "steady"
+
+        if days_until_deadline is not None:
+            if days_until_deadline < 0:
+                score += 18
+                reason_key = "goal_progress_overdue"
+                pressure_level = "risk"
+            elif days_until_deadline <= 3 and completion_rate < 0.8:
+                score += 14
+                reason_key = "goal_progress_deadline_risk"
+                pressure_level = "risk"
+            elif days_until_deadline <= 7 and completion_rate < 0.65:
+                score += 10
+                reason_key = "goal_progress_deadline_watch"
+                pressure_level = "watch"
+            elif days_until_deadline <= 14 and completion_rate < 0.4:
+                score += 5
+                reason_key = "goal_progress_slow_start"
+                pressure_level = "watch"
+
+        if goal.value_level == ValueLevel.HIGH:
+            if completion_rate < 0.35:
+                score += 9
+                if pressure_level != "risk":
+                    reason_key = "high_value_goal_under_progress"
+                    pressure_level = "watch"
+            elif completion_rate < 0.7:
+                score += 6
+                if pressure_level != "risk":
+                    reason_key = "high_value_goal_needs_progress"
+                    pressure_level = "watch"
+        elif goal.value_level == ValueLevel.MEDIUM and completion_rate < 0.45 and days_until_deadline is not None:
+            score += 3
+            if pressure_level == "steady":
+                reason_key = "goal_needs_progress"
+                pressure_level = "watch"
+
+        if completion_rate >= 0.65 and unfinished_task_count <= 2:
+            score += 8 if goal.value_level == ValueLevel.HIGH else 5
+            if pressure_level != "risk":
+                reason_key = "goal_completion_closure"
+                pressure_level = "closure"
+        elif goal.value_level == ValueLevel.HIGH and unfinished_task_count >= 3 and completion_rate < 0.8:
+            score += 4
+
+        score = min(24, int(score))
+        if score <= 0:
+            return self._empty_goal_progress_profile(goal_id=goal.id, value_level=goal.value_level)
+
+        return {
+            "applied": True,
+            "goal_id": goal.id,
+            "goal_value_level": goal.value_level,
+            "total_task_count": total_task_count,
+            "completed_task_count": completed_task_count,
+            "unfinished_task_count": unfinished_task_count,
+            "completion_rate": completion_rate,
+            "remaining_estimated_minutes": remaining_estimated_minutes,
+            "days_until_deadline": days_until_deadline,
+            "pressure_level": pressure_level,
+            "reason_key": reason_key,
+            "score": score,
+        }
+
+    def _empty_goal_progress_profile(self, *, goal_id: uuid.UUID | None, value_level: ValueLevel | None) -> dict:
+        return {
+            "applied": False,
+            "goal_id": goal_id,
+            "goal_value_level": value_level,
+            "total_task_count": 0,
+            "completed_task_count": 0,
+            "unfinished_task_count": 0,
+            "completion_rate": 0.0,
+            "remaining_estimated_minutes": 0,
+            "days_until_deadline": None,
+            "pressure_level": "none",
+            "reason_key": None,
+            "score": 0,
+        }
+
+    def _goal_progress_score_breakdown(self, goal_progress: dict) -> dict:
+        goal_id = goal_progress.get("goal_id")
+        value_level = goal_progress.get("goal_value_level")
+        return {
+            "goal_progress_applied": bool(goal_progress.get("applied")),
+            "goal_progress_version": "goal-progress-strategy-v1",
+            "goal_progress_goal_id": str(goal_id) if goal_id else None,
+            "goal_progress_goal_value_level": value_level.value if hasattr(value_level, "value") else value_level,
+            "goal_progress_total_task_count": int(goal_progress.get("total_task_count") or 0),
+            "goal_progress_completed_task_count": int(goal_progress.get("completed_task_count") or 0),
+            "goal_progress_unfinished_task_count": int(goal_progress.get("unfinished_task_count") or 0),
+            "goal_progress_completion_rate": float(goal_progress.get("completion_rate") or 0.0),
+            "goal_progress_remaining_estimated_minutes": int(goal_progress.get("remaining_estimated_minutes") or 0),
+            "goal_progress_days_until_deadline": goal_progress.get("days_until_deadline"),
+            "goal_progress_pressure_level": goal_progress.get("pressure_level") or "none",
+            "goal_progress_reason_key": goal_progress.get("reason_key"),
         }
 
     def _personalization_by_task_id(
@@ -1829,6 +2033,8 @@ class PlanningService:
             and score_breakdown.get("semantic_total_score", 0) >= 28
         ):
             return "AI 语义信号判断它能有效推进目标，因此今天保护一个最小可执行动作。"
+        if score_breakdown.get("goal_progress_applied"):
+            return self._goal_progress_reason(score_breakdown=score_breakdown)
         if task.id in goal_next_action_task_ids:
             return "这是关联目标当前最适合推进的下一步，系统会保护它进入今日主序列。"
         if score_breakdown.get("personalization_applied") and score_breakdown.get("personalization_score", 0) < 0:
@@ -1847,7 +2053,19 @@ class PlanningService:
             return "Placed here because the task shape fits today's energy signal."
         return "Balanced task placed in the recommended execution order."
 
-    def _planned_sort_key(self, planned: PlannedTask) -> tuple[int, int, int, int, int, int, int, date, int, int, datetime]:
+    def _goal_progress_reason(self, *, score_breakdown: dict) -> str:
+        reason_key = score_breakdown.get("goal_progress_reason_key")
+        if reason_key == "goal_completion_closure":
+            return "这个目标已经接近完成，Today 会保护下一步来提高目标完成度。"
+        if reason_key in {"goal_progress_overdue", "goal_progress_deadline_risk"}:
+            return "关联目标进度落后且截止压力较高，系统会优先拉回它的下一步。"
+        if reason_key == "goal_progress_deadline_watch":
+            return "关联目标接近截止且完成率偏低，Today 会提前保护它的下一步。"
+        if reason_key in {"high_value_goal_under_progress", "high_value_goal_needs_progress"}:
+            return "高价值目标当前推进不足，系统会把下一步放进今天的主行动。"
+        return "系统读取了目标完成率和剩余任务，把这个下一步作为今天的推进点。"
+
+    def _planned_sort_key(self, planned: PlannedTask) -> tuple[int, int, int, int, int, int, int, int, date, int, int, datetime]:
         section_rank = {
             DailyPlanItemSection.PINNED: 0,
             DailyPlanItemSection.RECOMMENDED: 1,
@@ -1862,6 +2080,7 @@ class PlanningService:
             1 if planned.blocked_by_dependency else 0,
             0 if planned.priority_adjusted else 1,
             0 if planned.score_breakdown.get("goal_next_action_score", 0) > 0 else 1,
+            0 if planned.score_breakdown.get("goal_progress_score", 0) > 0 else 1,
             -planned.score,
             planned.task.deadline or date.max,
             planned.task.priority,
@@ -1895,6 +2114,9 @@ class PlanningService:
         personalization_signal_count = len(
             [planned for planned in active_tasks if planned.score_breakdown.get("personalization_applied")]
         )
+        goal_progress_signal_count = len(
+            [planned for planned in active_tasks if planned.score_breakdown.get("goal_progress_applied")]
+        )
         first_breakdown = planned_tasks[0].score_breakdown if planned_tasks else {}
         daily_capacity_minutes = int(first_breakdown.get("daily_capacity_minutes") or 0)
         energy_level = str(first_breakdown.get("energy_level") or "unknown")
@@ -1927,6 +2149,7 @@ class PlanningService:
                     "minimum_viable_progress_count": 0,
                     "execution_feedback_count": 0,
                     "personalization_signal_count": 0,
+                    "goal_progress_signal_count": 0,
                     "energy_level": energy_level,
                     "energy_applied": energy_applied,
                 },
@@ -1965,6 +2188,7 @@ class PlanningService:
                 "minimum_viable_progress_count": minimum_viable_progress_count,
                 "execution_feedback_count": execution_feedback_count,
                 "personalization_signal_count": personalization_signal_count,
+                "goal_progress_signal_count": goal_progress_signal_count,
                 "energy_level": energy_level,
                 "energy_applied": energy_applied,
                 "average_score": round(
@@ -2143,6 +2367,16 @@ class PlanningService:
                     "score": factors["goal_next_action_count"],
                 }
             )
+        if factors.get("goal_progress_signal_count"):
+            signals.append(
+                {
+                    "key": "goal_progress_strategy",
+                    "title": "目标进度压力",
+                    "message": f"{factors['goal_progress_signal_count']} 个目标下一步读取了目标完成率、剩余任务和截止压力。",
+                    "signal": "watch",
+                    "score": factors["goal_progress_signal_count"],
+                }
+            )
         if factors["user_adjusted_count"]:
             signals.append(
                 {
@@ -2295,6 +2529,7 @@ class PlanningService:
             "capacity_status": capacity_status,
             "dependency_protected_count": int(score_factors.get("dependency_protected_count", 0) or 0),
             "goal_next_action_count": int(score_factors.get("goal_next_action_count", 0) or 0),
+            "goal_progress_signal_count": int(score_factors.get("goal_progress_signal_count", 0) or 0),
             "user_adjusted_count": int(score_factors.get("user_adjusted_count", 0) or 0),
             "semantic_signal_count": int(score_factors.get("semantic_signal_count", 0) or 0),
             "semantic_protected_count": int(score_factors.get("semantic_protected_count", 0) or 0),
@@ -2327,6 +2562,8 @@ class PlanningService:
             explanation.append(f"{factors['dependency_protected_count']} 个前置任务被提前，用来保护任务依赖顺序。")
         if factors["goal_next_action_count"]:
             explanation.append(f"{factors['goal_next_action_count']} 个目标各自保留了一个下一步行动，避免高价值方向被单个任务列表挤掉。")
+        if factors.get("goal_progress_signal_count"):
+            explanation.append(f"{factors['goal_progress_signal_count']} 个目标下一步读取了目标完成率和剩余压力，让 Today 更像是在推进目标，而不是只排任务。")
         if factors["user_adjusted_count"]:
             explanation.append(f"{factors['user_adjusted_count']} 个任务读取了你的优先级修正，让 AI 判断保持可校正。")
         if factors["semantic_signal_count"]:
@@ -2699,6 +2936,33 @@ class PlanningService:
                     "message": message,
                     "signal": "info" if semantic_total_score < 28 else "positive",
                     "score": semantic_total_score,
+                }
+            )
+
+        goal_progress_score = int(score_breakdown.get("goal_progress_score") or 0)
+        if score_breakdown.get("goal_progress_applied") and goal_progress_score > 0:
+            reason_key = score_breakdown.get("goal_progress_reason_key")
+            completion_rate = float(score_breakdown.get("goal_progress_completion_rate") or 0.0)
+            unfinished_count = int(score_breakdown.get("goal_progress_unfinished_task_count") or 0)
+            if reason_key == "goal_completion_closure":
+                message = f"关联目标已完成约 {int(completion_rate * 100)}%，剩余 {unfinished_count} 个任务，Today 会保护这个收口动作。"
+                signal = "positive"
+            elif reason_key in {"goal_progress_overdue", "goal_progress_deadline_risk", "goal_progress_deadline_watch"}:
+                message = "关联目标完成率偏低且截止压力较高，这个下一步被提前保护。"
+                signal = "watch"
+            elif reason_key in {"high_value_goal_under_progress", "high_value_goal_needs_progress"}:
+                message = "高价值目标当前推进不足，系统会优先保护它的下一步。"
+                signal = "watch"
+            else:
+                message = "系统读取了目标完成率、剩余任务和截止压力，确认这是今天值得推进的目标下一步。"
+                signal = "info"
+            signals.append(
+                {
+                    "key": "goal_progress_strategy",
+                    "title": "目标进度策略",
+                    "message": message,
+                    "signal": signal,
+                    "score": goal_progress_score,
                 }
             )
 

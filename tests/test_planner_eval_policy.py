@@ -14,7 +14,7 @@ class PlannerEvalPolicyTests(unittest.TestCase):
         policy = load_policy(DEFAULT_POLICY_PATH)
 
         self.assertEqual(policy["evaluator_version"], EVALUATOR_VERSION)
-        self.assertEqual(len(policy["required_scenarios"]), 10)
+        self.assertEqual(len(policy["required_scenarios"]), 11)
         self.assertTrue(policy["exact_scenario_set"])
 
     def test_policy_check_accepts_matching_run(self):
@@ -114,6 +114,8 @@ def _policy(*scenario_names: str) -> dict:
             "total_score",
             "goal_value_score",
             "goal_urgency_score",
+            "goal_progress_score",
+            "goal_progress_completion_rate",
             "behavior_feedback_score",
             "personalization_score",
             "personalization_sample_count",
@@ -173,6 +175,8 @@ def _scenario(name: str, *, passed: bool = True) -> dict:
                     "total_score": 30,
                     "goal_value_score": 0,
                     "goal_urgency_score": 0,
+                    "goal_progress_score": 0,
+                    "goal_progress_completion_rate": 0.0,
                     "behavior_feedback_score": 0,
                     "personalization_score": 0,
                     "personalization_sample_count": 0,

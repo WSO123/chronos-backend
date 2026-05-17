@@ -1,0 +1,147 @@
+{
+  "policy_version": "p2-planner-eval-policy-v3",
+  "evaluator_version": "p2-planning-engine-eval-v6",
+  "status": "active",
+  "required_run_status": "ok",
+  "exact_scenario_set": true,
+  "required_detail_fields": [
+    "ordered_titles",
+    "rolled_over_titles",
+    "risk_keys",
+    "capacity_status",
+    "daily_capacity_minutes",
+    "selected_estimated_minutes",
+    "rolled_over_estimated_minutes",
+    "over_capacity_minutes",
+    "energy_applied",
+    "planner_agent_status",
+    "planner_agent_provider",
+    "planner_agent_model",
+    "planner_agent_prompt_version",
+    "planner_agent_prompt_checksum",
+    "planner_agent_output_applied",
+    "score_explanation_summary",
+    "score_explanation_signal_keys",
+    "item_signals"
+  ],
+  "required_item_signal_fields": [
+    "section",
+    "score_version",
+    "score_band",
+    "total_score",
+    "goal_value_score",
+    "goal_urgency_score",
+    "goal_progress_score",
+    "goal_progress_completion_rate",
+    "behavior_feedback_score",
+    "personalization_score",
+    "personalization_sample_count",
+    "dependency_score",
+    "user_preference_score",
+    "dominant_factor",
+    "dominant_reason",
+    "score_signal_keys"
+  ],
+  "required_scenarios": [
+    {
+      "name": "capacity_rollover",
+      "must_pass": true,
+      "critical": true,
+      "intent": "Non-protected work rolls forward when today's realistic capacity is full."
+    },
+    {
+      "name": "protected_overload_warning",
+      "must_pass": true,
+      "critical": true,
+      "intent": "Protected high-value work is not silently dropped even when it overloads the day."
+    },
+    {
+      "name": "low_energy_lightens_plan",
+      "must_pass": true,
+      "critical": true,
+      "intent": "Low energy narrows the main sequence and keeps the day executable."
+    },
+    {
+      "name": "high_energy_deep_fit_no_expansion",
+      "must_pass": true,
+      "critical": false,
+      "intent": "High energy can favor deep work without expanding capacity beyond the user's day."
+    },
+    {
+      "name": "dependency_chain_protection",
+      "must_pass": true,
+      "critical": true,
+      "intent": "Prerequisite work is protected before dependent tasks."
+    },
+    {
+      "name": "user_priority_adjustment_protection",
+      "must_pass": true,
+      "critical": true,
+      "intent": "User corrections remain visible and can override the default planner shape."
+    },
+    {
+      "name": "behavior_feedback_penalizes_interruptions",
+      "must_pass": true,
+      "critical": true,
+      "intent": "Repeated interruptions reduce a task's fit for immediate execution."
+    },
+    {
+      "name": "multi_goal_competition_protects_high_value_goal",
+      "must_pass": true,
+      "critical": true,
+      "intent": "High-value goals are protected from lower-value but noisy work."
+    },
+    {
+      "name": "overdue_goal_recovery_promotes_next_task",
+      "must_pass": true,
+      "critical": true,
+      "intent": "Overdue goals pull their next executable task back into Today's protected sequence."
+    },
+    {
+      "name": "goal_progress_strategy_closes_near_done_goal",
+      "must_pass": true,
+      "critical": true,
+      "intent": "Near-done high-value goals protect the closing next action so Today improves goal completion, not just task throughput."
+    },
+    {
+      "name": "semantic_history_personalizes_duration",
+      "must_pass": true,
+      "critical": true,
+      "intent": "Semantic task history changes today's duration estimate and explanation without letting LLM directly sort."
+    }
+  ],
+  "regression_rules": [
+    {
+      "key": "run_status_not_ok",
+      "decision": "block",
+      "reason": "The evaluator itself failed or reported failed scenarios."
+    },
+    {
+      "key": "required_scenario_missing",
+      "decision": "block",
+      "reason": "A protected product behavior lost coverage."
+    },
+    {
+      "key": "required_scenario_failed",
+      "decision": "block",
+      "reason": "A protected product behavior regressed."
+    },
+    {
+      "key": "required_detail_or_signal_missing",
+      "decision": "block",
+      "reason": "Strategy Detail and offline comparison would lose explainability."
+    }
+  ],
+  "changed_rules": [
+    {
+      "key": "evaluator_version_changed",
+      "decision": "update_policy_before_release",
+      "reason": "A new evaluator version needs an explicit baseline policy."
+    },
+    {
+      "key": "additional_scenario_present",
+      "decision": "update_policy_before_release",
+      "reason": "New quality coverage should become part of the golden baseline."
+    }
+  ]
+}

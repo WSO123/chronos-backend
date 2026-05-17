@@ -365,7 +365,7 @@ class CaptureParserOutput(BaseModel):
 当前实现状态：
 
 - 已落地 Planning Engine v1，作为 deterministic planner core 和未来 LLM Daily Planner 的 fallback。
-- Planning Engine v1 已读取任务价值、Goal 价值、Goal 下一步保护、任务 / Goal deadline、优先级、剩余估时、依赖、用户修正、真实执行反馈、当日容量、Energy 信号、TaskPlanningSignal 语义信号和基于同类语义任务历史的个人执行画像。
+- Planning Engine v1 已读取任务价值、Goal 价值、Goal 下一步保护、Goal 完成率 / 剩余任务 / 截止压力、任务 / Goal deadline、优先级、剩余估时、依赖、用户修正、真实执行反馈、当日容量、Energy 信号、TaskPlanningSignal 语义信号和基于同类语义任务历史的个人执行画像。
 - 已接入 Daily Planner Agent critique / suggestion：`PlanningService` 先生成 deterministic candidates，再调用 Agent 返回 structured review。
 - Today 可通过 `POST /api/v1/today/planning-signals` 受控生成当前主序列缺失的 TaskPlanningSignal；生成后仍由 deterministic Planning Engine replan，不由 LLM 直接排序。
 - 默认 provider 是 `mock`，模型标识为 `structured-mock-v1`；`AI_ENABLE_REAL_LLM=false` 时不会调用外部模型。
@@ -379,7 +379,7 @@ class CaptureParserOutput(BaseModel):
 - 超出容量的非保护任务进入 `section=rolled_over`；系统容量滚动不把 Task 本体改为 postponed。
 - 已提供 `scripts/evaluate_planning_engine.py` 固定场景评估，覆盖容量滚动、受保护任务超载、低精力保护、高精力深度任务适配、依赖链保护、用户手动优先级修正、重复中断行为反馈、多 Goal 竞争和超期 Goal 恢复；支持 `--jsonl-output` 写出 run summary 和 scenario records。
 - 已提供 `scripts/compare_planner_eval_jsonl.py` 比较两次 planner eval JSONL，默认只报告 scenario 通过状态、排序和 `item_signals` 差异；显式加 `--fail-on-regression` 时才作为回归 gate。
-- 已提供 planner eval golden baseline policy：`docs/planner-eval-baselines/p2-planning-engine-eval-v5.json` 和 `scripts/check_planner_eval_policy.py`。后续 LLM Daily Planner 必须通过这些基线、用 compare / policy 工具说明差异，或显式更新评估预期。
+- 已提供 planner eval golden baseline policy：`docs/planner-eval-baselines/p2-planning-engine-eval-v6.json` 和 `scripts/check_planner_eval_policy.py`。后续 LLM Daily Planner 必须通过这些基线、用 compare / policy 工具说明差异，或显式更新评估预期。
 - 已提供 `scripts/generate_llm_acceptance_dry_run.py`，用于在不调用真实 provider 的情况下跑通 provider smoke / fallback / compare / policy 到验收草稿的完整流程。
 - 已提供 `scripts/generate_llm_acceptance_record.py`，用于把真实 provider smoke、fallback smoke、planner eval compare 和 golden policy check 的 JSON 输出生成 Markdown 验收草稿；默认脱敏 provider response id，生成后仍需人工 review。
 
@@ -457,6 +457,7 @@ Planning Engine v1 已使用的信号：
 - daily capacity
 - EnergyDailyMetric
 - TaskPlanningSignal：任务类型、复杂度、认知负荷、语义估时、目标对齐、阻塞风险、最小可推进步骤
+- Goal progress strategy：基于 Goal 当前完成率、剩余任务数、截止压力和价值等级，只提升目标当前下一步，不把 Today 扩展成项目管理看板。
 - Personalization signal：基于 `TaskPlanningSignal.task_type` 聚合同类历史任务的实际耗时、完成、中断和延后，作为确定性评分输入；LLM 只提供语义分类，不直接排序。
 
 失败 fallback：

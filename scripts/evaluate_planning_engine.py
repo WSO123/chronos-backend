@@ -28,7 +28,7 @@ from tests.factories import create_user
 
 
 PLAN_DATE = date(2026, 5, 17)
-EVALUATOR_VERSION = "p2-planning-engine-eval-v5"
+EVALUATOR_VERSION = "p2-planning-engine-eval-v6"
 
 
 @dataclass(frozen=True)
@@ -51,6 +51,7 @@ def run_evaluation(*, run_id: str | None = None) -> dict:
         _scenario_behavior_feedback_penalizes_interruptions,
         _scenario_multi_goal_competition_protects_high_value_goal,
         _scenario_overdue_goal_recovery_promotes_next_task,
+        _scenario_goal_progress_strategy_closes_near_done_goal,
         _scenario_semantic_history_personalizes_duration,
     ]
     results = [scenario() for scenario in scenarios]
@@ -483,6 +484,7 @@ def _scenario_multi_goal_competition_protects_high_value_goal() -> ScenarioResul
                 and (
                     "High-value goal" in protected_item["recommendation_reason"]
                     or "关联目标当前最适合推进的下一步" in protected_item["recommendation_reason"]
+                    or "高价值目标当前推进不足" in protected_item["recommendation_reason"]
                 ),
             ),
             ("optional low-goal work rolls over", bool(rolled) and rolled[0]["task_id"] == optional_low_goal_task.id),
@@ -558,6 +560,105 @@ def _scenario_overdue_goal_recovery_promotes_next_task() -> ScenarioResult:
         failures += _explainability_failures(strategy)
         return ScenarioResult(
             name="overdue_goal_recovery_promotes_next_task",
+            passed=not failures,
+            details=_details(db=db, today=today, strategy=strategy),
+            failures=failures,
+        )
+    finally:
+        db.close()
+
+
+def _scenario_goal_progress_strategy_closes_near_done_goal() -> ScenarioResult:
+    db = _fresh_db()
+    try:
+        user = create_user(db, name="Planner Eval Goal Progress")
+        goal = goal_service.create_goal(
+            db,
+            user_id=user.id,
+            title="Finish Chronos P2 core loop",
+            deadline=PLAN_DATE + timedelta(days=10),
+            value_level=ValueLevel.HIGH,
+        )
+        for title in ("Finish architecture review", "Validate P1 mainline"):
+            completed = task_service.create_task(
+                db,
+                user_id=user.id,
+                goal_id=goal.id,
+                title=title,
+                estimated_duration_min=30,
+                priority=3,
+                value_level=ValueLevel.MEDIUM,
+            )
+            task_service.complete_task(
+                db,
+                task_id=completed.id,
+                user_id=user.id,
+                actual_duration_min_delta=30,
+            )
+        closing_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            goal_id=goal.id,
+            title="Close goal progress strategy",
+            estimated_duration_min=45,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        competing_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Handle ordinary admin backlog",
+            estimated_duration_min=45,
+            priority=2,
+            value_level=ValueLevel.MEDIUM,
+        )
+
+        today = planning_service.get_today(db, user_id=user.id, plan_date=PLAN_DATE)
+        strategy = planning_service.get_strategy_detail(db, user_id=user.id, plan_date=PLAN_DATE)
+        closing_item = _find_item(today, closing_task.id)
+        competing_item = _find_item(today, competing_task.id)
+        closing_rationale = next(
+            (item for item in strategy["task_rationales"] if item["task_id"] == closing_task.id),
+            None,
+        )
+        failures = _check_all(
+            (
+                "near-done high-value goal task receives progress strategy",
+                bool(closing_item) and closing_item["score_breakdown"].get("goal_progress_applied") is True,
+            ),
+            (
+                "goal progress score is applied",
+                bool(closing_item) and closing_item["score_breakdown"].get("goal_progress_score", 0) > 0,
+            ),
+            (
+                "closure reason is preserved",
+                bool(closing_item)
+                and closing_item["score_breakdown"].get("goal_progress_reason_key") == "goal_completion_closure",
+            ),
+            (
+                "goal progress completion rate is visible",
+                bool(closing_item) and closing_item["score_breakdown"].get("goal_progress_completion_rate", 0) >= 0.65,
+            ),
+            (
+                "goal progress outranks ordinary admin task",
+                bool(closing_item)
+                and bool(competing_item)
+                and closing_item["score_breakdown"]["total_score"] > competing_item["score_breakdown"]["total_score"],
+            ),
+            (
+                "strategy exposes goal progress signal",
+                strategy["factors"].get("goal_progress_signal_count") == 1,
+            ),
+            (
+                "task rationale explains goal progress",
+                bool(closing_rationale)
+                and "goal_progress_strategy"
+                in [signal["key"] for signal in closing_rationale["score_signals"]],
+            ),
+        )
+        failures += _explainability_failures(strategy)
+        return ScenarioResult(
+            name="goal_progress_strategy_closes_near_done_goal",
             passed=not failures,
             details=_details(db=db, today=today, strategy=strategy),
             failures=failures,
@@ -743,6 +844,8 @@ def _item_signals(items: list[dict]) -> list[dict]:
             "total_score": item["score_breakdown"].get("total_score"),
             "goal_value_score": item["score_breakdown"].get("goal_value_score"),
             "goal_urgency_score": item["score_breakdown"].get("goal_urgency_score"),
+            "goal_progress_score": item["score_breakdown"].get("goal_progress_score"),
+            "goal_progress_completion_rate": item["score_breakdown"].get("goal_progress_completion_rate"),
             "behavior_feedback_score": item["score_breakdown"].get("behavior_feedback_score"),
             "personalization_score": item["score_breakdown"].get("personalization_score"),
             "personalization_sample_count": item["score_breakdown"].get("personalization_sample_count"),

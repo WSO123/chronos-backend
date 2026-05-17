@@ -115,6 +115,7 @@ P2 新增字段：
   "capacity_status": "within_capacity",
   "dependency_protected_count": 1,
   "goal_next_action_count": 2,
+  "goal_progress_signal_count": 1,
   "user_adjusted_count": 1,
   "semantic_signal_count": 1,
   "semantic_protected_count": 1,
@@ -134,6 +135,7 @@ P2 新增字段：
 
 - `dependency_protected_count` 表示被提前保护的前置任务数量。
 - `goal_next_action_count` 表示有多少高价值 / 临近截止目标各自保留了一个下一步行动。
+- `goal_progress_signal_count` 表示有多少目标下一步读取了 Goal 完成率、剩余任务数和截止压力，用来提升目标完成度。
 - `user_adjusted_count` 表示当前计划读取到用户优先级修正事件的任务数量。
 - `semantic_signal_count` 表示当前计划读取到 TaskPlanningSignal 的任务数量。
 - `semantic_protected_count` 表示因为语义信号对目标推进价值较高而被保护的任务数量。
@@ -254,6 +256,7 @@ P2 新增字段：
 
 - `score_breakdown` 是解释数据，不要在 Today 首屏展示成复杂驾驶舱。
 - Strategy Detail 优先展示 `dominant_reason` 和 `score_signals`，不要让前端自行解释原始权重。
+- `goal_progress_*` 字段来自 Goal 下任务的确定性聚合，用于解释系统如何保护“更接近目标完成”的下一步；它不新增 Goal 页面复杂度。
 - `semantic_*` 字段来自 TaskPlanningSignal，只表示 Planning Engine 读取到语义信号；它不是 LLM 直接改排序。
 - `personalization_*` 字段来自同类 TaskPlanningSignal 历史任务的执行结果，用于解释“系统如何逐渐理解这个用户的真实执行节奏”；它不直接修改 Task 本体。
 - `base_estimated_duration_min` 是任务原始 / 语义估时，`personalized_estimated_duration_min` 是结合个人历史执行画像后的本轮估时，`remaining_estimated_duration_min` 是结合 Focus 实际投入后的剩余估时，`original_estimated_duration_min` 是最小推进切片前的本轮估时。

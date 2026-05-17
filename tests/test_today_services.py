@@ -937,7 +937,83 @@ class TodayServiceTests(unittest.TestCase):
         protected_rationales = [
             rationale for rationale in strategy["task_rationales"] if rationale["task_id"] in {launch_next.id, learning_next.id}
         ]
-        self.assertTrue(all(rationale["dominant_factor"] == "goal_next_action" for rationale in protected_rationales))
+        self.assertTrue(
+            all(
+                rationale["dominant_factor"] in {"goal_next_action", "goal_progress_strategy"}
+                for rationale in protected_rationales
+            )
+        )
+        self.assertTrue(
+            all(
+                "goal_next_action" in [signal["key"] for signal in rationale["score_signals"]]
+                for rationale in protected_rationales
+            )
+        )
+
+    def test_planning_engine_uses_goal_progress_strategy_for_high_value_goal(self):
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Build durable AI execution OS",
+            deadline=self.plan_date + timedelta(days=14),
+            value_level=ValueLevel.HIGH,
+        )
+        completed_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Finish product architecture",
+            estimated_duration_min=30,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task_service.complete_task(
+            self.db,
+            task_id=completed_task.id,
+            user_id=self.user.id,
+            actual_duration_min_delta=30,
+        )
+        next_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Implement goal progress strategy",
+            estimated_duration_min=45,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        later_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Polish goal progress copy",
+            estimated_duration_min=45,
+            priority=5,
+            value_level=ValueLevel.MEDIUM,
+        )
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        next_item = next(item for item in today["sections"]["pinned_tasks"] if item["task_id"] == next_task.id)
+        ordered_task_ids = [
+            item["task_id"]
+            for item in [
+                *today["sections"]["pinned_tasks"],
+                *today["sections"]["recommended_tasks"],
+                *today["sections"]["low_priority_tasks"],
+            ]
+        ]
+
+        self.assertLess(ordered_task_ids.index(next_task.id), ordered_task_ids.index(later_task.id))
+        self.assertTrue(next_item["score_breakdown"]["goal_progress_applied"])
+        self.assertGreater(next_item["score_breakdown"]["goal_progress_score"], 0)
+        self.assertEqual(next_item["score_breakdown"]["goal_progress_total_task_count"], 3)
+        self.assertEqual(next_item["score_breakdown"]["goal_progress_completed_task_count"], 1)
+        self.assertEqual(next_item["score_breakdown"]["goal_progress_unfinished_task_count"], 2)
+        self.assertEqual(strategy["factors"]["goal_progress_signal_count"], 1)
+        next_rationale = next(rationale for rationale in strategy["task_rationales"] if rationale["task_id"] == next_task.id)
+        self.assertEqual(next_rationale["dominant_factor"], "goal_progress_strategy")
+        self.assertIn("高价值目标", next_rationale["dominant_reason"])
 
     def test_today_planner_orders_prerequisites_before_dependent_tasks(self):
         prerequisite = task_service.create_task(
