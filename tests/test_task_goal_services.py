@@ -284,6 +284,42 @@ class TaskGoalServiceTests(unittest.TestCase):
         self.assertEqual(goal_detail["dependency_map"]["edges"][0]["from_task_id"], prerequisite.id)
         self.assertEqual(goal_detail["dependency_map"]["edges"][0]["to_task_id"], dependent.id)
 
+    def test_goal_recommended_next_task_respects_unfinished_dependencies(self):
+        goal = goal_service.create_goal(self.db, user_id=self.user.id, title="Dependency-aware goal")
+        prerequisite = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Prepare source material",
+            priority=4,
+            value_level=ValueLevel.LOW,
+        )
+        dependent = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Publish final analysis",
+            priority=1,
+            value_level=ValueLevel.HIGH,
+        )
+        task_service.add_task_dependency(
+            self.db,
+            task_id=dependent.id,
+            user_id=self.user.id,
+            prerequisite_task_id=prerequisite.id,
+        )
+
+        detail = goal_service.get_goal_detail(self.db, goal_id=goal.id, user_id=self.user.id)
+        home = goal_service.get_goals_home(self.db, user_id=self.user.id)
+
+        self.assertEqual(detail["task_list"]["recommended_next_task"]["id"], prerequisite.id)
+        self.assertEqual(home["goals"][0]["recommended_next_task_id"], prerequisite.id)
+
+        task_service.complete_task(self.db, task_id=prerequisite.id, user_id=self.user.id)
+        updated_detail = goal_service.get_goal_detail(self.db, goal_id=goal.id, user_id=self.user.id)
+
+        self.assertEqual(updated_detail["task_list"]["recommended_next_task"]["id"], dependent.id)
+
     def test_task_dependency_rejects_cycles(self):
         first = task_service.create_task(self.db, user_id=self.user.id, title="First")
         second = task_service.create_task(self.db, user_id=self.user.id, title="Second")

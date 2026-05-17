@@ -284,6 +284,7 @@ prerequisite_task -> dependent_task
 - `filters`
 - `goals`
 - 每个 goal card 的 progress / risk / associated task count / recommended next task id
+- `recommended_next_task_id` 会避开仍有未完成前置任务的后续任务；如果所有未完成任务都被阻塞，则回退到排序最高的未完成任务。
 
 ### GET `/api/v1/goals/{goal_id}/detail`
 
@@ -301,6 +302,8 @@ Dependency Map 已返回真实依赖边，方向为：
 ```text
 from_task_id -> to_task_id
 ```
+
+`task_list.recommended_next_task` 与 Goals 首页保持一致：优先推荐未被依赖阻塞的下一步，避免把用户直接带到暂时不能执行的后续任务。
 
 ### GET `/api/v1/goals/{goal_id}/progress-timeline`
 

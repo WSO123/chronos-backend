@@ -1238,6 +1238,7 @@ PATCH /api/v1/goals/{goal_id}
 - `GET /goals/{goal_id}` 保持基础信息接口，服务轻量详情和 selector。
 - `GET /goals/home` 服务 P2 Goals 首页聚合，返回 summary、filter counts、goal cards、progress、risk、关联任务数和推荐下一步任务 id。
 - `GET /goals/{goal_id}/detail` 服务 P2 Goal Detail 聚合，返回 overview、progress、task list、规则建议和 dependency map。
+- Goals Home 和 Goal Detail 的 recommended next task 必须避开仍有未完成前置任务的后续任务，保证 `Goals -> Task Detail -> Focus` 不把用户带到被依赖阻塞的任务。
 - `GET /goals/{goal_id}/progress-timeline` 服务 P2 Goal Progress Timeline，返回基于 ActivityEvent 的关键推进节点。
 - Dependency Map 已支持真实依赖边，边方向统一为 `from_task_id` 前置任务指向 `to_task_id` 后续任务；深度目标洞察仍留到后续 P2 迭代。
 

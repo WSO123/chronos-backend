@@ -88,7 +88,7 @@ class GoalService:
         today = self._current_user_date(db, user_id=user_id)
         goals = self._goals_with_tasks(db, user_id=user_id)
         visible_goals = [goal for goal in goals if goal.status != GoalStatus.ARCHIVED]
-        home_items = [self._goal_home_item(goal, today=today) for goal in visible_goals]
+        home_items = [self._goal_home_item(db, goal, today=today) for goal in visible_goals]
         filtered_items = self._filter_home_items(home_items, selected_filter=selected_filter, today=today)
         paginated_items = filtered_items[offset : offset + limit]
 
@@ -107,7 +107,7 @@ class GoalService:
         sorted_tasks = sorted(visible_tasks, key=lambda task: self._task_sort_key(task, today=today))
         unfinished_tasks = [task for task in sorted_tasks if task.status != TaskStatus.COMPLETED]
         completed_tasks = [task for task in sorted_tasks if task.status == TaskStatus.COMPLETED]
-        recommended_next_task = unfinished_tasks[0] if goal.status == GoalStatus.ACTIVE and unfinished_tasks else None
+        recommended_next_task = self._recommended_next_task(db, goal=goal, sorted_tasks=sorted_tasks)
         task_summaries = {task.id: self._task_summary(task) for task in visible_tasks}
 
         return {
@@ -216,12 +216,12 @@ class GoalService:
         )
         return list(db.scalars(stmt).all())
 
-    def _goal_home_item(self, goal: Goal, *, today: date) -> dict:
+    def _goal_home_item(self, db: Session, goal: Goal, *, today: date) -> dict:
         visible_tasks = [task for task in goal.tasks if task.status != TaskStatus.ARCHIVED]
         sorted_tasks = sorted(visible_tasks, key=lambda task: self._task_sort_key(task, today=today))
         unfinished_tasks = [task for task in sorted_tasks if task.status != TaskStatus.COMPLETED]
         completed_tasks = [task for task in sorted_tasks if task.status == TaskStatus.COMPLETED]
-        recommended_next_task = unfinished_tasks[0] if goal.status == GoalStatus.ACTIVE and unfinished_tasks else None
+        recommended_next_task = self._recommended_next_task(db, goal=goal, sorted_tasks=sorted_tasks)
         progress = self._progress(goal=goal, tasks=visible_tasks, today=today)
         return {
             "id": goal.id,
@@ -236,6 +236,34 @@ class GoalService:
             "unfinished_task_count": len(unfinished_tasks),
             "completed_task_count": len(completed_tasks),
             "recommended_next_task_id": recommended_next_task.id if recommended_next_task else None,
+        }
+
+    def _recommended_next_task(self, db: Session, *, goal: Goal, sorted_tasks: list[Task]) -> Task | None:
+        if goal.status != GoalStatus.ACTIVE:
+            return None
+        unfinished_tasks = [task for task in sorted_tasks if task.status != TaskStatus.COMPLETED]
+        if not unfinished_tasks:
+            return None
+
+        blocked_task_ids = self._blocked_task_ids(db, tasks=sorted_tasks)
+        for task in unfinished_tasks:
+            if task.id not in blocked_task_ids:
+                return task
+        return unfinished_tasks[0]
+
+    def _blocked_task_ids(self, db: Session, *, tasks: list[Task]) -> set[uuid.UUID]:
+        task_by_id = {task.id: task for task in tasks}
+        if not task_by_id:
+            return set()
+        stmt = select(TaskDependency).where(
+            TaskDependency.dependent_task_id.in_(task_by_id.keys()),
+            TaskDependency.prerequisite_task_id.in_(task_by_id.keys()),
+        )
+        edges = list(db.scalars(stmt).all())
+        return {
+            edge.dependent_task_id
+            for edge in edges
+            if task_by_id[edge.prerequisite_task_id].status != TaskStatus.COMPLETED
         }
 
     def _filter_home_items(self, items: list[dict], *, selected_filter: GoalHomeFilter, today: date) -> list[dict]:
