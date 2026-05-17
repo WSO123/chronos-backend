@@ -52,7 +52,7 @@ Capture -> Inbox -> Today -> Task Detail -> Focus -> Report
 | Capture 文本输入 | L3 | 支持文本 Capture，并通过 Parser / fallback 进入 Inbox | P3 语音 / 图片先不扩展 |
 | Inbox 确认 Task / Goal | L3 | Task 确认可返回 `today_impact`，重复 confirm 保持幂等 | Goal confirm 后与 Goal Detail 的体验还可继续细化 |
 | Inbox -> Today 滚动纳入 | L3 | active Today 存在时通过 `system_refresh` 纳入新任务；无 plan 时不隐式创建 | 需要 smoke 场景长期覆盖 |
-| Planning Engine / Today 编排 | L3 | 确定性排序是 source of truth，读取价值、deadline、剩余估时、依赖、用户修正、执行反馈、容量、Energy 和 fresh TaskPlanningSignal 语义信号 | 后续继续补边界场景和回归基线，不让 LLM 接管排序 |
+| Planning Engine / Today 编排 | L3 | 确定性排序是 source of truth，读取价值、deadline、剩余估时、依赖、用户修正、执行反馈、容量、Energy、fresh TaskPlanningSignal 语义信号和同类任务历史执行画像 | 后续继续补边界场景和回归基线，不让 LLM 接管排序 |
 | Today AI signal preparation | L3 | Today 可受控生成缺失 / 过期 TaskPlanningSignal，并在有新信号时 deterministic replan | 不做首屏静默 provider 狂跑，保留成本和信任边界 |
 | Today 快速操作 | L3 | 完成 / 延后等动作已影响 plan item 和执行事件；最小推进切片完成时只记录 Task partial progress | 可继续补完整主线 smoke，覆盖更多 action 组合 |
 | Task Detail 承接层 | L3 | 聚合 Goal、AI info、Today context、Focus state 和 actions | 避免继续堆成信息仓库 |
@@ -78,6 +78,7 @@ P2 只保留和执行主线强相关的部分：Goals、依赖、洞察、解释
 | Task Semantic Planning Signal | L2-L3 | 能把任务语义、目标对齐、复杂度、语义估时和最小推进动作写入可追踪信号，并被 Today 评分读取 | 后续需要补自动刷新策略 |
 | Minimum Viable Progress | L3 | 大任务带有语义信号时，Today 可只安排今日最小推进切片；完成切片记录部分进度，不覆盖 Task 原估时或误完成 Task | 后续可继续优化切片大小学习策略 |
 | Execution Feedback Calibration | L2-L3 | Replan 时会读取 Task 实际投入时间，把 Today 估时校准为剩余工作量，并在 Strategy Detail 解释 | 先不自动改 Task 原估时，避免系统过度自作主张 |
+| Planner Personalization v1 | L2-L3 | 通过 TaskPlanningSignal 的 task_type 聚合同类历史任务耗时、中断、延后和完成势能，调整本轮估时、评分和 Strategy Detail 解释 | 不创建长期画像表，不让 LLM 直接排序 |
 | Insights / Weekly / Monthly | L2 | 作为复盘与趋势入口可用 | 不能替代 Today 的每日执行决策 |
 
 ---

@@ -120,6 +120,7 @@ P2 新增字段：
   "semantic_protected_count": 1,
   "minimum_viable_progress_count": 1,
   "execution_feedback_count": 1,
+  "personalization_signal_count": 1,
   "energy_level": "unknown",
   "energy_applied": false,
   "planner_agent_latency_ms": 12,
@@ -138,6 +139,7 @@ P2 新增字段：
 - `semantic_protected_count` 表示因为语义信号对目标推进价值较高而被保护的任务数量。
 - `minimum_viable_progress_count` 表示有多少大任务在 Today 中只保护“今天做得出来的最小推进动作”。
 - `execution_feedback_count` 表示有多少任务读取了真实执行时间，并用它校准今日剩余估时。
+- `personalization_signal_count` 表示有多少任务读取了同类任务历史执行画像，用于调整估时和排序力度；它来自确定性聚合，不是 LLM 直接排序。
 - `daily_capacity_minutes` 是 Planning Engine 的当日容量参考，不是严格日历时间块。
 - `selected_estimated_minutes` 是今天主执行序列的估时总量。
 - `rolled_over_estimated_minutes` 是被滚动到未来、保留可见但不计入主执行序列的估时。
@@ -253,7 +255,8 @@ P2 新增字段：
 - `score_breakdown` 是解释数据，不要在 Today 首屏展示成复杂驾驶舱。
 - Strategy Detail 优先展示 `dominant_reason` 和 `score_signals`，不要让前端自行解释原始权重。
 - `semantic_*` 字段来自 TaskPlanningSignal，只表示 Planning Engine 读取到语义信号；它不是 LLM 直接改排序。
-- `base_estimated_duration_min` 是任务原始 / 语义估时，`remaining_estimated_duration_min` 是结合 Focus 实际投入后的剩余估时，`original_estimated_duration_min` 是最小推进切片前的本轮估时。
+- `personalization_*` 字段来自同类 TaskPlanningSignal 历史任务的执行结果，用于解释“系统如何逐渐理解这个用户的真实执行节奏”；它不直接修改 Task 本体。
+- `base_estimated_duration_min` 是任务原始 / 语义估时，`personalized_estimated_duration_min` 是结合个人历史执行画像后的本轮估时，`remaining_estimated_duration_min` 是结合 Focus 实际投入后的剩余估时，`original_estimated_duration_min` 是最小推进切片前的本轮估时。
 - 当 `minimum_viable_progress_applied=true` 时，Today item 代表“今日最小推进切片”，不是整个 Task；完成该 item 后后端会记录 Task partial progress，Task 仍保持 active。
 - `selected_for_today=false` 且 `rollover_reason=capacity` 表示任务被系统滚动到未来，不代表任务被用户手动延后；此时 `item_status` 仍可为 `planned`，前端应以 `section=rolled_over` 判断展示位置。
 - 若 `capacity_status=overloaded`，Today 可在 Insights Preview 展示一条轻量风险提示，但不要展示完整容量面板。

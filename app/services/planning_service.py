@@ -924,7 +924,15 @@ class PlanningService:
 
     def _score_breakdown_for(self, task: Task, *, context: PlanningContext, signals: dict) -> dict:
         semantic_signal = signals["semantic_by_task_id"].get(task.id)
-        duration_estimate = self._duration_estimate_for(task, semantic_signal=semantic_signal)
+        personalization = signals["personalization_by_task_id"].get(
+            task.id,
+            self._empty_personalization_profile(task_type=semantic_signal.task_type if semantic_signal else None),
+        )
+        duration_estimate = self._duration_estimate_for(
+            task,
+            semantic_signal=semantic_signal,
+            personalization=personalization,
+        )
         estimated_minutes = int(duration_estimate["estimated_duration_min"])
         behavior = signals["behavior_by_task_id"].get(
             task.id,
@@ -949,6 +957,7 @@ class PlanningService:
         behavior_feedback_score = min(behavior["completed"], 3) * 2
         behavior_feedback_score -= min(behavior["postponed"], 3) * 6
         behavior_feedback_score -= min(behavior["interrupted"], 3) * 4
+        personalization_score = int(personalization.get("score") or 0)
         user_preference_score = 10 if task.id in signals["adjusted_task_ids"] else 0
         if context.ai_strategy_preference == AIStrategyPreference.HIGH_VALUE_FIRST and task.value_level == ValueLevel.HIGH:
             user_preference_score += 8
@@ -971,6 +980,7 @@ class PlanningService:
             + duration_fit_score
             + energy_fit_score
             + behavior_feedback_score
+            + personalization_score
             + user_preference_score
             + postponement_penalty
             + priority_score
@@ -991,6 +1001,7 @@ class PlanningService:
             "duration_fit_score": int(duration_fit_score),
             "energy_fit_score": int(energy_fit_score),
             "behavior_feedback_score": int(behavior_feedback_score),
+            "personalization_score": personalization_score,
             "user_preference_score": int(user_preference_score),
             "postponement_penalty": int(postponement_penalty),
             "priority_score": int(priority_score),
@@ -1001,6 +1012,7 @@ class PlanningService:
             "energy_level": context.energy_level,
             "energy_applied": context.energy_has_data,
             "behavior": behavior,
+            **self._personalization_score_breakdown(personalization),
         }
 
     def _estimated_minutes_for(self, task: Task, *, semantic_signal: TaskPlanningSignal | None) -> int:
@@ -1010,32 +1022,44 @@ class PlanningService:
             return semantic_signal.estimated_duration_min
         return 25
 
-    def _duration_estimate_for(self, task: Task, *, semantic_signal: TaskPlanningSignal | None) -> dict:
+    def _duration_estimate_for(
+        self,
+        task: Task,
+        *,
+        semantic_signal: TaskPlanningSignal | None,
+        personalization: dict,
+    ) -> dict:
         base_estimate = self._estimated_minutes_for(task, semantic_signal=semantic_signal)
+        personalized_estimate = self._personalized_estimated_minutes(
+            base_estimate=base_estimate,
+            personalization=personalization,
+        )
         actual_minutes = max(0, int(task.actual_duration_min or 0))
         progress_ratio = max(0.0, min(1.0, float(task.progress or 0)))
-        remaining_estimate = base_estimate
+        remaining_estimate = personalized_estimate
         feedback_reason = None
 
         if 0 < progress_ratio < 1:
-            remaining_estimate = max(15, ceil(base_estimate * (1 - progress_ratio)))
+            remaining_estimate = max(15, ceil(personalized_estimate * (1 - progress_ratio)))
             feedback_reason = "task_progress_remaining"
         elif actual_minutes > 0:
-            if actual_minutes < base_estimate:
-                remaining_estimate = max(15, base_estimate - actual_minutes)
+            if actual_minutes < personalized_estimate:
+                remaining_estimate = max(15, personalized_estimate - actual_minutes)
                 feedback_reason = "actual_duration_remaining"
             else:
-                remaining_estimate = max(25, min(45, base_estimate))
+                remaining_estimate = max(25, min(45, personalized_estimate))
                 feedback_reason = "actual_duration_overrun"
 
         return {
             "estimated_duration_min": int(remaining_estimate),
             "base_estimated_duration_min": int(base_estimate),
+            "personalized_estimated_duration_min": int(personalized_estimate),
+            "personalized_duration_adjustment_min": int(personalized_estimate - base_estimate),
             "remaining_estimated_duration_min": int(remaining_estimate),
             "actual_duration_min": actual_minutes,
             "progress_ratio": round(progress_ratio, 2),
-            "execution_feedback_applied": remaining_estimate != base_estimate,
-            "execution_feedback_reason": feedback_reason if remaining_estimate != base_estimate else None,
+            "execution_feedback_applied": remaining_estimate != personalized_estimate,
+            "execution_feedback_reason": feedback_reason if remaining_estimate != personalized_estimate else None,
         }
 
     def _semantic_signal_scores(
@@ -1305,6 +1329,7 @@ class PlanningService:
                 "adjusted_task_ids": set(),
                 "behavior_by_task_id": {},
                 "semantic_by_task_id": {},
+                "personalization_by_task_id": {},
             }
 
         task_ids = set(task_by_id)
@@ -1414,6 +1439,13 @@ class PlanningService:
             if freshness["is_fresh"]:
                 semantic_by_task_id[signal.task_id] = signal
 
+        personalization_by_task_id = self._personalization_by_task_id(
+            db,
+            user_id=user_id,
+            candidate_task_ids=task_ids,
+            semantic_by_task_id=semantic_by_task_id,
+        )
+
         return {
             "dependency_depth_by_task_id": depth_by_task_id,
             "unlocking_task_ids": unlocking_task_ids,
@@ -1422,6 +1454,235 @@ class PlanningService:
             "adjusted_task_ids": adjusted_task_ids,
             "behavior_by_task_id": behavior_by_task_id,
             "semantic_by_task_id": semantic_by_task_id,
+            "personalization_by_task_id": personalization_by_task_id,
+        }
+
+    def _personalization_by_task_id(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        candidate_task_ids: set[uuid.UUID],
+        semantic_by_task_id: dict[uuid.UUID, TaskPlanningSignal],
+    ) -> dict[uuid.UUID, dict]:
+        task_types = {
+            signal.task_type
+            for signal in semantic_by_task_id.values()
+            if signal.task_type and signal.task_type != "general"
+        }
+        if not task_types:
+            return {}
+
+        latest_signal_by_task_id: dict[uuid.UUID, TaskPlanningSignal] = {}
+        signals = list(
+            db.scalars(
+                select(TaskPlanningSignal)
+                .where(
+                    TaskPlanningSignal.user_id == user_id,
+                    TaskPlanningSignal.task_type.in_(task_types),
+                )
+                .order_by(TaskPlanningSignal.created_at.desc(), TaskPlanningSignal.id.desc())
+            ).all()
+        )
+        for signal in signals:
+            if signal.task_id in latest_signal_by_task_id:
+                continue
+            latest_signal_by_task_id[signal.task_id] = signal
+
+        history_task_ids = set(latest_signal_by_task_id) - set(candidate_task_ids)
+        if not history_task_ids:
+            return {
+                task_id: self._empty_personalization_profile(task_type=signal.task_type)
+                for task_id, signal in semantic_by_task_id.items()
+            }
+
+        history_tasks = list(
+            db.scalars(
+                select(Task).where(
+                    Task.user_id == user_id,
+                    Task.id.in_(history_task_ids),
+                    Task.status != TaskStatus.ARCHIVED,
+                )
+            ).all()
+        )
+        history_events = list(
+            db.scalars(
+                select(ActivityEvent).where(
+                    ActivityEvent.user_id == user_id,
+                    ActivityEvent.related_task_id.in_(history_task_ids),
+                    ActivityEvent.event_type.in_(
+                        [
+                            "TASK_COMPLETED",
+                            "TASK_POSTPONED",
+                            "FOCUS_SESSION_INTERRUPTED",
+                            "FOCUS_SESSION_POSTPONED",
+                        ]
+                    ),
+                )
+            ).all()
+        )
+        events_by_task_id: dict[uuid.UUID, dict[str, int]] = {
+            task_id: {"completed": 0, "postponed": 0, "interrupted": 0}
+            for task_id in history_task_ids
+        }
+        for event in history_events:
+            if event.related_task_id is None:
+                continue
+            counts = events_by_task_id.setdefault(
+                event.related_task_id,
+                {"completed": 0, "postponed": 0, "interrupted": 0},
+            )
+            if event.event_type == "TASK_COMPLETED":
+                counts["completed"] += 1
+            elif event.event_type in {"TASK_POSTPONED", "FOCUS_SESSION_POSTPONED"}:
+                counts["postponed"] += 1
+            elif event.event_type == "FOCUS_SESSION_INTERRUPTED":
+                counts["interrupted"] += 1
+
+        stats_by_type: dict[str, dict] = {}
+        for task in history_tasks:
+            signal = latest_signal_by_task_id.get(task.id)
+            if signal is None:
+                continue
+            counts = events_by_task_id.get(
+                task.id,
+                {"completed": 0, "postponed": 0, "interrupted": 0},
+            )
+            actual_minutes = int(task.actual_duration_min or 0)
+            if actual_minutes <= 0 and task.status != TaskStatus.COMPLETED and not any(counts.values()):
+                continue
+            stats = stats_by_type.setdefault(signal.task_type, self._empty_personalization_stats())
+            base_estimate = int(task.estimated_duration_min or signal.estimated_duration_min or 25)
+            stats["sample_count"] += 1
+            stats["completed_count"] += 1 if task.status == TaskStatus.COMPLETED or counts["completed"] else 0
+            stats["postponed_count"] += counts["postponed"]
+            stats["interrupted_count"] += counts["interrupted"]
+            if base_estimate > 0 and actual_minutes > 0:
+                stats["duration_sample_count"] += 1
+                stats["estimated_total_min"] += base_estimate
+                stats["actual_total_min"] += actual_minutes
+                if actual_minutes >= int(base_estimate * 1.25):
+                    stats["overrun_count"] += 1
+
+        return {
+            task_id: self._personalization_profile_for_signal(
+                signal=signal,
+                stats=stats_by_type.get(signal.task_type),
+            )
+            for task_id, signal in semantic_by_task_id.items()
+        }
+
+    def _empty_personalization_stats(self) -> dict:
+        return {
+            "sample_count": 0,
+            "duration_sample_count": 0,
+            "completed_count": 0,
+            "postponed_count": 0,
+            "interrupted_count": 0,
+            "overrun_count": 0,
+            "estimated_total_min": 0,
+            "actual_total_min": 0,
+        }
+
+    def _personalization_profile_for_signal(
+        self,
+        *,
+        signal: TaskPlanningSignal,
+        stats: dict | None,
+    ) -> dict:
+        if stats is None or stats["sample_count"] < 2:
+            return self._empty_personalization_profile(task_type=signal.task_type)
+
+        duration_multiplier = 1.0
+        if stats["duration_sample_count"] >= 2 and stats["estimated_total_min"] > 0:
+            duration_multiplier = stats["actual_total_min"] / stats["estimated_total_min"]
+            duration_multiplier = max(0.70, min(1.80, duration_multiplier))
+
+        completion_rate = stats["completed_count"] / stats["sample_count"] if stats["sample_count"] else 0.0
+        friction_count = stats["postponed_count"] + stats["interrupted_count"]
+        friction_rate = friction_count / stats["sample_count"] if stats["sample_count"] else 0.0
+        overrun_risk = stats["overrun_count"] >= 2 or duration_multiplier >= 1.25
+        interruption_risk = stats["interrupted_count"] >= 2 or friction_rate >= 0.5
+        postponement_risk = stats["postponed_count"] >= 2
+        completion_momentum = (
+            completion_rate >= 0.75
+            and not overrun_risk
+            and not interruption_risk
+            and not postponement_risk
+        )
+        score = 0
+        if overrun_risk:
+            score -= 4
+        if interruption_risk:
+            score -= 6
+        if postponement_risk:
+            score -= 4
+        if completion_momentum:
+            score += 4
+
+        return {
+            "applied": True,
+            "task_type": signal.task_type,
+            "sample_count": stats["sample_count"],
+            "duration_sample_count": stats["duration_sample_count"],
+            "completed_count": stats["completed_count"],
+            "completion_rate": round(completion_rate, 2),
+            "postponed_count": stats["postponed_count"],
+            "interrupted_count": stats["interrupted_count"],
+            "overrun_count": stats["overrun_count"],
+            "duration_multiplier": round(duration_multiplier, 2),
+            "overrun_risk": overrun_risk,
+            "interruption_risk": interruption_risk,
+            "postponement_risk": postponement_risk,
+            "completion_momentum": completion_momentum,
+            "score": int(score),
+        }
+
+    def _empty_personalization_profile(self, *, task_type: str | None) -> dict:
+        return {
+            "applied": False,
+            "task_type": task_type,
+            "sample_count": 0,
+            "duration_sample_count": 0,
+            "completed_count": 0,
+            "completion_rate": 0.0,
+            "postponed_count": 0,
+            "interrupted_count": 0,
+            "overrun_count": 0,
+            "duration_multiplier": 1.0,
+            "overrun_risk": False,
+            "interruption_risk": False,
+            "postponement_risk": False,
+            "completion_momentum": False,
+            "score": 0,
+        }
+
+    def _personalized_estimated_minutes(self, *, base_estimate: int, personalization: dict) -> int:
+        if not personalization.get("applied") or personalization.get("duration_sample_count", 0) < 2:
+            return int(base_estimate)
+        multiplier = float(personalization.get("duration_multiplier") or 1.0)
+        if 0.85 <= multiplier <= 1.15:
+            return int(base_estimate)
+        adjusted = ceil(base_estimate * multiplier)
+        return max(15, min(240, int(adjusted)))
+
+    def _personalization_score_breakdown(self, personalization: dict) -> dict:
+        return {
+            "personalization_applied": bool(personalization.get("applied")),
+            "personalization_version": "planning-personalization-v1",
+            "personalization_task_type": personalization.get("task_type"),
+            "personalization_sample_count": int(personalization.get("sample_count") or 0),
+            "personalization_duration_sample_count": int(personalization.get("duration_sample_count") or 0),
+            "personalization_completed_count": int(personalization.get("completed_count") or 0),
+            "personalization_completion_rate": float(personalization.get("completion_rate") or 0.0),
+            "personalization_postponed_count": int(personalization.get("postponed_count") or 0),
+            "personalization_interrupted_count": int(personalization.get("interrupted_count") or 0),
+            "personalization_overrun_count": int(personalization.get("overrun_count") or 0),
+            "personalization_duration_multiplier": float(personalization.get("duration_multiplier") or 1.0),
+            "personalization_overrun_risk": bool(personalization.get("overrun_risk")),
+            "personalization_interruption_risk": bool(personalization.get("interruption_risk")),
+            "personalization_postponement_risk": bool(personalization.get("postponement_risk")),
+            "personalization_completion_momentum": bool(personalization.get("completion_momentum")),
         }
 
     def _goal_next_action_task_ids(
@@ -1570,6 +1831,10 @@ class PlanningService:
             return "AI 语义信号判断它能有效推进目标，因此今天保护一个最小可执行动作。"
         if task.id in goal_next_action_task_ids:
             return "这是关联目标当前最适合推进的下一步，系统会保护它进入今日主序列。"
+        if score_breakdown.get("personalization_applied") and score_breakdown.get("personalization_score", 0) < 0:
+            return "系统读取了你过去同类任务的执行阻力，因此按更保守的节奏安排。"
+        if score_breakdown.get("personalization_applied") and score_breakdown.get("personalization_score", 0) > 0:
+            return "系统读取了你过去同类任务的完成势能，因此保留这个顺手推进的机会。"
         if task.value_level == ValueLevel.HIGH:
             return "High-value task protected from being crowded out by lighter work."
         if task.goal is not None and task.goal.value_level == ValueLevel.HIGH:
@@ -1627,6 +1892,9 @@ class PlanningService:
         execution_feedback_count = len(
             [planned for planned in active_tasks if planned.score_breakdown.get("execution_feedback_applied")]
         )
+        personalization_signal_count = len(
+            [planned for planned in active_tasks if planned.score_breakdown.get("personalization_applied")]
+        )
         first_breakdown = planned_tasks[0].score_breakdown if planned_tasks else {}
         daily_capacity_minutes = int(first_breakdown.get("daily_capacity_minutes") or 0)
         energy_level = str(first_breakdown.get("energy_level") or "unknown")
@@ -1658,6 +1926,7 @@ class PlanningService:
                     "semantic_protected_count": 0,
                     "minimum_viable_progress_count": 0,
                     "execution_feedback_count": 0,
+                    "personalization_signal_count": 0,
                     "energy_level": energy_level,
                     "energy_applied": energy_applied,
                 },
@@ -1695,6 +1964,7 @@ class PlanningService:
                 "semantic_protected_count": semantic_protected_count,
                 "minimum_viable_progress_count": minimum_viable_progress_count,
                 "execution_feedback_count": execution_feedback_count,
+                "personalization_signal_count": personalization_signal_count,
                 "energy_level": energy_level,
                 "energy_applied": energy_applied,
                 "average_score": round(
@@ -1913,6 +2183,16 @@ class PlanningService:
                     "score": factors["execution_feedback_count"],
                 }
             )
+        if factors.get("personalization_signal_count"):
+            signals.append(
+                {
+                    "key": "personalization_signal",
+                    "title": "个人执行画像",
+                    "message": f"{factors['personalization_signal_count']} 个任务读取了同类任务的历史执行节奏，用来调整估时和排序力度。",
+                    "signal": "info",
+                    "score": factors["personalization_signal_count"],
+                }
+            )
         if factors["energy_applied"]:
             signals.append(
                 {
@@ -2020,6 +2300,7 @@ class PlanningService:
             "semantic_protected_count": int(score_factors.get("semantic_protected_count", 0) or 0),
             "minimum_viable_progress_count": int(score_factors.get("minimum_viable_progress_count", 0) or 0),
             "execution_feedback_count": int(score_factors.get("execution_feedback_count", 0) or 0),
+            "personalization_signal_count": int(score_factors.get("personalization_signal_count", 0) or 0),
             "energy_level": str(score_factors.get("energy_level") or "unknown"),
             "energy_applied": bool(score_factors.get("energy_applied") or False),
             "planner_agent_latency_ms": score_factors.get("planner_agent_latency_ms"),
@@ -2054,6 +2335,8 @@ class PlanningService:
             explanation.append(f"{factors['minimum_viable_progress_count']} 个高价值大任务只安排最小推进动作，避免 Today 变成不可执行清单。")
         if factors["execution_feedback_count"]:
             explanation.append(f"{factors['execution_feedback_count']} 个任务读取了真实执行时间，用来校准下一轮剩余估时。")
+        if factors.get("personalization_signal_count"):
+            explanation.append(f"{factors['personalization_signal_count']} 个任务读取了你的同类任务历史表现，用来让 Today 更贴近你的真实执行节奏。")
         if strategy.mode == PlanningPreference.LIGHT:
             explanation.append("今天保持轻量，让第一个动作更容易开始。")
         elif strategy.mode == PlanningPreference.SPRINT:
@@ -2375,6 +2658,31 @@ class PlanningService:
                     "message": message,
                     "signal": "info",
                     "score": score_breakdown.get("remaining_estimated_duration_min"),
+                }
+            )
+
+        if score_breakdown.get("personalization_applied"):
+            task_type = score_breakdown.get("personalization_task_type") or "同类"
+            multiplier = float(score_breakdown.get("personalization_duration_multiplier") or 1.0)
+            if score_breakdown.get("personalization_overrun_risk"):
+                message = f"你过去的 {task_type} 类任务常超出估时，Today 已按更保守的时长安排。"
+                signal = "watch"
+            elif score_breakdown.get("personalization_interruption_risk") or score_breakdown.get("personalization_postponement_risk"):
+                message = f"你过去的 {task_type} 类任务更容易中断或延后，排序会降低它抢占主序列的力度。"
+                signal = "watch"
+            elif score_breakdown.get("personalization_completion_momentum"):
+                message = f"你过去的 {task_type} 类任务完成反馈较好，Today 会保留这个顺手推进的机会。"
+                signal = "positive"
+            else:
+                message = f"Today 参考了你过去 {task_type} 类任务的执行节奏。"
+                signal = "info"
+            signals.append(
+                {
+                    "key": "personalization_signal",
+                    "title": "个人执行画像",
+                    "message": message,
+                    "signal": signal,
+                    "score": int(round(multiplier * 100)),
                 }
             )
 

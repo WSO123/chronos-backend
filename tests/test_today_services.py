@@ -11,6 +11,7 @@ from app.models.activity_event import ActivityEvent
 from app.models.ai_job import AIJob
 from app.models.enums import AIJobStatus, AIJobType, DailyPlanItemStatus, EntityType, TaskStatus, ValueLevel
 from app.models.task import Task
+from app.models.task_planning_signal import TaskPlanningSignal
 from app.services.energy_service import energy_service
 from app.services.goal_service import goal_service
 from app.services.planning_service import PlanningService, planning_service
@@ -38,6 +39,39 @@ class TodayServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.db.close()
+
+    def _add_task_signal(
+        self,
+        task: Task,
+        *,
+        task_type: str,
+        estimated_duration_min: int | None = None,
+        goal_alignment_score: float = 0.4,
+        semantic_priority_score: float = 0.4,
+    ) -> TaskPlanningSignal:
+        signal = TaskPlanningSignal(
+            user_id=self.user.id,
+            task_id=task.id,
+            source="rule",
+            task_type=task_type,
+            complexity="medium",
+            cognitive_load="medium",
+            energy_fit="steady",
+            blocking_risk="low",
+            estimated_duration_min=estimated_duration_min,
+            duration_confidence=0.7,
+            goal_alignment_score=goal_alignment_score,
+            semantic_priority_score=semantic_priority_score,
+            breakdown_recommended=False,
+            minimum_viable_step=None,
+            semantic_summary="测试语义信号。",
+            confidence=0.7,
+            raw_payload={},
+        )
+        self.db.add(signal)
+        self.db.commit()
+        self.db.refresh(signal)
+        return signal
 
     def test_today_lazy_creates_daily_plan_with_light_sections(self):
         task_service.create_task(
@@ -781,6 +815,73 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["factors"]["minimum_viable_progress_count"], 1)
         self.assertEqual(strategy["factors"]["selected_estimated_minutes"], 125)
         self.assertEqual(strategy["task_rationales"][0]["dominant_factor"], "minimum_viable_progress")
+
+    def test_planning_engine_uses_personalization_from_semantic_task_history(self):
+        history_one = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Write historical launch note",
+            estimated_duration_min=30,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task_service.complete_task(
+            self.db,
+            task_id=history_one.id,
+            user_id=self.user.id,
+            actual_duration_min_delta=60,
+        )
+        self._add_task_signal(history_one, task_type="writing", estimated_duration_min=30)
+        history_two = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Write historical product memo",
+            estimated_duration_min=30,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task_service.complete_task(
+            self.db,
+            task_id=history_two.id,
+            user_id=self.user.id,
+            actual_duration_min_delta=50,
+        )
+        self._add_task_signal(history_two, task_type="writing", estimated_duration_min=30)
+        current_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Write current planning memo",
+            estimated_duration_min=30,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        self._add_task_signal(current_task, task_type="writing", estimated_duration_min=30)
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        current_item = next(
+            item
+            for item in [
+                *today["sections"]["pinned_tasks"],
+                *today["sections"]["recommended_tasks"],
+                *today["sections"]["low_priority_tasks"],
+                *today["sections"]["rolled_over_tasks"],
+            ]
+            if item["task_id"] == current_task.id
+        )
+
+        self.assertTrue(current_item["score_breakdown"]["personalization_applied"])
+        self.assertEqual(current_item["score_breakdown"]["personalization_task_type"], "writing")
+        self.assertEqual(current_item["score_breakdown"]["personalization_sample_count"], 2)
+        self.assertGreater(current_item["score_breakdown"]["personalization_duration_multiplier"], 1.2)
+        self.assertGreater(current_item["score_breakdown"]["personalized_estimated_duration_min"], 30)
+        self.assertLess(current_item["score_breakdown"]["personalization_score"], 0)
+        self.assertEqual(strategy["factors"]["personalization_signal_count"], 1)
+        current_rationale = next(
+            rationale for rationale in strategy["task_rationales"] if rationale["task_id"] == current_task.id
+        )
+        self.assertEqual(current_rationale["dominant_factor"], "personalization_signal")
+        self.assertIn("更保守", current_rationale["dominant_reason"])
 
     def test_planning_engine_protects_next_action_for_each_high_value_goal(self):
         launch_goal = goal_service.create_goal(

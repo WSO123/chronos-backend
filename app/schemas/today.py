@@ -112,6 +112,7 @@ class StrategyDetailFactorsResponse(BaseModel):
     semantic_protected_count: int = 0
     minimum_viable_progress_count: int = 0
     execution_feedback_count: int = 0
+    personalization_signal_count: int = 0
     energy_level: str
     energy_applied: bool
     planner_agent_latency_ms: int | None = None

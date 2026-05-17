@@ -17,6 +17,8 @@ if str(ROOT_DIR) not in sys.path:
 from app.models.activity_event import ActivityEvent
 from app.models.ai_job import AIJob
 from app.models.enums import DailyPlanItemStatus, EntityType, TaskStatus, ValueLevel
+from app.models.task import Task
+from app.models.task_planning_signal import TaskPlanningSignal
 from app.services.energy_service import energy_service
 from app.services.goal_service import goal_service
 from app.services.planning_service import planning_service
@@ -26,7 +28,7 @@ from tests.factories import create_user
 
 
 PLAN_DATE = date(2026, 5, 17)
-EVALUATOR_VERSION = "p2-planning-engine-eval-v4"
+EVALUATOR_VERSION = "p2-planning-engine-eval-v5"
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,7 @@ def run_evaluation(*, run_id: str | None = None) -> dict:
         _scenario_behavior_feedback_penalizes_interruptions,
         _scenario_multi_goal_competition_protects_high_value_goal,
         _scenario_overdue_goal_recovery_promotes_next_task,
+        _scenario_semantic_history_personalizes_duration,
     ]
     results = [scenario() for scenario in scenarios]
     return {
@@ -563,9 +566,129 @@ def _scenario_overdue_goal_recovery_promotes_next_task() -> ScenarioResult:
         db.close()
 
 
+def _scenario_semantic_history_personalizes_duration() -> ScenarioResult:
+    db = _fresh_db()
+    try:
+        user = create_user(db, name="Planner Eval Personalization")
+        history_one = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Write previous launch memo",
+            estimated_duration_min=30,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task_service.complete_task(
+            db,
+            task_id=history_one.id,
+            user_id=user.id,
+            actual_duration_min_delta=60,
+        )
+        _add_task_signal(db, user_id=user.id, task=history_one, task_type="writing", estimated_duration_min=30)
+        history_two = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Write previous planning memo",
+            estimated_duration_min=30,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task_service.complete_task(
+            db,
+            task_id=history_two.id,
+            user_id=user.id,
+            actual_duration_min_delta=50,
+        )
+        _add_task_signal(db, user_id=user.id, task=history_two, task_type="writing", estimated_duration_min=30)
+        current_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Write current strategy memo",
+            estimated_duration_min=30,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        _add_task_signal(db, user_id=user.id, task=current_task, task_type="writing", estimated_duration_min=30)
+
+        today = planning_service.get_today(db, user_id=user.id, plan_date=PLAN_DATE)
+        strategy = planning_service.get_strategy_detail(db, user_id=user.id, plan_date=PLAN_DATE)
+        current_item = _find_item(today, current_task.id)
+        current_rationale = next(
+            (item for item in strategy["task_rationales"] if item["task_id"] == current_task.id),
+            None,
+        )
+        failures = _check_all(
+            (
+                "current writing task receives personalization signal",
+                bool(current_item) and current_item["score_breakdown"].get("personalization_applied") is True,
+            ),
+            (
+                "history sample count is preserved",
+                bool(current_item) and current_item["score_breakdown"].get("personalization_sample_count") == 2,
+            ),
+            (
+                "duration estimate is adjusted upward",
+                bool(current_item) and current_item["score_breakdown"].get("personalized_estimated_duration_min", 0) > 30,
+            ),
+            (
+                "personalization factor is visible in strategy",
+                strategy["factors"].get("personalization_signal_count") == 1,
+            ),
+            (
+                "task rationale explains personalization",
+                bool(current_item)
+                and bool(current_rationale)
+                and "personalization_signal"
+                in [signal["key"] for signal in current_rationale["score_signals"]],
+            ),
+        )
+        failures += _explainability_failures(strategy)
+        return ScenarioResult(
+            name="semantic_history_personalizes_duration",
+            passed=not failures,
+            details=_details(db=db, today=today, strategy=strategy),
+            failures=failures,
+        )
+    finally:
+        db.close()
+
+
 def _fresh_db():
     reset_database()
     return TestingSessionLocal()
+
+
+def _add_task_signal(
+    db,
+    *,
+    user_id,
+    task: Task,
+    task_type: str,
+    estimated_duration_min: int | None = None,
+) -> TaskPlanningSignal:
+    signal = TaskPlanningSignal(
+        user_id=user_id,
+        task_id=task.id,
+        source="rule",
+        task_type=task_type,
+        complexity="medium",
+        cognitive_load="medium",
+        energy_fit="steady",
+        blocking_risk="low",
+        estimated_duration_min=estimated_duration_min,
+        duration_confidence=0.7,
+        goal_alignment_score=0.4,
+        semantic_priority_score=0.4,
+        breakdown_recommended=False,
+        minimum_viable_step=None,
+        semantic_summary="Planner eval semantic signal.",
+        confidence=0.7,
+        raw_payload={},
+    )
+    db.add(signal)
+    db.commit()
+    db.refresh(signal)
+    return signal
 
 
 def _details(*, db, today: dict, strategy: dict) -> dict:
@@ -621,6 +744,8 @@ def _item_signals(items: list[dict]) -> list[dict]:
             "goal_value_score": item["score_breakdown"].get("goal_value_score"),
             "goal_urgency_score": item["score_breakdown"].get("goal_urgency_score"),
             "behavior_feedback_score": item["score_breakdown"].get("behavior_feedback_score"),
+            "personalization_score": item["score_breakdown"].get("personalization_score"),
+            "personalization_sample_count": item["score_breakdown"].get("personalization_sample_count"),
             "dependency_score": item["score_breakdown"].get("dependency_score"),
             "user_preference_score": item["score_breakdown"].get("user_preference_score"),
             "dominant_factor": item.get("dominant_factor"),
