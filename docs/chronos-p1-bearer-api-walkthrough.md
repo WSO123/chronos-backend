@@ -16,6 +16,8 @@ Seed Demo User -> Auth Me -> Today -> Task Detail -> Focus -> Daily Report -> Me
 
 它不是新的产品需求，而是前端联调手册。目标是让前端可以确认：真实 JWT 会话下，Chronos 的 Today 决策中心、Task Detail 承接层、Focus 执行页和 Report 反馈层能串起来。
 
+Auth MVP 保持简单：email + password + JWT。P1 不接短信验证码、邮件验证、OTP、OAuth 或第三方账号服务。
+
 ---
 
 ## 2. 前置条件
@@ -80,6 +82,28 @@ seed demo data
 -> GET /auth/me
 -> GET /today
 -> GET /tasks/{task_id}
+-> POST /focus-sessions
+-> POST /focus-sessions/{id}/complete
+-> POST /reports/daily/generate
+-> GET /me/overview
+```
+
+如果要验证更接近真实用户第一天使用的路径，也就是从 Capture 输入开始：
+
+```bash
+uv run python scripts/smoke_p1_bearer_capture_loop.py
+uv run python scripts/verify_local.py --smoke p1-bearer-capture
+```
+
+这条 smoke 会自动完成：
+
+```text
+POST /auth/register
+-> POST /captures
+-> POST /inbox/{id}/confirm
+-> GET /today
+-> GET /tasks/{task_id}
+-> POST /tasks/{task_id}/breakdown
 -> POST /focus-sessions
 -> POST /focus-sessions/{id}/complete
 -> POST /reports/daily/generate

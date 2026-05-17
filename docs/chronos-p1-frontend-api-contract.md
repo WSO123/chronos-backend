@@ -84,6 +84,8 @@ uv run python scripts/verify_local.py --smoke auth
 
 注册用户并返回 access / refresh token。MVP 阶段用于正式 token 闭环，不承担复杂账号体系。
 
+P1 注册只做 email + password，不接短信验证码、邮件验证、OTP、OAuth 或第三方账号服务；前端也不要为这些能力预留阻塞式流程。
+
 Request:
 
 ```json

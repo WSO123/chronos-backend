@@ -118,6 +118,8 @@ POST /api/v1/auth/logout
 GET  /api/v1/auth/me
 ```
 
+注册 MVP 只做 email + password，不接短信验证码、邮件验证、OTP、OAuth 或第三方账号服务。
+
 准备一组可用于前端联调和手动验收的 P1 demo 数据：
 
 ```bash
@@ -134,6 +136,12 @@ uv run python scripts/dev_seed_demo.py --password local-password --emit-token
 
 ```bash
 uv run python scripts/smoke_auth_token_loop.py
+```
+
+跑一遍 Bearer token 下真实 Capture 主链路 smoke 验证：
+
+```bash
+uv run python scripts/smoke_p1_bearer_capture_loop.py
 ```
 
 跑一遍 P1 主链路 smoke 验证：
@@ -177,6 +185,7 @@ uv run python scripts/generate_llm_acceptance_record.py --smoke-json /tmp/chrono
 ```bash
 uv run python scripts/verify_local.py --smoke auth
 uv run python scripts/verify_local.py --smoke p1-bearer
+uv run python scripts/verify_local.py --smoke p1-bearer-capture
 uv run python scripts/verify_local.py --smoke p3
 uv run python scripts/verify_local.py --smoke ai-mainline
 uv run python scripts/verify_local.py --smoke llm-fallback
@@ -193,6 +202,7 @@ P3: Data Source -> Capture / Inbox -> Today -> Energy -> Reminder Center -> Sche
 AI Mainline: Capture Parser -> Daily Planner -> Strategy Explanation -> Task Breakdown -> Daily Report -> Insight Detail
 Auth: Register -> Login -> Auth Me -> Business API -> Refresh Rotation -> Logout
 P1 Bearer: Seed Demo Token -> Auth Me -> Today -> Task Detail -> Focus -> Daily Report -> Me
+P1 Bearer Capture: Register -> Capture -> Inbox -> Today -> Task Detail -> Focus -> Daily Report -> Me
 ```
 
 **启动 API 后端 (热重载模式):**
@@ -245,6 +255,7 @@ uv run alembic upgrade head
 uv run python scripts/dev_seed_demo.py
 uv run python scripts/smoke_auth_token_loop.py
 uv run python scripts/smoke_p1_bearer_execution_loop.py
+uv run python scripts/smoke_p1_bearer_capture_loop.py
 uv run python scripts/smoke_p1_execution_loop.py
 uv run python scripts/smoke_p2_goal_insight_loop.py
 uv run python scripts/smoke_p3_natural_growth_loop.py
@@ -258,6 +269,7 @@ git diff --check
 `scripts/dev_seed_user.py` 和 `scripts/dev_seed_demo.py` 都支持 `--password` 写入本地登录密码，配合 `--emit-token` 可输出 JWT token pair，方便前端从开发态 header 迁移到 Bearer token 联调。
 `scripts/smoke_auth_token_loop.py` 用于验证 Auth token 闭环：register、login、Bearer 访问业务 API、refresh token 轮换和 logout 撤销。
 `scripts/smoke_p1_bearer_execution_loop.py` 用于验证 Bearer token 模式下 P1 主闭环：demo token、Today、Task Detail、Focus、Daily Report 和 Me Overview。
+`scripts/smoke_p1_bearer_capture_loop.py` 用于验证 Bearer token 模式下真实输入闭环：register、Capture、Inbox confirm、Today、Task Detail、Focus、Daily Report 和 Me Overview。
 `scripts/smoke_p1_execution_loop.py` 用于开发后快速防回归，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_p2_goal_insight_loop.py` 用于验证 P2 Goals / Reports / Insights 合同，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_p3_natural_growth_loop.py` 用于验证 P3 数据接入、精力、外部输入、提醒、Me 入口状态和调度契约，每次默认创建一个独立 smoke 用户，不会重置数据库。
