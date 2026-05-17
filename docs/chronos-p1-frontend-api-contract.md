@@ -1289,6 +1289,8 @@ GET /me/overview
 uv run alembic upgrade head
 uv run python scripts/dev_seed_demo.py
 uv run python scripts/smoke_p1_execution_loop.py
+uv run python scripts/smoke_p1_mainline_contract.py
+uv run python scripts/verify_local.py --smoke p1-mainline
 uv run python -m unittest discover -s tests
 ```
 

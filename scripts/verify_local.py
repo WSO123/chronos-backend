@@ -39,6 +39,7 @@ def _parse_args() -> argparse.Namespace:
         action="append",
         choices=(
             "p1",
+            "p1-mainline",
             "p1-bearer",
             "p1-bearer-capture",
             "p2",
@@ -86,7 +87,7 @@ def _build_steps(args: argparse.Namespace) -> list[VerificationStep]:
         ]
     )
 
-    selected_smoke = [*args.smoke, "p1", "p2", "p3"] if args.all_smoke else args.smoke
+    selected_smoke = [*args.smoke, "p1", "p1-mainline", "p2", "p3"] if args.all_smoke else args.smoke
     for smoke in _unique_preserving_order(selected_smoke):
         steps.append(_smoke_step(smoke))
     if args.planner_eval_policy:
@@ -123,6 +124,7 @@ def _build_steps(args: argparse.Namespace) -> list[VerificationStep]:
 def _smoke_step(smoke: str) -> VerificationStep:
     scripts = {
         "p1": "scripts/smoke_p1_execution_loop.py",
+        "p1-mainline": "scripts/smoke_p1_mainline_contract.py",
         "p1-bearer": "scripts/smoke_p1_bearer_execution_loop.py",
         "p1-bearer-capture": "scripts/smoke_p1_bearer_capture_loop.py",
         "p2": "scripts/smoke_p2_goal_insight_loop.py",

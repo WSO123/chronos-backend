@@ -185,6 +185,7 @@ git diff --check
 
 ```bash
 uv run python scripts/verify_local.py --smoke p1-bearer-capture
+uv run python scripts/verify_local.py --smoke p1-mainline
 ```
 
 核心状态联动变更：

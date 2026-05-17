@@ -156,6 +156,12 @@ uv run python scripts/smoke_p1_bearer_capture_loop.py
 uv run python scripts/smoke_p1_execution_loop.py
 ```
 
+跑一遍 P1 主线契约 smoke 验证：
+
+```bash
+uv run python scripts/smoke_p1_mainline_contract.py
+```
+
 跑一遍 P2 目标 / 洞察 smoke 验证：
 
 ```bash
@@ -193,6 +199,7 @@ uv run python scripts/verify_local.py --smoke auth
 uv run python scripts/verify_local.py --smoke auth-errors
 uv run python scripts/verify_local.py --smoke p1-bearer
 uv run python scripts/verify_local.py --smoke p1-bearer-capture
+uv run python scripts/verify_local.py --smoke p1-mainline
 uv run python scripts/verify_local.py --smoke p3
 uv run python scripts/verify_local.py --smoke ai-mainline
 uv run python scripts/verify_local.py --smoke llm-fallback
@@ -266,6 +273,7 @@ uv run python scripts/smoke_auth_frontend_error_contract.py
 uv run python scripts/smoke_p1_bearer_execution_loop.py
 uv run python scripts/smoke_p1_bearer_capture_loop.py
 uv run python scripts/smoke_p1_execution_loop.py
+uv run python scripts/smoke_p1_mainline_contract.py
 uv run python scripts/smoke_p2_goal_insight_loop.py
 uv run python scripts/smoke_p3_natural_growth_loop.py
 uv run python scripts/evaluate_planning_engine.py
@@ -281,6 +289,7 @@ git diff --check
 `scripts/smoke_p1_bearer_execution_loop.py` 用于验证 Bearer token 模式下 P1 主闭环：demo token、Today、Task Detail、Focus、Daily Report 和 Me Overview。
 `scripts/smoke_p1_bearer_capture_loop.py` 用于验证 Bearer token 模式下真实输入闭环：register、Capture、Inbox confirm、Today、Task Detail、Focus、Daily Report 和 Me Overview。
 `scripts/smoke_p1_execution_loop.py` 用于开发后快速防回归，每次默认创建一个独立 smoke 用户，不会重置数据库。
+`scripts/smoke_p1_mainline_contract.py` 用于验证 P1 主线契约：Capture / Inbox / Today / Task Detail / Focus / Today 快速操作 / Daily Report / Me Overview 的状态口径保持一致。
 `scripts/smoke_p2_goal_insight_loop.py` 用于验证 P2 Goals / Reports / Insights 合同，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_p3_natural_growth_loop.py` 用于验证 P3 数据接入、精力、外部输入、提醒、Me 入口状态和调度契约，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_core_ai_mainline.py` 用于验证核心 bounded agents 主线：Capture Parser、Daily Planner、Strategy Explanation、Task Breakdown、Daily Report、Insight Detail 都被调用并写入 `AIJob`，每次默认创建一个独立 smoke 用户，不会重置数据库。
