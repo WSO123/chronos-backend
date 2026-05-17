@@ -57,10 +57,35 @@ class PromptRegistry:
 
 prompt_registry = PromptRegistry(
     {
+        "capture_parser": PromptSpec(
+            key="capture_parser",
+            version="p2-capture-parser-agent-v1",
+            resource_path="capture_parser/p2-capture-parser-agent-v1.md",
+        ),
+        "daily_report": PromptSpec(
+            key="daily_report",
+            version="p2-daily-report-agent-v1",
+            resource_path="daily_report/p2-daily-report-agent-v1.md",
+        ),
+        "insight_detail": PromptSpec(
+            key="insight_detail",
+            version="p2-insight-detail-agent-v1",
+            resource_path="insight_detail/p2-insight-detail-agent-v1.md",
+        ),
         "daily_planner": PromptSpec(
             key="daily_planner",
             version="p2-daily-planner-agent-v1",
             resource_path="daily_planner/p2-daily-planner-agent-v1.md",
-        )
+        ),
+        "strategy_explanation": PromptSpec(
+            key="strategy_explanation",
+            version="p2-strategy-explanation-agent-v1",
+            resource_path="strategy_explanation/p2-strategy-explanation-agent-v1.md",
+        ),
+        "task_breakdown": PromptSpec(
+            key="task_breakdown",
+            version="p2-task-breakdown-agent-v1",
+            resource_path="task_breakdown/p2-task-breakdown-agent-v1.md",
+        ),
     }
 )

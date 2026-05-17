@@ -71,6 +71,7 @@ P2 新增字段：
 - `summary`
 - `primary_reason`
 - `factors`
+- `score_explanation`
 - `explanation`
 - `task_rationales`
 - `source`
@@ -90,7 +91,7 @@ P2 新增字段：
 说明：
 
 - `model_name` / `prompt_version` 指向最终落库的 Planning Engine strategy snapshot。
-- `ai_job_id` 指向 Daily Planner Agent shell 的调用记录，可通过 `GET /api/v1/ai-jobs/{id}` 查看 provider、model、status、fallback 和 metadata。
+- `ai_job_id` 指向 Daily Planner Agent 的调用记录，可通过 `GET /api/v1/ai-jobs/{id}` 查看 provider、model、status、fallback 和 metadata。
 - `AIJob.job_metadata.prompt_checksum` 可用于确认本次 planner agent 使用的具体 prompt 内容版本；前端一般不需要展示。
 - `AIJob.latency_ms`、`job_metadata.failure_type`、`job_metadata.provider_latency_ms`、`job_metadata.provider_response_id` 和 `job_metadata.usage` 只用于 Strategy Detail 深层解释、调试或后台观测，不建议进入 Today 首屏；真实 provider 返回 usage 时这里可能包含 token 统计。
 - Strategy Detail 可以把 `ai_job_id` 用于调试或深层解释；Today 首屏不展示这个字段。
@@ -135,6 +136,57 @@ P2 新增字段：
 - `planner_agent_latency_ms` 和 `planner_agent_failure_type` 只用于 Strategy Detail 深层解释、调试或后台观测；Today 首屏不展示。
 - 这些字段用于 Strategy Detail 的信任解释，不建议放到 Today 首屏。
 
+`score_explanation` 是 Planning Engine 从 `score_breakdown` 归纳出的可读解释：
+
+```json
+{
+  "score_explanation": {
+    "summary": "Planning Engine 将 3 个主序列任务压在约 120 分钟内，容量参考为 150 分钟。",
+    "signals": [
+      {
+        "key": "high_value_protection",
+        "title": "高价值优先",
+        "message": "1 个任务被放入保护区，优先处理重要或紧急事项。",
+        "signal": "positive",
+        "score": 1
+      }
+    ],
+    "source": "planning-engine-score-breakdown-v1"
+  }
+}
+```
+
+前端约束：
+
+- `score_explanation` 只用于 Strategy Detail，不进入 Today 首屏。
+- `signals` 建议最多展示 2-4 条，作为解释而不是控制项。
+- `signal` 当前可能是 `positive`、`info`、`watch`、`risk`。
+
+`planner_review` 来自 Daily Planner Agent 对 Planning Engine 结果的审阅：
+
+```json
+{
+  "planner_review": {
+    "summary": "Planning Engine 的排序可以直接执行，LLM 只补充轻量审阅，不改变任务顺序。",
+    "suggestions": [
+      {
+        "key": "start_with_first_task",
+        "title": "先开始第一项",
+        "message": "当前排序已经可执行，先从主序列第一项开始，完成后再看下一步。",
+        "signal": "positive"
+      }
+    ],
+    "source": "daily_planner_agent_v1"
+  }
+}
+```
+
+前端约束：
+
+- `planner_review` 只出现在 Strategy Detail，不放入 Today 首屏。
+- 它是 critique / suggestion，不表示系统已修改任务顺序。
+- 当 Daily Planner Agent fallback 或旧计划没有该字段时，`planner_review` 可以为 `null`。
+
 `task_rationales[]` 中每个任务会包含 `score_breakdown`：
 
 ```json
@@ -143,6 +195,8 @@ P2 新增字段：
   "title": "Draft proposal",
   "score_breakdown": {
     "total_score": 88,
+    "score_version": "planning-engine-v1",
+    "score_band": "high",
     "value_score": 30,
     "urgency_score": 16,
     "dependency_score": 18,
@@ -154,14 +208,25 @@ P2 新增字段：
     "priority_score": 16,
     "daily_capacity_minutes": 150,
     "selected_for_today": true
-  }
+  },
+  "dominant_factor": "deadline_soon",
+  "dominant_reason": "截止时间较近，因此排序会适度提前。",
+  "score_signals": [
+    {
+      "key": "deadline_soon",
+      "title": "截止时间接近",
+      "message": "截止时间较近，因此排序会适度提前。",
+      "signal": "watch",
+      "score": 16
+    }
+  ]
 }
 ```
 
 前端约束：
 
 - `score_breakdown` 是解释数据，不要在 Today 首屏展示成复杂驾驶舱。
-- Strategy Detail 可以按需展示 2-3 个最关键因子。
+- Strategy Detail 优先展示 `dominant_reason` 和 `score_signals`，不要让前端自行解释原始权重。
 - `selected_for_today=false` 且 `rollover_reason=capacity` 表示任务被系统滚动到未来，不代表任务被用户手动延后；此时 `item_status` 仍可为 `planned`，前端应以 `section=rolled_over` 判断展示位置。
 - 若 `capacity_status=overloaded`，Today 可在 Insights Preview 展示一条轻量风险提示，但不要展示完整容量面板。
 
@@ -300,7 +365,10 @@ anchor_date=YYYY-MM-DD
 
 - Insight Detail 是二级页。
 - 默认控制条数，避免抢走行动感。
-- 当前是规则聚合，不接真实 LLM。
+- 当前已接入 Insight Detail Agent，但仍保持只读。
+- `source.generated_by` 成功时为 `insight-agent-v1`，fallback 时为 `rule-insight-v1`。
+- `source` 可返回 `ai_job_id`、`ai_job_status`、`model_name`、`prompt_version`、`fallback_reason`，用于调试和来源展示。
+- Agent 只改写 `behavior_patterns`、`recommendations`、`strategy_notes`，不改变 `overview` 和 `efficiency_windows`。
 
 ## 8. Me
 

@@ -2,8 +2,10 @@ import unittest
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from app.ai.providers.base import LLMProviderError
 from app.models.activity_event import ActivityEvent
-from app.models.enums import DailyPlanItemStatus, DataSourceType, ValueLevel
+from app.models.ai_job import AIJob
+from app.models.enums import AIJobStatus, AIJobType, DailyPlanItemStatus, DataSourceType, ValueLevel
 from app.models.report import DailyReport
 from app.services.data_source_service import data_source_service
 from app.services.focus_service import focus_service
@@ -11,10 +13,19 @@ from app.services.goal_service import goal_service
 from app.services.me_service import me_service
 from app.services.planning_service import planning_service
 from app.services.reminder_service import reminder_service
-from app.services.report_service import report_service
+from app.services.report_service import ReportService, report_service
 from app.services.task_service import task_service
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
+
+
+class FailingDailyReportAgent:
+    prompt_version = "failing-daily-report-agent"
+    prompt_checksum = "0" * 64
+
+    def run(self, **kwargs):
+        del kwargs
+        raise LLMProviderError("daily report provider unavailable")
 
 
 class ReportAndMeServiceTests(unittest.TestCase):
@@ -198,7 +209,43 @@ class ReportAndMeServiceTests(unittest.TestCase):
         self.assertEqual(report.generated_from_plan_version, 1)
         self.assertTrue(report.ai_summary)
         self.assertTrue(report.ai_suggestions)
-        self.assertIn("DAILY_REPORT_GENERATED", {event.event_type for event in events})
+        report_jobs = (
+            self.db.query(AIJob)
+            .filter(AIJob.user_id == self.user.id, AIJob.job_type == AIJobType.DAILY_REPORT_GENERATOR)
+            .all()
+        )
+        report_event = next(event for event in events if event.event_type == "DAILY_REPORT_GENERATED")
+        self.assertEqual(len(report_jobs), 1)
+        self.assertEqual(report_jobs[0].status, AIJobStatus.SUCCEEDED)
+        self.assertEqual(report_jobs[0].result_entity_type, "report")
+        self.assertEqual(report_jobs[0].result_entity_id, report.id)
+        self.assertEqual(report_jobs[0].provider, "mock")
+        self.assertEqual(report_jobs[0].prompt_version, "p2-daily-report-agent-v1")
+        self.assertEqual(report_event.payload["ai_job_id"], str(report_jobs[0].id))
+        self.assertEqual(report_event.payload["ai_job_status"], "succeeded")
+
+    def test_generate_daily_report_falls_back_when_agent_fails(self):
+        service = ReportService(report_agent=FailingDailyReportAgent())
+
+        report = service.generate_daily_report(self.db, user_id=self.user.id, report_date=self.report_date)
+        report_job = (
+            self.db.query(AIJob)
+            .filter(AIJob.user_id == self.user.id, AIJob.job_type == AIJobType.DAILY_REPORT_GENERATOR)
+            .one()
+        )
+        report_event = (
+            self.db.query(ActivityEvent)
+            .filter(ActivityEvent.user_id == self.user.id, ActivityEvent.event_type == "DAILY_REPORT_GENERATED")
+            .one()
+        )
+
+        self.assertEqual(report.ai_summary, "今天还没有形成可复盘的执行数据。")
+        self.assertEqual(report.ai_suggestions, ["明天先从一个清晰的小任务开始，让 Today 有一个稳定入口。"])
+        self.assertEqual(report_job.status, AIJobStatus.SUCCEEDED_WITH_FALLBACK)
+        self.assertEqual(report_job.job_metadata["fallback_reason"], "daily_report_agent_failed")
+        self.assertEqual(report_job.job_metadata["failure_type"], "provider_error")
+        self.assertEqual(report_event.payload["ai_job_id"], str(report_job.id))
+        self.assertEqual(report_event.payload["ai_job_status"], "succeeded_with_fallback")
 
     def test_get_or_generate_daily_report_is_idempotent_until_refresh(self):
         task_service.create_task(self.db, user_id=self.user.id, title="Report task")

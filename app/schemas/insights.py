@@ -40,6 +40,11 @@ class InsightSourceResponse(BaseModel):
     generated_by: str
     period_days: int
     data_points: int
+    ai_job_id: str | None = None
+    ai_job_status: str | None = None
+    model_name: str | None = None
+    prompt_version: str | None = None
+    fallback_reason: str | None = None
 
 
 class InsightDetailResponse(BaseModel):

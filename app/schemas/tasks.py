@@ -203,6 +203,9 @@ class TaskBreakdownAIJobResponse(BaseModel):
     result_entity_type: str | None
     result_entity_id: uuid.UUID | None
     error_message: str | None
+    provider: str | None
+    model: str | None
+    prompt_version: str | None
     job_metadata: dict
 
 

@@ -55,7 +55,7 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
         200,
         "get AI job",
     )
-    if ai_job["status"] != "succeeded_with_fallback":
+    if ai_job["status"] not in {"succeeded", "succeeded_with_fallback"}:
         raise RuntimeError(f"unexpected AI job status: {ai_job['status']}")
 
     today = _expect(client.get("/api/v1/today", headers=headers), 200, "get today")

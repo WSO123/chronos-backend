@@ -10,9 +10,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.agents.daily_planner import DailyPlannerAgent, daily_planner_agent
+from app.ai.agents.strategy_explanation import (
+    StrategyExplanationAgent,
+    strategy_explanation_agent as default_strategy_explanation_agent,
+)
 from app.ai.providers.base import LLMProviderError, empty_llm_usage
 from app.ai.providers.registry import llm_provider_registry
 from app.ai.schemas.planning import DailyPlannerOutput
+from app.ai.schemas.strategy_explanation import StrategyExplanationOutput
 from app.models.activity_event import ActivityEvent
 from app.models.ai_job import AIJob
 from app.models.daily_plan import DailyPlan, DailyPlanItem, PlanRevision, StrategySnapshot
@@ -71,8 +76,14 @@ class PlanningContext:
 
 
 class PlanningService:
-    def __init__(self, *, planner_agent: DailyPlannerAgent | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        planner_agent: DailyPlannerAgent | None = None,
+        strategy_explanation_agent: StrategyExplanationAgent | None = None,
+    ) -> None:
         self.planner_agent = planner_agent or daily_planner_agent
+        self.strategy_explanation_agent = strategy_explanation_agent or default_strategy_explanation_agent
 
     def get_today(self, db: Session, *, user_id: uuid.UUID, plan_date: date | None = None) -> dict:
         resolved_date = self._resolve_plan_date(db, user_id=user_id, plan_date=plan_date)
@@ -423,6 +434,9 @@ class PlanningService:
                 "output_applied": True,
                 "confidence": agent_result.output.confidence,
                 "item_count": len(agent_result.output.items),
+                "review_summary": strategy_payload["score_factors"].get("planner_agent_review_summary"),
+                "suggestions": strategy_payload["score_factors"].get("planner_agent_suggestions", []),
+                "suggestion_count": len(strategy_payload["score_factors"].get("planner_agent_suggestions", [])),
                 "prompt_checksum": agent_result.prompt_checksum,
                 "provider_response_id": getattr(agent_result, "response_id", None),
                 "usage": getattr(agent_result, "usage", empty_llm_usage()),
@@ -458,6 +472,8 @@ class PlanningService:
             "planner_agent_latency_ms": job.latency_ms,
             "planner_agent_failure_type": job.job_metadata.get("failure_type"),
             "planner_agent_output_applied": job.job_metadata.get("output_applied", False),
+            "planner_agent_review_summary": job.job_metadata.get("review_summary"),
+            "planner_agent_suggestions": job.job_metadata.get("suggestions", []),
         }
         return {"planned_tasks": planned_tasks, "strategy_payload": strategy_payload, "ai_job": job}
 
@@ -543,8 +559,32 @@ class PlanningService:
             "summary": output.strategy_summary,
             "mode": PlanningPreference(output.mode),
             "primary_reason": output.primary_reason,
+            "score_factors": {
+                **strategy_payload["score_factors"],
+                "planner_agent_review_summary": self._clean_optional_planner_text(output.review_summary),
+                "planner_agent_suggestions": self._clean_planner_suggestions(output.suggestions),
+            },
         }
         return applied_tasks, strategy_payload
+
+    def _clean_optional_planner_text(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = " ".join(value.strip().split())
+        return cleaned or None
+
+    def _clean_planner_suggestions(self, suggestions: list) -> list[dict]:
+        cleaned_suggestions: list[dict] = []
+        for suggestion in suggestions[:3]:
+            item = {
+                "key": self._clean_optional_planner_text(suggestion.key),
+                "title": self._clean_optional_planner_text(suggestion.title),
+                "message": self._clean_optional_planner_text(suggestion.message),
+                "signal": suggestion.signal,
+            }
+            if item["key"] and item["title"] and item["message"]:
+                cleaned_suggestions.append(item)
+        return cleaned_suggestions
 
     def _planning_context(self, db: Session, *, user_id: uuid.UUID, plan_date: date) -> PlanningContext:
         settings = self._settings_for(db, user_id=user_id)
@@ -625,8 +665,11 @@ class PlanningService:
             + postponement_penalty
             + priority_score
         )
+        total_score = int(total_score)
         return {
-            "total_score": int(total_score),
+            "score_version": "planning-engine-v1",
+            "total_score": total_score,
+            "score_band": self._score_band(total_score),
             "value_score": int(value_score),
             "goal_value_score": int(goal_value_score),
             "urgency_score": int(urgency_score),
@@ -644,6 +687,13 @@ class PlanningService:
             "energy_applied": context.energy_has_data,
             "behavior": behavior,
         }
+
+    def _score_band(self, total_score: int) -> str:
+        if total_score >= 70:
+            return "high"
+        if total_score >= 40:
+            return "medium"
+        return "low"
 
     def _urgency_score(self, *, task: Task, plan_date: date) -> int:
         if task.deadline is None:
@@ -1076,6 +1126,21 @@ class PlanningService:
         strategy = self._current_strategy(db, plan=plan)
         revision = self._current_revision(db, plan=plan)
         factors = self._strategy_factors(plan=plan, items=items, score_factors=strategy.score_factors)
+        task_rationales = [self._strategy_task_rationale_response(item) for item in items]
+        score_explanation = self._strategy_score_explanation(
+            strategy=strategy,
+            factors=factors,
+            task_rationales=task_rationales,
+        )
+        energy = self._strategy_energy_explanation(db, plan=plan)
+        explanation_result = self._run_strategy_explanation_agent(
+            db,
+            plan=plan,
+            strategy=strategy,
+            factors=factors,
+            score_explanation=score_explanation,
+            task_rationales=task_rationales,
+        )
         return {
             "date": plan.plan_date,
             "daily_plan_id": plan.id,
@@ -1091,16 +1156,141 @@ class PlanningService:
                 "created_at": revision.created_at,
             },
             "factors": factors,
-            "explanation": self._strategy_explanation(strategy=strategy, factors=factors),
-            "energy": self._strategy_energy_explanation(db, plan=plan),
-            "task_rationales": [self._item_response(item) for item in items],
+            "explanation": explanation_result["explanation"],
+            "energy": energy,
+            "score_explanation": score_explanation,
+            "planner_review": self._planner_review(score_factors=strategy.score_factors),
+            "task_rationales": task_rationales,
             "source": {
                 "strategy_snapshot_id": strategy.id,
                 "ai_job_id": strategy.score_factors.get("ai_job_id"),
                 "model_name": strategy.model_name,
                 "prompt_version": strategy.prompt_version,
                 "generated_at": strategy.created_at,
+                "explanation_ai_job_id": explanation_result["ai_job_id"],
+                "explanation_model_name": explanation_result["model_name"],
+                "explanation_prompt_version": explanation_result["prompt_version"],
+                "explanation_status": explanation_result["status"],
             },
+        }
+
+    def _planner_review(self, *, score_factors: dict) -> dict | None:
+        suggestions = score_factors.get("planner_agent_suggestions") or []
+        summary = score_factors.get("planner_agent_review_summary")
+        if not summary and not suggestions:
+            return None
+        return {
+            "summary": summary,
+            "suggestions": suggestions[:3],
+            "source": "daily_planner_agent_v1",
+        }
+
+    def _strategy_score_explanation(
+        self,
+        *,
+        strategy: StrategySnapshot,
+        factors: dict,
+        task_rationales: list[dict],
+    ) -> dict:
+        if factors["task_count"] <= 0:
+            return {
+                "summary": "当前没有需要排序的主执行任务，Planning Engine 暂时只保留轻量入口。",
+                "signals": [],
+                "source": "planning-engine-score-breakdown-v1",
+            }
+
+        capacity = factors["daily_capacity_minutes"]
+        selected_minutes = factors["selected_estimated_minutes"]
+        if factors["over_capacity_minutes"]:
+            summary = (
+                f"Planning Engine 识别到受保护任务约 {selected_minutes} 分钟，"
+                f"已超过今日容量参考 {capacity} 分钟，因此优先解释风险和高价值保护。"
+            )
+        elif capacity:
+            summary = (
+                f"Planning Engine 将 {factors['task_count']} 个主序列任务压在约 {selected_minutes} 分钟内，"
+                f"容量参考为 {capacity} 分钟。"
+            )
+        else:
+            summary = f"Planning Engine 用价值、截止时间、依赖和任务大小为 {factors['task_count']} 个任务生成执行顺序。"
+
+        signals: list[dict] = []
+        if factors["over_capacity_minutes"]:
+            signals.append(
+                {
+                    "key": "capacity_overload",
+                    "title": "受保护任务偏重",
+                    "message": f"主执行序列超过容量约 {factors['over_capacity_minutes']} 分钟，建议先完成第一项再决定是否拉回其他任务。",
+                    "signal": "risk",
+                    "score": factors["over_capacity_minutes"],
+                }
+            )
+        elif factors["rolled_over_count"]:
+            signals.append(
+                {
+                    "key": "capacity_rollover",
+                    "title": "容量保护生效",
+                    "message": f"{factors['rolled_over_count']} 个任务被滚动到未来，避免今天的主序列变得不可执行。",
+                    "signal": "watch",
+                    "score": factors["rolled_over_count"],
+                }
+            )
+        if factors["pinned_count"]:
+            signals.append(
+                {
+                    "key": "high_value_protection",
+                    "title": "高价值优先",
+                    "message": f"{factors['pinned_count']} 个任务被放入保护区，优先处理重要或紧急事项。",
+                    "signal": "positive",
+                    "score": factors["pinned_count"],
+                }
+            )
+        if factors["dependency_protected_count"]:
+            signals.append(
+                {
+                    "key": "dependency_order",
+                    "title": "依赖顺序保护",
+                    "message": f"{factors['dependency_protected_count']} 个前置任务被提前，减少后续任务被卡住的风险。",
+                    "signal": "info",
+                    "score": factors["dependency_protected_count"],
+                }
+            )
+        if factors["user_adjusted_count"]:
+            signals.append(
+                {
+                    "key": "user_adjustment",
+                    "title": "用户修正已读取",
+                    "message": f"{factors['user_adjusted_count']} 个任务使用了你的优先级修正，排序仍保留可校正性。",
+                    "signal": "positive",
+                    "score": factors["user_adjusted_count"],
+                }
+            )
+        if factors["energy_applied"]:
+            signals.append(
+                {
+                    "key": "energy_fit",
+                    "title": "精力信号已应用",
+                    "message": f"今日精力为 {factors['energy_level']}，已影响容量保护或任务适配分。",
+                    "signal": "info",
+                    "score": None,
+                }
+            )
+        if not signals and task_rationales:
+            dominant = task_rationales[0].get("dominant_reason") or strategy.primary_reason
+            signals.append(
+                {
+                    "key": "balanced_order",
+                    "title": "稳定排序",
+                    "message": dominant,
+                    "signal": "info",
+                    "score": None,
+                }
+            )
+
+        return {
+            "summary": summary,
+            "signals": signals[:4],
+            "source": "planning-engine-score-breakdown-v1",
         }
 
     def _strategy_energy_explanation(self, db: Session, *, plan: DailyPlan) -> dict:
@@ -1211,6 +1401,140 @@ class PlanningService:
             explanation.append("今天会平衡价值、截止时间和任务大小，不把 Today 变成复杂驾驶舱。")
         return explanation[:4]
 
+    def _run_strategy_explanation_agent(
+        self,
+        db: Session,
+        *,
+        plan: DailyPlan,
+        strategy: StrategySnapshot,
+        factors: dict,
+        score_explanation: dict,
+        task_rationales: list[dict],
+    ) -> dict:
+        fallback_explanation = self._strategy_explanation(strategy=strategy, factors=factors)
+        provider = llm_provider_registry.current_provider()
+        job = ai_job_service.create_job(
+            db,
+            user_id=plan.user_id,
+            job_type=AIJobType.STRATEGY_EXPLANATION,
+            input_entity_type=EntityType.DAILY_PLAN.value,
+            input_entity_id=plan.id,
+            provider=provider.provider_name,
+            model=provider.model_name,
+            prompt_version=self.strategy_explanation_agent.prompt_version,
+            metadata={
+                "mode": "sync_structured_agent",
+                "strategy_snapshot_id": str(strategy.id),
+                "prompt_checksum": self.strategy_explanation_agent.prompt_checksum,
+                "fallback_generator": "rule-strategy-explanation-v1",
+            },
+            commit=False,
+        )
+        job.status = AIJobStatus.RUNNING
+        job.started_at = utc_now()
+        started = perf_counter()
+
+        try:
+            agent_result = self.strategy_explanation_agent.run(
+                strategy_context={
+                    "daily_plan_id": str(plan.id),
+                    "plan_date": plan.plan_date.isoformat(),
+                    "strategy_snapshot_id": str(strategy.id),
+                    "summary": strategy.summary,
+                    "mode": strategy.mode.value,
+                    "primary_reason": strategy.primary_reason,
+                    "score_explanation": score_explanation,
+                },
+                factors=factors,
+                task_rationales=self._strategy_explanation_task_context(task_rationales),
+                fallback_output={
+                    "explanation": fallback_explanation,
+                    "confidence": 0.68,
+                    "summary": strategy.summary,
+                },
+                provider=provider,
+            )
+            explanation = self._clean_strategy_explanation(agent_result.output)
+            job.provider = agent_result.provider
+            job.model = agent_result.model
+            job.prompt_version = agent_result.prompt_version
+            job.status = AIJobStatus.SUCCEEDED
+            job.job_metadata = {
+                **job.job_metadata,
+                "output_applied": True,
+                "line_count": len(explanation),
+                "confidence": agent_result.output.confidence,
+                "prompt_checksum": agent_result.prompt_checksum,
+                "provider_response_id": agent_result.response_id,
+                "usage": agent_result.usage,
+                "summary": agent_result.output.summary,
+            }
+        except Exception as exc:  # noqa: BLE001 - explanation must not block Strategy Detail.
+            explanation = fallback_explanation
+            job.status = AIJobStatus.SUCCEEDED_WITH_FALLBACK
+            job.error_message = str(exc)
+            job.job_metadata = {
+                **job.job_metadata,
+                "output_applied": False,
+                "fallback_reason": self._strategy_explanation_fallback_reason(exc),
+                "fallback_error_type": exc.__class__.__name__,
+                "fallback_root_error_type": self._root_error_type(exc),
+                "failure_type": self._planner_failure_type(exc),
+            }
+
+        job.result_entity_type = "strategy_snapshot"
+        job.result_entity_id = strategy.id
+        job.finished_at = utc_now()
+        job.latency_ms = max(0, int((perf_counter() - started) * 1000))
+        job.job_metadata = {
+            **job.job_metadata,
+            "provider_latency_ms": job.latency_ms,
+            "provider_observability_version": "v1",
+            "usage": self._planner_usage_metadata(job.job_metadata.get("usage")),
+        }
+        db.flush()
+        db.commit()
+        db.refresh(job)
+        return {
+            "explanation": explanation,
+            "ai_job_id": str(job.id),
+            "model_name": job.model,
+            "prompt_version": job.prompt_version,
+            "status": job.status.value,
+        }
+
+    def _strategy_explanation_task_context(self, task_rationales: list[dict]) -> list[dict]:
+        return [
+            {
+                "task_id": str(item["task_id"]),
+                "title": item["title"],
+                "section": item["section"].value if hasattr(item["section"], "value") else item["section"],
+                "sort_order": item["sort_order"],
+                "recommendation_reason": item["recommendation_reason"],
+                "estimated_duration_min": item["estimated_duration_min"],
+                "priority": item["priority"],
+                "value_level": item["value_level"].value if hasattr(item["value_level"], "value") else item["value_level"],
+                "deadline": item["deadline"].isoformat() if item["deadline"] else None,
+                "score_breakdown": item["score_breakdown"],
+                "dominant_factor": item.get("dominant_factor"),
+                "dominant_reason": item.get("dominant_reason"),
+                "score_signals": item.get("score_signals") or [],
+            }
+            for item in task_rationales[:8]
+        ]
+
+    def _clean_strategy_explanation(self, output: StrategyExplanationOutput) -> list[str]:
+        lines = [" ".join(line.strip().split()) for line in output.explanation]
+        cleaned = [line for line in lines if line]
+        if not cleaned:
+            raise ValueError("Strategy explanation agent returned no usable explanation")
+        return cleaned[:4]
+
+    def _strategy_explanation_fallback_reason(self, exc: Exception) -> str:
+        if isinstance(exc, ValueError):
+            return "strategy_explanation_agent_invalid_output"
+        return "strategy_explanation_agent_failed"
+
     def _over_capacity_minutes(self, *, selected_minutes: int, daily_capacity_minutes: int) -> int:
         if daily_capacity_minutes <= 0:
             return 0
@@ -1250,6 +1574,233 @@ class PlanningService:
             "deadline": item.task.deadline,
             "score_breakdown": item.score_breakdown or {},
         }
+
+    def _strategy_task_rationale_response(self, item: DailyPlanItem) -> dict:
+        response = self._item_response(item)
+        score_signals = self._task_score_signals(task=item.task, score_breakdown=response["score_breakdown"])
+        dominant = score_signals[0]
+        return {
+            **response,
+            "dominant_factor": dominant["key"],
+            "dominant_reason": dominant["message"],
+            "score_signals": score_signals[:4],
+        }
+
+    def _task_score_signals(self, *, task: Task, score_breakdown: dict) -> list[dict]:
+        signals: list[dict] = []
+        rollover_reason = score_breakdown.get("rollover_reason")
+        if rollover_reason == "capacity":
+            signals.append(
+                {
+                    "key": "capacity_rollover",
+                    "title": "滚动到未来",
+                    "message": "今日容量已优先留给更高价值或更紧急的主序列任务。",
+                    "signal": "watch",
+                    "score": None,
+                }
+            )
+        elif rollover_reason == "postponed":
+            signals.append(
+                {
+                    "key": "user_postponed",
+                    "title": "已延后",
+                    "message": "该任务保持可见，但不会重新挤入今天的主执行序列。",
+                    "signal": "info",
+                    "score": None,
+                }
+            )
+
+        urgency_score = int(score_breakdown.get("urgency_score") or 0)
+        if urgency_score >= 30:
+            signals.append(
+                {
+                    "key": "overdue_deadline",
+                    "title": "已超期",
+                    "message": "任务已超过截止时间，因此被提升到更靠前的位置。",
+                    "signal": "risk",
+                    "score": urgency_score,
+                }
+            )
+        elif urgency_score >= 24:
+            signals.append(
+                {
+                    "key": "due_today",
+                    "title": "今天截止",
+                    "message": "任务今天截止，因此需要在轻量事务前处理。",
+                    "signal": "risk",
+                    "score": urgency_score,
+                }
+            )
+        elif urgency_score > 0:
+            signals.append(
+                {
+                    "key": "deadline_soon",
+                    "title": "截止时间接近",
+                    "message": "截止时间较近，因此排序会适度提前。",
+                    "signal": "watch",
+                    "score": urgency_score,
+                }
+            )
+
+        goal_urgency_score = int(score_breakdown.get("goal_urgency_score") or 0)
+        if goal_urgency_score > 0:
+            signals.append(
+                {
+                    "key": "goal_deadline",
+                    "title": "目标节点接近",
+                    "message": "关联目标的截止时间正在接近，系统会保护它的下一步行动。",
+                    "signal": "watch",
+                    "score": goal_urgency_score,
+                }
+            )
+
+        dependency_score = int(score_breakdown.get("dependency_score") or 0)
+        if dependency_score > 0:
+            signals.append(
+                {
+                    "key": "dependency_unlock",
+                    "title": "前置任务",
+                    "message": "完成它可以解锁后续任务，因此被放到更靠前的位置。",
+                    "signal": "positive",
+                    "score": dependency_score,
+                }
+            )
+        elif dependency_score < 0:
+            signals.append(
+                {
+                    "key": "dependency_wait",
+                    "title": "等待前置任务",
+                    "message": "该任务依赖前置事项，排序会避免它过早进入主行动。",
+                    "signal": "info",
+                    "score": dependency_score,
+                }
+            )
+
+        user_preference_score = int(score_breakdown.get("user_preference_score") or 0)
+        if user_preference_score > 0:
+            signals.append(
+                {
+                    "key": "user_adjustment",
+                    "title": "用户修正",
+                    "message": "你的优先级或策略偏好已经进入本次排序。",
+                    "signal": "positive",
+                    "score": user_preference_score,
+                }
+            )
+
+        value_score = int(score_breakdown.get("value_score") or 0)
+        if value_score >= 30:
+            signals.append(
+                {
+                    "key": "high_value_task",
+                    "title": "高价值任务",
+                    "message": "这是高价值任务，系统会避免它被低价值事项挤掉。",
+                    "signal": "positive",
+                    "score": value_score,
+                }
+            )
+
+        goal_value_score = int(score_breakdown.get("goal_value_score") or 0)
+        if goal_value_score >= 12:
+            signals.append(
+                {
+                    "key": "high_value_goal",
+                    "title": "高价值目标",
+                    "message": "它服务于高价值目标，因此下一步行动会被适度保护。",
+                    "signal": "positive",
+                    "score": goal_value_score,
+                }
+            )
+
+        priority_score = int(score_breakdown.get("priority_score") or 0)
+        if priority_score >= 16:
+            signals.append(
+                {
+                    "key": "manual_priority",
+                    "title": "高优先级",
+                    "message": "任务优先级较高，因此排序更靠前。",
+                    "signal": "positive",
+                    "score": priority_score,
+                }
+            )
+
+        energy_fit_score = int(score_breakdown.get("energy_fit_score") or 0)
+        if score_breakdown.get("energy_applied") and energy_fit_score > 0:
+            signals.append(
+                {
+                    "key": "energy_fit",
+                    "title": "匹配今日精力",
+                    "message": f"任务形态匹配今日 {score_breakdown.get('energy_level', 'unknown')} 精力状态。",
+                    "signal": "info",
+                    "score": energy_fit_score,
+                }
+            )
+        elif score_breakdown.get("energy_applied") and energy_fit_score < 0:
+            signals.append(
+                {
+                    "key": "energy_mismatch",
+                    "title": "精力匹配偏弱",
+                    "message": "任务偏重，不太适合当前精力状态，因此分数被压低。",
+                    "signal": "watch",
+                    "score": energy_fit_score,
+                }
+            )
+
+        behavior_feedback_score = int(score_breakdown.get("behavior_feedback_score") or 0)
+        if behavior_feedback_score < 0:
+            signals.append(
+                {
+                    "key": "behavior_drag",
+                    "title": "历史执行阻力",
+                    "message": "近期延后或中断较多，系统会降低它进入主序列的力度。",
+                    "signal": "watch",
+                    "score": behavior_feedback_score,
+                }
+            )
+        elif behavior_feedback_score > 0:
+            signals.append(
+                {
+                    "key": "behavior_momentum",
+                    "title": "执行势能",
+                    "message": "近期完成反馈较好，排序会保留这个正向势能。",
+                    "signal": "positive",
+                    "score": behavior_feedback_score,
+                }
+            )
+
+        duration_fit_score = int(score_breakdown.get("duration_fit_score") or 0)
+        if duration_fit_score < 0:
+            signals.append(
+                {
+                    "key": "heavy_duration",
+                    "title": "任务偏重",
+                    "message": "预计耗时较长，系统会结合容量判断是否放入主序列。",
+                    "signal": "watch",
+                    "score": duration_fit_score,
+                }
+            )
+        elif duration_fit_score > 0 and task.value_level != ValueLevel.HIGH:
+            signals.append(
+                {
+                    "key": "duration_fit",
+                    "title": "容易开始",
+                    "message": "任务耗时适中，适合作为今天可执行序列的一部分。",
+                    "signal": "info",
+                    "score": duration_fit_score,
+                }
+            )
+
+        if not signals:
+            signals.append(
+                {
+                    "key": "balanced_order",
+                    "title": "平衡排序",
+                    "message": "该任务按价值、截止时间、优先级和任务大小综合排序。",
+                    "signal": "info",
+                    "score": int(score_breakdown.get("total_score") or 0),
+                }
+            )
+        return signals
 
     def _insights_preview(self, *, plan: DailyPlan, items: list[DailyPlanItem], progress: dict) -> dict:
         active_items = [

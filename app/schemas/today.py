@@ -121,6 +121,10 @@ class StrategyDetailSourceResponse(BaseModel):
     model_name: str | None
     prompt_version: str | None
     generated_at: datetime
+    explanation_ai_job_id: uuid.UUID | None = None
+    explanation_model_name: str | None = None
+    explanation_prompt_version: str | None = None
+    explanation_status: str | None = None
 
 
 class StrategyDetailEnergyResponse(BaseModel):
@@ -134,6 +138,39 @@ class StrategyDetailEnergyResponse(BaseModel):
     source: str
 
 
+class StrategyScoreSignalResponse(BaseModel):
+    key: str
+    title: str
+    message: str
+    signal: str
+    score: int | None = None
+
+
+class StrategyScoreExplanationResponse(BaseModel):
+    summary: str
+    signals: list[StrategyScoreSignalResponse] = Field(default_factory=list)
+    source: str
+
+
+class StrategyPlannerSuggestionResponse(BaseModel):
+    key: str
+    title: str
+    message: str
+    signal: str
+
+
+class StrategyPlannerReviewResponse(BaseModel):
+    summary: str | None = None
+    suggestions: list[StrategyPlannerSuggestionResponse] = Field(default_factory=list)
+    source: str
+
+
+class StrategyTaskRationaleResponse(TodayTaskResponse):
+    dominant_factor: str
+    dominant_reason: str
+    score_signals: list[StrategyScoreSignalResponse] = Field(default_factory=list)
+
+
 class StrategyDetailResponse(BaseModel):
     date: date
     daily_plan_id: uuid.UUID
@@ -145,7 +182,9 @@ class StrategyDetailResponse(BaseModel):
     factors: StrategyDetailFactorsResponse
     explanation: list[str]
     energy: StrategyDetailEnergyResponse
-    task_rationales: list[TodayTaskResponse]
+    score_explanation: StrategyScoreExplanationResponse
+    planner_review: StrategyPlannerReviewResponse | None = None
+    task_rationales: list[StrategyTaskRationaleResponse]
     source: StrategyDetailSourceResponse
 
 

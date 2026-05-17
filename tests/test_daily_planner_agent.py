@@ -60,6 +60,8 @@ class DailyPlannerAgentTests(unittest.TestCase):
         self.assertEqual(result.response_id, None)
         self.assertEqual(result.output.items[0].task_id, "task-1")
         self.assertEqual(result.output.strategy_summary, "Keep a steady order.")
+        self.assertEqual(result.output.suggestions[0].key, "start_with_first_task")
+        self.assertTrue(result.output.review_summary)
 
     def test_agent_uses_versioned_prompt_registry(self):
         agent = DailyPlannerAgent()
@@ -90,6 +92,7 @@ class DailyPlannerAgentTests(unittest.TestCase):
         template = prompt_registry.get("daily_planner")
         self.assertIn("Chronos Daily Planner Agent v1", provider.prompt)
         self.assertIn("Do not reorder tasks in v1.", provider.prompt)
+        self.assertIn("Review the Planning Engine result", provider.prompt)
         self.assertEqual(provider.metadata["prompt"]["key"], "daily_planner")
         self.assertEqual(provider.metadata["prompt"]["version"], template.version)
         self.assertEqual(provider.metadata["prompt"]["checksum"], template.checksum)
@@ -97,6 +100,7 @@ class DailyPlannerAgentTests(unittest.TestCase):
         self.assertEqual(result.prompt_checksum, template.checksum)
         self.assertEqual(result.usage["total_tokens"], 15)
         self.assertEqual(result.response_id, "recording-response")
+        self.assertEqual(provider.metadata["mock_output"]["suggestions"][0]["key"], "start_with_first_task")
 
     def test_prompt_registry_rejects_unknown_key(self):
         with self.assertRaises(PromptRegistryError):

@@ -654,6 +654,12 @@ uv run python scripts/verify_local.py --planner-eval
 uv run python scripts/smoke_p3_natural_growth_loop.py
 ```
 
+涉及 Capture Parser、Daily Planner、Strategy Explanation、Task Breakdown、Daily Report、Insight Detail 等 bounded agents 主线时，额外执行：
+
+```bash
+uv run python scripts/verify_local.py --smoke ai-mainline
+```
+
 需要完整 smoke 梯度时，可执行：
 
 ```bash

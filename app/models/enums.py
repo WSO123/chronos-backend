@@ -169,8 +169,10 @@ class EventSource(StrEnum):
 class AIJobType(StrEnum):
     CAPTURE_PARSER = "capture_parser"
     DAILY_PLANNER = "daily_planner"
+    STRATEGY_EXPLANATION = "strategy_explanation"
     TASK_BREAKDOWN = "task_breakdown"
     DAILY_REPORT_GENERATOR = "daily_report_generator"
+    INSIGHT_GENERATOR = "insight_generator"
 
 
 class AIJobStatus(StrEnum):

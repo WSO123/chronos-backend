@@ -126,6 +126,12 @@ uv run python scripts/smoke_p2_goal_insight_loop.py
 uv run python scripts/smoke_p3_natural_growth_loop.py
 ```
 
+跑一遍核心 AI 主线 smoke 验证：
+
+```bash
+uv run python scripts/smoke_core_ai_mainline.py
+```
+
 跑一遍 Planning Engine 固定场景评估：
 
 ```bash
@@ -142,6 +148,7 @@ uv run python scripts/generate_llm_acceptance_record.py --smoke-json /tmp/chrono
 
 ```bash
 uv run python scripts/verify_local.py --smoke p3
+uv run python scripts/verify_local.py --smoke ai-mainline
 uv run python scripts/verify_local.py --smoke llm-fallback
 uv run python scripts/verify_local.py --planner-eval
 uv run python scripts/verify_local.py --planner-eval-policy
@@ -153,6 +160,7 @@ uv run python scripts/verify_local.py --planner-eval-policy
 Capture -> Inbox -> Today -> Task Detail -> Focus -> Daily Report -> Me
 P2: Goals -> Goal Detail / Timeline -> Reports / Insights -> Me
 P3: Data Source -> Capture / Inbox -> Today -> Energy -> Reminder Center -> Scheduler
+AI Mainline: Capture Parser -> Daily Planner -> Strategy Explanation -> Task Breakdown -> Daily Report -> Insight Detail
 ```
 
 **启动 API 后端 (热重载模式):**
@@ -216,6 +224,7 @@ git diff --check
 `scripts/smoke_p1_execution_loop.py` 用于开发后快速防回归，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_p2_goal_insight_loop.py` 用于验证 P2 Goals / Reports / Insights 合同，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_p3_natural_growth_loop.py` 用于验证 P3 数据接入、精力、外部输入、提醒、Me 入口状态和调度契约，每次默认创建一个独立 smoke 用户，不会重置数据库。
+`scripts/smoke_core_ai_mainline.py` 用于验证核心 bounded agents 主线：Capture Parser、Daily Planner、Strategy Explanation、Task Breakdown、Daily Report、Insight Detail 都被调用并写入 `AIJob`，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/evaluate_planning_engine.py` 用于验证 Planning Engine 的固定场景排序、容量、Energy、依赖、用户修正、行为反馈、Goal 价值和超期 Goal 恢复，使用测试数据库，不污染开发数据库；可选 `--jsonl-output` 会写出离线评估记录，便于后续比较 provider / prompt。
 `scripts/compare_planner_eval_jsonl.py` 用于比较两份 Planning Engine eval JSONL，输出 scenario 通过状态、排序、容量和 `item_signals` 差异；默认只报告结果，`--fail-on-regression` 可作为显式手动 gate。
 `scripts/check_planner_eval_policy.py` 用于把一次 Planning Engine eval JSONL 与 [planner eval golden baseline](./docs/planner-eval-baselines/README.md) 对齐，识别缺失场景、失败场景、字段丢失和 baseline 变更。

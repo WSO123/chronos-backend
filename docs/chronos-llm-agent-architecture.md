@@ -288,9 +288,9 @@ POST /api/v1/ai-jobs/{job_id}/retry
 
 ---
 
-## 7. P1 Agent 设计
+## 7. 核心 Agent 设计
 
-P1 只实现四类 Agent。
+当前优先服务 Capture -> Inbox -> Today -> Task Detail -> Focus -> Report 主线，先实现低风险、可解释、可回退的核心 Agent。
 
 ### 7.1 Capture Parser
 
@@ -317,6 +317,14 @@ P1 只实现四类 Agent。
 - 不直接创建正式 Task / Goal。
 - 用户确认后再由 InboxService 创建正式对象。
 
+当前实现状态：
+
+- 已接入 `CaptureParserAgent`，使用 prompt registry 中的 `p2-capture-parser-agent-v1`。
+- 创建 Capture 时同步创建 `AIJob(job_type=capture_parser)`，记录 provider、model、prompt version、prompt checksum、latency、usage 和 fallback 信息。
+- 默认 mock provider 使用 rule parser 输出作为 `mock_output`，保证本地不依赖真实 LLM。
+- Agent 输出只写入 `AIParseResult` 和 `InboxItem`，`AIJob.result_entity` 指向 InboxItem。
+- Agent / provider 失败或输出不合法时，使用 rule parser fallback，并标记 `AIJob.status=succeeded_with_fallback`。
+
 建议输出 schema：
 
 ```python
@@ -324,25 +332,22 @@ from datetime import date
 from typing import Literal
 from pydantic import BaseModel, Field
 
-class ParsedItem(BaseModel):
+class CaptureParserOutput(BaseModel):
+    result_type: Literal["task", "goal", "idea", "calendar_item", "unknown"]
     item_type: Literal["task", "goal", "idea", "unknown"]
     title: str
     description: str | None = None
     estimated_duration_min: int | None = None
     suggested_priority: int | None = None
     suggested_deadline: date | None = None
-    suggested_goal_id: str | None = None
     confidence: float = Field(ge=0, le=1)
-
-class CaptureParseOutput(BaseModel):
-    items: list[ParsedItem]
-    summary: str | None = None
+    rationale: str | None = None
 ```
 
 失败 fallback：
 
-- 将原始输入作为 `InboxItem`。
-- `item_type = unknown`
+- 使用 rule parser 结果生成 `AIParseResult` 和 `InboxItem`。
+- 如果 rule parser 也无法判断，则 `item_type = unknown`。
 - `AIJob.status = succeeded_with_fallback`
 - 用户仍可手动确认 / 编辑。
 
@@ -358,15 +363,15 @@ class CaptureParseOutput(BaseModel):
 
 - 已落地 Planning Engine v1，作为 deterministic planner core 和未来 LLM Daily Planner 的 fallback。
 - Planning Engine v1 已读取任务价值、Goal 价值、任务 / Goal deadline、优先级、估时、依赖、用户修正、行为反馈、当日容量和 Energy 信号。
-- 已接入 Daily Planner Agent shell：`PlanningService` 先生成 deterministic candidates，再调用 Agent 返回 structured output。
+- 已接入 Daily Planner Agent critique / suggestion：`PlanningService` 先生成 deterministic candidates，再调用 Agent 返回 structured review。
 - 默认 provider 是 `mock`，模型标识为 `structured-mock-v1`；`AI_ENABLE_REAL_LLM=false` 时不会调用外部模型。
 - 已接入 OpenAI-compatible provider adapter，可通过 `LLM_PROVIDER=openai` 或 `LLM_PROVIDER=openai-compatible` 显式启用；本地和 CI 默认关闭。
 - 每次 plan revision 都记录一条 `AIJob(job_type=daily_planner)`，Strategy Detail `source.ai_job_id` 可追踪调用结果。
 - Daily Planner prompt 已迁移到 `app/ai/prompts/daily_planner/p2-daily-planner-agent-v1.md`，通过 prompt registry 加载，并在 `AIJob.job_metadata.prompt_checksum` 里记录 checksum。
 - Daily Planner provider 调用记录 `latency_ms`、`provider_latency_ms`、`failure_type`、`provider_response_id` 和 `usage`；真实 provider 返回 usage 时会写入 token 统计，mock / fallback 保持空结构。
-- v1 只允许 Agent 更新策略摘要和推荐理由；业务层校验禁止 Agent 改变任务集合、排序和 section。
+- v1 只允许 Agent 更新策略摘要、推荐理由和 Strategy Detail 的 `planner_review`；业务层校验禁止 Agent 改变任务集合、排序和 section。
 - Agent 失败或输出不合法时，`AIJob.status=succeeded_with_fallback`，继续使用 Planning Engine v1 输出。
-- 每个 `DailyPlanItem` 会保存 `score_breakdown`，Strategy Detail 可以解释排序，Today 首屏不展开完整评分。
+- 每个 `DailyPlanItem` 会保存 `score_breakdown`，包含 `score_version`、`score_band` 和各项评分因子；Strategy Detail 会再归纳出 `score_explanation`、`dominant_factor`、`dominant_reason` 和 `score_signals`，前端不需要自行解释原始权重。
 - 超出容量的非保护任务进入 `section=rolled_over`；系统容量滚动不把 Task 本体改为 postponed。
 - 已提供 `scripts/evaluate_planning_engine.py` 固定场景评估，覆盖容量滚动、受保护任务超载、低精力保护、高精力深度任务适配、依赖链保护、用户手动优先级修正、重复中断行为反馈、多 Goal 竞争和超期 Goal 恢复；支持 `--jsonl-output` 写出 run summary 和 scenario records。
 - 已提供 `scripts/compare_planner_eval_jsonl.py` 比较两次 planner eval JSONL，默认只报告 scenario 通过状态、排序和 `item_signals` 差异；显式加 `--fail-on-regression` 时才作为回归 gate。
@@ -394,7 +399,7 @@ class CaptureParseOutput(BaseModel):
 
 - `PlanRevision` 由 PlanningService 根据触发来源创建。
 - LLM 不直接输出完整 revision，也不直接修改当前 DailyPlan。
-- LLM 输出的是排序建议、分区建议和策略摘要；版本号、diff 和落库由业务 service 负责。
+- LLM 输出的是策略摘要、推荐理由、审阅总结和轻量建议；版本号、diff、排序和落库由业务 service 负责。
 
 建议输出 schema：
 
@@ -414,7 +419,11 @@ class DailyPlanOutput(BaseModel):
     strategy_summary: str
     primary_reason: str
     items: list[PlanItemOutput]
+    review_summary: str | None = None
+    suggestions: list[PlannerSuggestionOutput] = []
 ```
+
+`suggestions` 只用于 Strategy Detail 的二级解释，不进入 Today 首屏，不代表系统已经修改计划。
 
 重要原则：
 
@@ -425,7 +434,7 @@ P1 不建议完全依赖 LLM 排序。
 推荐策略：
 
 - Planning Engine v1 负责确定性基础顺序、容量筛选、`score_breakdown` 和 fallback。
-- LLM 后续只增强策略摘要、推荐理由、异常场景判断和可解释性，不直接写业务表。
+- LLM 后续只增强策略摘要、推荐理由、审阅建议、异常场景判断和可解释性，不直接写业务表。
 - Service 负责校验 LLM 输出是否违反依赖、容量和用户修正边界。
 - Planner 相关改动应优先更新固定评估场景，避免“接口通过但排序退化”。
 
@@ -451,7 +460,43 @@ Planning Engine v1 已使用的信号：
 - `AIJob.status = succeeded_with_fallback`
 - 用户仍然可以打开 Today。
 
-### 7.3 Task Breakdown
+### 7.3 Strategy Explanation
+
+目的：
+
+```text
+把 Planning Engine 的 score_breakdown 和策略因子解释成自然、可信、克制的策略说明。
+```
+
+输入：
+
+- StrategySnapshot
+- Strategy Detail factors
+- DailyPlanItem.score_breakdown
+- Strategy Detail `score_explanation`
+- Task rationales / dominant reasons / score signals
+
+输出：
+
+- 1-4 条 Strategy Detail explanation
+- AIJob trace
+
+规则：
+
+- 不改变任务集合、排序、section 或状态。
+- 不修改 StrategySnapshot / DailyPlan / Task / Goal。
+- 不把 Today 首屏变成评分驾驶舱。
+- 解释必须基于已有 factors，不得编造原因。
+
+当前实现状态：
+
+- 已接入 `StrategyExplanationAgent`，使用 prompt registry 中的 `p2-strategy-explanation-agent-v1`。
+- `GET /today/strategy` 创建 `AIJob(job_type=strategy_explanation)`，记录 provider、model、prompt version、prompt checksum、latency、usage 和 fallback 信息。
+- Agent 上下文会收到 Planning Engine 已归纳的 `score_explanation` 和每个任务的 `score_signals`；Agent 只能改写解释文案，不能改变排序或业务状态。
+- `StrategyDetail.source.ai_job_id` 继续指向 Daily Planner；`source.explanation_ai_job_id` 指向 Strategy Explanation。
+- Agent 失败或输出不合法时，回退规则解释，`AIJob.status=succeeded_with_fallback`。
+
+### 7.4 Task Breakdown
 
 目的：
 
@@ -473,14 +518,17 @@ Planning Engine v1 已使用的信号：
 建议输出 schema：
 
 ```python
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class BreakdownStepOutput(BaseModel):
     title: str
-    sort_order: int
+    sort_order: int = Field(ge=1, le=12)
+    rationale: str | None = None
 
 class TaskBreakdownOutput(BaseModel):
-    steps: list[BreakdownStepOutput]
+    steps: list[BreakdownStepOutput] = Field(min_length=1, max_length=6)
+    confidence: float = Field(ge=0, le=1)
+    summary: str | None = None
 ```
 
 规则：
@@ -489,15 +537,24 @@ class TaskBreakdownOutput(BaseModel):
 - 用户需要可编辑。
 - P1 可以直接生成步骤，但必须允许后续编辑。
 
+当前实现状态：
+
+- 已接入 `TaskBreakdownAgent`，使用 prompt registry 中的 `p2-task-breakdown-agent-v1`。
+- `POST /tasks/{task_id}/breakdown` 创建 `AIJob(job_type=task_breakdown)`，记录 provider、model、prompt version、prompt checksum、latency、usage 和 fallback 信息。
+- 默认 mock provider 使用 rule breakdown 输出作为 `mock_output`，本地不依赖真实 LLM。
+- Agent 输出会落成 `TaskStep`，但不会改变 Task 本体字段。
+- 任务已有步骤时不调用 Agent、不覆盖、不追加，返回 `created_steps=[]`。
+
 失败 fallback：
 
-- 不生成步骤，不自动修改已有 `TaskStep`。
+- 任务没有已有步骤时，使用 rule fallback 生成少量可编辑 `TaskStep`。
+- 任务已有步骤时，不生成步骤，不自动修改已有 `TaskStep`。
 - `AIJob.status = succeeded_with_fallback`
 - `result_entity_type` 可记录为 `task`，`result_entity_id` 记录原 `task_id`。
 - `metadata.fallback_reason` 记录失败原因。
 - 用户仍可手动添加步骤。
 
-### 7.4 Daily Report Generator
+### 7.5 Daily Report Generator
 
 目的：
 
@@ -517,14 +574,24 @@ class TaskBreakdownOutput(BaseModel):
 - DailyReport.ai_summary
 - DailyReport.ai_suggestions
 
-建议输出 schema：
+当前实现状态：
+
+- 已接入 `DailyReportAgent`，使用 prompt registry 中的 `p2-daily-report-agent-v1`。
+- `ReportService.generate_daily_report` 先基于统计数据生成规则 fallback，再创建 `AIJob(job_type=daily_report_generator)` 调用 provider-backed structured output。
+- Agent 输出只更新 `DailyReport.ai_summary` 和 `DailyReport.ai_suggestions`，不改变 Task / Goal / DailyPlan / FocusSession 状态。
+- 默认 mock provider 使用规则复盘结果作为 `mock_output`，保证本地不依赖真实 LLM。
+- Agent / provider 失败或输出不合法时，保留规则复盘文案，并标记 `AIJob.status=succeeded_with_fallback`。
+- `DAILY_REPORT_GENERATED` 事件 payload 记录 `ai_job_id`、`ai_job_status` 和 fallback reason，方便后续 Me / Reports 追踪来源。
+
+输出 schema：
 
 ```python
 from pydantic import BaseModel
 
 class DailyReportOutput(BaseModel):
-    summary: str
-    suggestions: list[str]
+    ai_summary: str
+    ai_suggestions: list[str]
+    confidence: float
 ```
 
 表达要求：
@@ -538,7 +605,70 @@ class DailyReportOutput(BaseModel):
 失败 fallback：
 
 - 用统计数据生成基础日报。
-- AI summary 留空或使用默认模板。
+- AI summary 和 suggestions 使用默认模板。
+- `AIJob.status = succeeded_with_fallback`
+
+### 7.6 Insight Detail
+
+目的：
+
+```text
+把周级行为数据、规则洞察和 Report 信号整理成克制、可信的 Insight Detail。
+```
+
+输入：
+
+- Weekly Report summary
+- efficiency windows
+- rule-generated behavior patterns
+- rule-generated recommendations
+- rule-generated strategy notes
+
+输出：
+
+- Insight Detail behavior_patterns
+- Insight Detail recommendations
+- Insight Detail strategy_notes
+- AIJob trace
+
+当前实现状态：
+
+- 已接入 `InsightDetailAgent`，使用 prompt registry 中的 `p2-insight-detail-agent-v1`。
+- `GET /insights/detail` 先生成规则洞察，再创建 `AIJob(job_type=insight_generator)` 调用 provider-backed structured output。
+- Agent 只改写解释性文本：`behavior_patterns`、`recommendations`、`strategy_notes`。
+- Agent 不修改 `overview`、`efficiency_windows`、Task、Goal、DailyPlan、FocusSession 或 DailyReport。
+- 当前不持久化 Insight 表；AIJob 的 `input_entity_type/result_entity_type` 使用 `insight_detail`，并在 metadata 中记录 period。
+- Agent / provider 失败或输出不合法时，保留规则洞察，并标记 `AIJob.status=succeeded_with_fallback`。
+
+输出 schema：
+
+```python
+from pydantic import BaseModel
+
+class InsightPatternOutput(BaseModel):
+    key: str
+    title: str
+    signal: str
+    evidence: str
+    suggestion: str
+
+class InsightRecommendationOutput(BaseModel):
+    category: str
+    title: str
+    suggestion: str
+    rationale: str
+
+class InsightDetailOutput(BaseModel):
+    behavior_patterns: list[InsightPatternOutput]
+    recommendations: list[InsightRecommendationOutput]
+    strategy_notes: list[str]
+    confidence: float
+```
+
+失败 fallback：
+
+- 使用 `rule-insight-v1` 的 behavior patterns、recommendations 和 strategy notes。
+- `source.generated_by = rule-insight-v1`
 - `AIJob.status = succeeded_with_fallback`
 
 ---
@@ -578,8 +708,10 @@ Chronos 的核心闭环不能依赖 LLM 成功。
 | --- | --- |
 | Capture Parser | 原始输入进入 Inbox，类型 unknown，job 标记为 `succeeded_with_fallback` |
 | Daily Planner | 使用 Planning Engine v1 生成 DailyPlan，job 标记为 `succeeded_with_fallback` |
-| Task Breakdown | 不生成步骤，不写 `TaskStep`，用户手动添加，job 标记为 `succeeded_with_fallback` |
+| Strategy Explanation | 使用规则解释，Strategy Detail 仍可打开，job 标记为 `succeeded_with_fallback` |
+| Task Breakdown | 任务无已有步骤时生成规则步骤；已有步骤时不覆盖，job 标记为 `succeeded_with_fallback` |
 | Daily Report Generator | 使用统计模板生成基础报告，job 标记为 `succeeded_with_fallback` |
+| Insight Detail | 使用规则洞察，Insight Detail 仍可打开，job 标记为 `succeeded_with_fallback` |
 
 所有 fallback 都应：
 
@@ -606,6 +738,7 @@ P1 可先不复杂使用 LangGraph：
 - Capture Parser：普通 function 足够。
 - Task Breakdown：普通 function 足够。
 - Daily Report Generator：普通 function 足够。
+- Insight Detail：普通 function 足够。
 - Daily Planner：当前是 Planning Engine v1 + structured Agent shell，后续多轮反馈和长期行为学习再升级为 LangGraph。
 
 后续适合 LangGraph 的场景：
@@ -733,8 +866,10 @@ Daily Planner v1 额外记录：
 | --- | --- | --- | --- |
 | Capture Parser | CaptureInput | AIParseResult / InboxItem | 是 |
 | Daily Planner | Task / Goal / ActivityEvent / Planning Engine candidates | DailyPlan / DailyPlanItem / StrategySnapshot / AIJob trace | 用户可 replan / 调整 |
+| Strategy Explanation | StrategySnapshot / DailyPlanItem.score_breakdown | Strategy Detail explanation / AIJob trace | 不需要确认，只读解释 |
 | Task Breakdown | Task | TaskStep candidates | 用户可编辑 |
 | Daily Report Generator | ActivityEvent / FocusSession / DailyPlan | DailyReport | 不强制确认 |
+| Insight Detail | Weekly Report / FocusSession / rule insights | Insight Detail text / AIJob trace | 不需要确认，只读解释 |
 
 ---
 

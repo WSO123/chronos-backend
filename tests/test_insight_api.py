@@ -114,7 +114,9 @@ class InsightAPITests(unittest.TestCase):
         self.assertEqual(body["overview"]["at_risk_goal_count"], 1)
         self.assertTrue(body["behavior_patterns"])
         self.assertTrue(body["recommendations"])
-        self.assertEqual(body["source"]["generated_by"], "rule-insight-v1")
+        self.assertEqual(body["source"]["generated_by"], "insight-agent-v1")
+        self.assertEqual(body["source"]["ai_job_status"], "succeeded")
+        self.assertEqual(body["source"]["prompt_version"], "p2-insight-detail-agent-v1")
 
     def _item_for_task(self, today: dict, task_id: str) -> dict:
         for section_items in today["sections"].values():

@@ -2,6 +2,7 @@ import unittest
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from app.ai.providers.base import LLMProviderError
 from app.models.activity_event import ActivityEvent
 from app.models.enums import AIJobStatus, DataSourceType, GoalHomeFilter, GoalStatus, TaskSource, TaskStatus, ValueLevel
 from app.services.data_source_service import data_source_service
@@ -11,9 +12,18 @@ from app.services.focus_service import focus_service
 from app.services.goal_service import goal_service
 from app.services.inbox_service import inbox_service
 from app.services.planning_service import planning_service
-from app.services.task_service import task_service
+from app.services.task_service import TaskService, task_service
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
+
+
+class FailingTaskBreakdownAgent:
+    prompt_version = "test-task-breakdown"
+    prompt_checksum = "1" * 64
+
+    def run(self, **kwargs):
+        del kwargs
+        raise LLMProviderError("provider unavailable")
 
 
 class TaskGoalServiceTests(unittest.TestCase):
@@ -440,7 +450,7 @@ class TaskGoalServiceTests(unittest.TestCase):
         self.assertEqual(home["goals"][0]["associated_task_count"], 2)
         self.assertEqual(completed_home["goals"][0]["id"], completed_goal.id)
 
-    def test_breakdown_task_creates_rule_steps_and_ai_job(self):
+    def test_breakdown_task_creates_agent_steps_and_ai_job(self):
         task = task_service.create_task(
             self.db,
             user_id=self.user.id,
@@ -451,12 +461,31 @@ class TaskGoalServiceTests(unittest.TestCase):
         result = task_service.breakdown_task(self.db, task_id=task.id, user_id=self.user.id)
         events = task_service.list_task_events(self.db, task_id=task.id, user_id=self.user.id)
 
-        self.assertEqual(result["ai_job"]["status"], AIJobStatus.SUCCEEDED_WITH_FALLBACK)
-        self.assertEqual(result["ai_job"]["job_metadata"]["fallback_reason"], "rule_mock_breakdown")
+        self.assertEqual(result["ai_job"]["status"], AIJobStatus.SUCCEEDED)
+        self.assertTrue(result["ai_job"]["job_metadata"]["output_applied"])
+        self.assertEqual(result["ai_job"]["provider"], "mock")
+        self.assertEqual(result["ai_job"]["prompt_version"], "p2-task-breakdown-agent-v1")
         self.assertEqual(len(result["created_steps"]), 4)
         self.assertEqual([step.sort_order for step in result["created_steps"]], [1, 2, 3, 4])
         self.assertIn("TASK_BREAKDOWN_GENERATED", [event.event_type for event in events])
         self.assertIn("TASK_STEP_CREATED", [event.event_type for event in events])
+
+    def test_breakdown_task_agent_failure_falls_back_to_rule_steps(self):
+        service = TaskService(breakdown_agent=FailingTaskBreakdownAgent())
+        task = service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Fallback breakdown",
+            estimated_duration_min=70,
+        )
+
+        result = service.breakdown_task(self.db, task_id=task.id, user_id=self.user.id)
+
+        self.assertEqual(result["ai_job"]["status"], AIJobStatus.SUCCEEDED_WITH_FALLBACK)
+        self.assertEqual(result["ai_job"]["job_metadata"]["failure_type"], "provider_error")
+        self.assertEqual(result["ai_job"]["job_metadata"]["fallback_reason"], "task_breakdown_agent_failed")
+        self.assertFalse(result["ai_job"]["job_metadata"]["output_applied"])
+        self.assertEqual(len(result["created_steps"]), 4)
 
     def test_breakdown_task_preserves_existing_steps(self):
         task = task_service.create_task(self.db, user_id=self.user.id, title="Already split")

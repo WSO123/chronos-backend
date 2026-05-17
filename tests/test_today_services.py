@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 import uuid
 
+from app.ai.providers.base import LLMProviderError
 from app.ai.schemas.planning import DailyPlannerOutput
 from app.core.config import settings
 from app.models.activity_event import ActivityEvent
@@ -14,6 +15,15 @@ from app.services.planning_service import PlanningService, planning_service
 from app.services.task_service import task_service
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
+
+
+class FailingStrategyExplanationAgent:
+    prompt_version = "test-strategy-explanation"
+    prompt_checksum = "2" * 64
+
+    def run(self, **kwargs):
+        del kwargs
+        raise LLMProviderError("strategy explanation provider unavailable")
 
 
 class TodayServiceTests(unittest.TestCase):
@@ -52,6 +62,8 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(today["plan_version"], 1)
         self.assertEqual(today["sections"]["pinned_tasks"][0]["title"], "Protect high value work")
         self.assertGreater(today["sections"]["pinned_tasks"][0]["score_breakdown"]["total_score"], 0)
+        self.assertEqual(today["sections"]["pinned_tasks"][0]["score_breakdown"]["score_version"], "planning-engine-v1")
+        self.assertEqual(today["sections"]["pinned_tasks"][0]["score_breakdown"]["score_band"], "high")
         self.assertEqual(today["sections"]["pinned_tasks"][0]["score_breakdown"]["selected_for_today"], True)
         self.assertEqual(today["sections"]["low_priority_tasks"][0]["title"], "Optional cleanup")
         self.assertEqual(today["progress"]["total_count"], 2)
@@ -126,6 +138,12 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(len(strategy["task_rationales"]), 2)
         self.assertEqual(strategy["task_rationales"][0]["title"], "Protect strategy task")
         self.assertIn("value_score", strategy["task_rationales"][0]["score_breakdown"])
+        self.assertEqual(strategy["score_explanation"]["source"], "planning-engine-score-breakdown-v1")
+        self.assertTrue(strategy["score_explanation"]["summary"])
+        self.assertTrue(strategy["score_explanation"]["signals"])
+        self.assertEqual(strategy["task_rationales"][0]["dominant_factor"], "due_today")
+        self.assertIn("今天截止", strategy["task_rationales"][0]["dominant_reason"])
+        self.assertTrue(strategy["task_rationales"][0]["score_signals"])
         self.assertTrue(strategy["explanation"])
         self.assertEqual(strategy["source"]["model_name"], "planning-engine-v1")
         self.assertIsNotNone(strategy["source"]["ai_job_id"])
@@ -144,6 +162,36 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(planner_job.job_metadata["provider_observability_version"], "v1")
         self.assertEqual(planner_job.job_metadata["usage"]["total_tokens"], None)
         self.assertEqual(planner_job.job_metadata["usage"]["cost_usd"], None)
+        self.assertIsNotNone(strategy["source"]["explanation_ai_job_id"])
+        explanation_job = self.db.get(AIJob, uuid.UUID(strategy["source"]["explanation_ai_job_id"]))
+        self.assertEqual(explanation_job.job_type, AIJobType.STRATEGY_EXPLANATION)
+        self.assertEqual(explanation_job.status, AIJobStatus.SUCCEEDED)
+        self.assertEqual(explanation_job.provider, "mock")
+        self.assertEqual(explanation_job.result_entity_type, "strategy_snapshot")
+        self.assertEqual(explanation_job.result_entity_id, strategy["source"]["strategy_snapshot_id"])
+        self.assertEqual(explanation_job.prompt_version, "p2-strategy-explanation-agent-v1")
+        self.assertTrue(explanation_job.job_metadata["output_applied"])
+
+    def test_strategy_explanation_agent_failure_falls_back_without_changing_plan(self):
+        service = PlanningService(strategy_explanation_agent=FailingStrategyExplanationAgent())
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Explain fallback task",
+            estimated_duration_min=30,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+        )
+
+        strategy = service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        self.assertEqual(strategy["task_rationales"][0]["title"], "Explain fallback task")
+        self.assertTrue(strategy["explanation"])
+        explanation_job = self.db.get(AIJob, uuid.UUID(strategy["source"]["explanation_ai_job_id"]))
+        self.assertEqual(explanation_job.status, AIJobStatus.SUCCEEDED_WITH_FALLBACK)
+        self.assertEqual(explanation_job.job_metadata["fallback_reason"], "strategy_explanation_agent_failed")
+        self.assertEqual(explanation_job.job_metadata["failure_type"], "provider_error")
+        self.assertFalse(explanation_job.job_metadata["output_applied"])
 
     def test_daily_planner_agent_usage_is_recorded_on_ai_job_metadata(self):
         class UsagePlannerAgent:
@@ -166,6 +214,15 @@ class TodayServiceTests(unittest.TestCase):
                                 "recommendation_reason": candidate["recommendation_reason"],
                             }
                             for candidate in candidates
+                        ],
+                        review_summary="The deterministic order is good enough to execute.",
+                        suggestions=[
+                            {
+                                "key": "protect_first_task",
+                                "title": "Protect the first task",
+                                "message": "Start with the first task before reviewing the rest.",
+                                "signal": "positive",
+                            }
                         ],
                         confidence=0.91,
                     ),
@@ -198,6 +255,9 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(planner_job.job_metadata["usage"]["output_tokens"], 22)
         self.assertEqual(planner_job.job_metadata["usage"]["total_tokens"], 133)
         self.assertEqual(planner_job.job_metadata["usage"]["cost_usd"], None)
+        self.assertEqual(planner_job.job_metadata["review_summary"], "The deterministic order is good enough to execute.")
+        self.assertEqual(planner_job.job_metadata["suggestions"][0]["key"], "protect_first_task")
+        self.assertEqual(strategy["planner_review"]["suggestions"][0]["key"], "protect_first_task")
         self.assertNotIn("planner_agent_total_tokens", strategy["factors"])
 
     def test_daily_planner_agent_failure_falls_back_to_planning_engine(self):

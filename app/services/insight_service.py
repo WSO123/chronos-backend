@@ -1,17 +1,27 @@
 from __future__ import annotations
 
 from datetime import UTC, date, timedelta
+from time import perf_counter
 import uuid
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.enums import FocusSessionStatus
+from app.ai.agents.insight_detail import InsightDetailAgent, insight_detail_agent
+from app.ai.providers.base import LLMProviderError, empty_llm_usage
+from app.ai.providers.registry import llm_provider_registry
+from app.ai.schemas.insight import InsightDetailOutput
+from app.models.enums import AIJobStatus, AIJobType, FocusSessionStatus
 from app.models.focus_session import FocusSession
+from app.models.mixins import utc_now
+from app.services.ai_job_service import ai_job_service
 from app.services.report_service import report_service
 
 
 class InsightService:
+    def __init__(self, *, insight_agent: InsightDetailAgent | None = None) -> None:
+        self.insight_agent = insight_agent or insight_detail_agent
+
     def get_detail(self, db: Session, *, user_id: uuid.UUID, anchor_date: date | None = None) -> dict:
         resolved_anchor_date = report_service.resolve_report_date(db, user_id=user_id, report_date=anchor_date)
         period_start = resolved_anchor_date - timedelta(days=resolved_anchor_date.weekday())
@@ -34,20 +44,35 @@ class InsightService:
         }
         patterns = self._behavior_patterns(summary=summary, windows=windows)
         recommendations = self._recommendations(summary=summary, windows=windows)
+        strategy_notes = self._strategy_notes(summary=summary, windows=windows)
+        source = {
+            "generated_by": "rule-insight-v1",
+            "period_days": 7,
+            "data_points": self._data_points(weekly_report=weekly_report, windows=windows),
+        }
+        agent_result = self._run_insight_agent(
+            db,
+            user_id=user_id,
+            anchor_date=resolved_anchor_date,
+            period_start=period_start,
+            period_end=period_end,
+            overview=overview,
+            efficiency_windows=windows,
+            behavior_patterns=patterns,
+            recommendations=recommendations,
+            strategy_notes=strategy_notes,
+            source=source,
+        )
         return {
             "anchor_date": resolved_anchor_date,
             "period_start": weekly_report["week_start"],
             "period_end": period_end,
             "overview": overview,
-            "behavior_patterns": patterns,
+            "behavior_patterns": agent_result["behavior_patterns"],
             "efficiency_windows": windows,
-            "recommendations": recommendations,
-            "strategy_notes": self._strategy_notes(summary=summary, windows=windows),
-            "source": {
-                "generated_by": "rule-insight-v1",
-                "period_days": 7,
-                "data_points": self._data_points(weekly_report=weekly_report, windows=windows),
-            },
+            "recommendations": agent_result["recommendations"],
+            "strategy_notes": agent_result["strategy_notes"],
+            "source": {**source, **agent_result["source"]},
         }
 
     def _efficiency_windows(
@@ -244,6 +269,207 @@ class InsightService:
             "late_night": "深夜",
         }
         return labels.get(label, label)
+
+    def _run_insight_agent(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        anchor_date: date,
+        period_start: date,
+        period_end: date,
+        overview: dict,
+        efficiency_windows: list[dict],
+        behavior_patterns: list[dict],
+        recommendations: list[dict],
+        strategy_notes: list[str],
+        source: dict,
+    ) -> dict:
+        provider = llm_provider_registry.current_provider()
+        job = ai_job_service.create_job(
+            db,
+            user_id=user_id,
+            job_type=AIJobType.INSIGHT_GENERATOR,
+            input_entity_type="insight_detail",
+            input_entity_id=user_id,
+            provider=provider.provider_name,
+            model=provider.model_name,
+            prompt_version=self.insight_agent.prompt_version,
+            metadata={
+                "mode": "sync_structured_agent",
+                "prompt_checksum": self.insight_agent.prompt_checksum,
+                "fallback_generator": "rule-insight-v1",
+                "anchor_date": anchor_date.isoformat(),
+                "period_start": period_start.isoformat(),
+                "period_end": period_end.isoformat(),
+            },
+            commit=False,
+        )
+        job.status = AIJobStatus.RUNNING
+        job.started_at = utc_now()
+        started = perf_counter()
+        fallback_output = self._insight_fallback_output(
+            behavior_patterns=behavior_patterns,
+            recommendations=recommendations,
+            strategy_notes=strategy_notes,
+        )
+        output = fallback_output
+        generated_by = "rule-insight-v1"
+
+        try:
+            agent_result = self.insight_agent.run(
+                insight_context={
+                    "anchor_date": anchor_date.isoformat(),
+                    "period_start": period_start.isoformat(),
+                    "period_end": period_end.isoformat(),
+                    "overview": overview,
+                    "efficiency_windows": efficiency_windows,
+                    "behavior_patterns": behavior_patterns,
+                    "recommendations": recommendations,
+                    "strategy_notes": strategy_notes,
+                    "source": source,
+                },
+                fallback_output=fallback_output,
+                provider=provider,
+            )
+            output = self._clean_insight_output(agent_result.output)
+            generated_by = "insight-agent-v1"
+            job.provider = agent_result.provider
+            job.model = agent_result.model
+            job.prompt_version = agent_result.prompt_version
+            job.status = AIJobStatus.SUCCEEDED
+            job.job_metadata = {
+                **job.job_metadata,
+                "output_applied": True,
+                "confidence": agent_result.output.confidence,
+                "pattern_count": len(output["behavior_patterns"]),
+                "recommendation_count": len(output["recommendations"]),
+                "prompt_checksum": agent_result.prompt_checksum,
+                "provider_response_id": agent_result.response_id,
+                "usage": agent_result.usage,
+            }
+        except Exception as exc:  # noqa: BLE001 - Insight Detail must remain readable.
+            job.status = AIJobStatus.SUCCEEDED_WITH_FALLBACK
+            job.error_message = str(exc)
+            job.job_metadata = {
+                **job.job_metadata,
+                "output_applied": False,
+                "fallback_reason": self._insight_fallback_reason(exc),
+                "fallback_error_type": exc.__class__.__name__,
+                "fallback_root_error_type": self._root_error_type(exc),
+                "failure_type": self._insight_failure_type(exc),
+            }
+
+        job.result_entity_type = "insight_detail"
+        job.result_entity_id = user_id
+        job.finished_at = utc_now()
+        job.latency_ms = max(0, int((perf_counter() - started) * 1000))
+        job.job_metadata = {
+            **job.job_metadata,
+            "provider_latency_ms": job.latency_ms,
+            "provider_observability_version": "v1",
+            "usage": self._insight_usage_metadata(job.job_metadata.get("usage")),
+        }
+        db.flush()
+        db.commit()
+        db.refresh(job)
+        return {
+            "behavior_patterns": output["behavior_patterns"],
+            "recommendations": output["recommendations"],
+            "strategy_notes": output["strategy_notes"],
+            "source": {
+                "generated_by": generated_by,
+                "ai_job_id": str(job.id),
+                "ai_job_status": job.status.value,
+                "model_name": job.model,
+                "prompt_version": job.prompt_version,
+                "fallback_reason": job.job_metadata.get("fallback_reason"),
+            },
+        }
+
+    def _insight_fallback_output(
+        self,
+        *,
+        behavior_patterns: list[dict],
+        recommendations: list[dict],
+        strategy_notes: list[str],
+    ) -> dict:
+        return {
+            "behavior_patterns": behavior_patterns,
+            "recommendations": recommendations,
+            "strategy_notes": strategy_notes,
+            "confidence": 0.68,
+        }
+
+    def _clean_insight_output(self, output: InsightDetailOutput) -> dict:
+        patterns = [
+            {
+                "key": self._clean_text(pattern.key),
+                "title": self._clean_text(pattern.title),
+                "signal": self._clean_text(pattern.signal),
+                "evidence": self._clean_text(pattern.evidence),
+                "suggestion": self._clean_text(pattern.suggestion),
+            }
+            for pattern in output.behavior_patterns
+        ]
+        recommendations = [
+            {
+                "category": self._clean_text(recommendation.category),
+                "title": self._clean_text(recommendation.title),
+                "suggestion": self._clean_text(recommendation.suggestion),
+                "rationale": self._clean_text(recommendation.rationale),
+            }
+            for recommendation in output.recommendations
+        ]
+        strategy_notes = [self._clean_text(note) for note in output.strategy_notes]
+        patterns = [
+            pattern
+            for pattern in patterns
+            if all(pattern[field] for field in ["key", "title", "signal", "evidence", "suggestion"])
+        ]
+        recommendations = [
+            recommendation
+            for recommendation in recommendations
+            if all(recommendation[field] for field in ["category", "title", "suggestion", "rationale"])
+        ]
+        strategy_notes = [note for note in strategy_notes if note]
+        if not patterns:
+            raise ValueError("Insight detail agent returned no usable behavior patterns")
+        if not recommendations:
+            raise ValueError("Insight detail agent returned no usable recommendations")
+        if not strategy_notes:
+            raise ValueError("Insight detail agent returned no usable strategy notes")
+        return {
+            "behavior_patterns": patterns[:5],
+            "recommendations": recommendations[:3],
+            "strategy_notes": strategy_notes[:3],
+        }
+
+    def _clean_text(self, value: str) -> str:
+        return " ".join(value.strip().split())
+
+    def _insight_usage_metadata(self, usage: object) -> dict:
+        if not isinstance(usage, dict):
+            return empty_llm_usage()
+        return {**empty_llm_usage(), **usage}
+
+    def _insight_fallback_reason(self, exc: Exception) -> str:
+        if isinstance(exc, ValueError):
+            return "insight_detail_agent_invalid_output"
+        return "insight_detail_agent_failed"
+
+    def _insight_failure_type(self, exc: Exception) -> str:
+        if isinstance(exc, ValueError):
+            return "invalid_output"
+        if isinstance(exc, LLMProviderError):
+            return "provider_error"
+        return "agent_error"
+
+    def _root_error_type(self, exc: Exception) -> str:
+        root = exc
+        while root.__cause__ is not None:
+            root = root.__cause__
+        return root.__class__.__name__
 
     def _data_points(self, *, weekly_report: dict, windows: list[dict]) -> int:
         non_empty_days = len(

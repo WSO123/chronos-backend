@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from time import perf_counter
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -9,9 +10,15 @@ from sqlalchemy import case, distinct, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.ai.agents.daily_report import DailyReportAgent, daily_report_agent
+from app.ai.providers.base import LLMProviderError, empty_llm_usage
+from app.ai.providers.registry import llm_provider_registry
+from app.ai.schemas.daily_report import DailyReportOutput
 from app.models.activity_event import ActivityEvent
 from app.models.daily_plan import DailyPlan, DailyPlanItem
 from app.models.enums import (
+    AIJobStatus,
+    AIJobType,
     ActorType,
     DailyPlanItemSection,
     DailyPlanItemStatus,
@@ -24,10 +31,12 @@ from app.models.enums import (
 )
 from app.models.focus_session import FocusSession
 from app.models.goal import Goal
+from app.models.mixins import utc_now
 from app.models.report import DailyReport
 from app.models.task import Task
 from app.models.user import User
 from app.services.activity_event_service import activity_event_service
+from app.services.ai_job_service import ai_job_service
 from app.services.errors import NotFoundError
 
 
@@ -45,6 +54,9 @@ class DailyReportMetrics:
 
 
 class ReportService:
+    def __init__(self, *, report_agent: DailyReportAgent | None = None) -> None:
+        self.report_agent = report_agent or daily_report_agent
+
     def resolve_report_date(self, db: Session, *, user_id: uuid.UUID, report_date: date | None) -> date:
         return self._resolve_report_date(db, user_id=user_id, report_date=report_date)
 
@@ -138,14 +150,14 @@ class ReportService:
         report_date: date | None = None,
     ) -> DailyReport:
         metrics = self.daily_metrics(db, user_id=user_id, report_date=report_date)
-        summary, suggestions = self._report_copy(metrics)
+        fallback_summary, fallback_suggestions = self._report_copy(metrics)
         report = self._get_daily_report(db, user_id=user_id, report_date=metrics.report_date)
         if report is None:
             report = DailyReport(
                 user_id=user_id,
                 report_date=metrics.report_date,
-                ai_summary=summary,
-                ai_suggestions=suggestions,
+                ai_summary=fallback_summary,
+                ai_suggestions=fallback_suggestions,
             )
             db.add(report)
             db.flush()
@@ -155,9 +167,18 @@ class ReportService:
         report.interrupted_count = metrics.interrupted_count
         report.focus_minutes = metrics.focus_minutes
         report.completion_rate = metrics.completion_rate
-        report.ai_summary = summary
-        report.ai_suggestions = suggestions
         report.generated_from_plan_version = metrics.generated_from_plan_version
+        report.refreshed_at = datetime.now(UTC)
+        db.flush()
+        agent_result = self._run_daily_report_agent(
+            db,
+            report=report,
+            metrics=metrics,
+            fallback_summary=fallback_summary,
+            fallback_suggestions=fallback_suggestions,
+        )
+        report.ai_summary = agent_result["summary"]
+        report.ai_suggestions = agent_result["suggestions"]
         report.refreshed_at = datetime.now(UTC)
         db.flush()
         activity_event_service.add_event(
@@ -173,6 +194,9 @@ class ReportService:
                 "completed_task_count": metrics.completed_task_count,
                 "focus_minutes": metrics.focus_minutes,
                 "generated_from_plan_version": metrics.generated_from_plan_version,
+                "ai_job_id": agent_result["ai_job_id"],
+                "ai_job_status": agent_result["ai_job_status"],
+                "fallback_reason": agent_result["fallback_reason"],
             },
         )
         try:
@@ -592,6 +616,146 @@ class ReportService:
         else:
             next_month = month_start.replace(month=month_start.month + 1)
         return month_start, next_month - timedelta(days=1)
+
+    def _run_daily_report_agent(
+        self,
+        db: Session,
+        *,
+        report: DailyReport,
+        metrics: DailyReportMetrics,
+        fallback_summary: str,
+        fallback_suggestions: list[str],
+    ) -> dict:
+        provider = llm_provider_registry.current_provider()
+        job = ai_job_service.create_job(
+            db,
+            user_id=report.user_id,
+            job_type=AIJobType.DAILY_REPORT_GENERATOR,
+            input_entity_type=EntityType.REPORT.value,
+            input_entity_id=report.id,
+            provider=provider.provider_name,
+            model=provider.model_name,
+            prompt_version=self.report_agent.prompt_version,
+            metadata={
+                "mode": "sync_structured_agent",
+                "prompt_checksum": self.report_agent.prompt_checksum,
+                "fallback_generator": "rule-daily-report-v1",
+                "report_date": metrics.report_date.isoformat(),
+            },
+            commit=False,
+        )
+        job.status = AIJobStatus.RUNNING
+        job.started_at = utc_now()
+        started = perf_counter()
+        fallback_output = self._daily_report_fallback_output(
+            summary=fallback_summary,
+            suggestions=fallback_suggestions,
+        )
+
+        try:
+            agent_result = self.report_agent.run(
+                report_context=self._daily_report_context(metrics),
+                fallback_output=fallback_output,
+                provider=provider,
+            )
+            output = self._clean_daily_report_output(agent_result.output)
+            job.provider = agent_result.provider
+            job.model = agent_result.model
+            job.prompt_version = agent_result.prompt_version
+            job.status = AIJobStatus.SUCCEEDED
+            job.job_metadata = {
+                **job.job_metadata,
+                "output_applied": True,
+                "confidence": agent_result.output.confidence,
+                "suggestion_count": len(output["suggestions"]),
+                "prompt_checksum": agent_result.prompt_checksum,
+                "provider_response_id": agent_result.response_id,
+                "usage": agent_result.usage,
+            }
+        except Exception as exc:  # noqa: BLE001 - report generation must keep a readable fallback.
+            output = {"summary": fallback_summary, "suggestions": fallback_suggestions}
+            job.status = AIJobStatus.SUCCEEDED_WITH_FALLBACK
+            job.error_message = str(exc)
+            job.job_metadata = {
+                **job.job_metadata,
+                "output_applied": False,
+                "fallback_reason": self._daily_report_fallback_reason(exc),
+                "fallback_error_type": exc.__class__.__name__,
+                "fallback_root_error_type": self._root_error_type(exc),
+                "failure_type": self._daily_report_failure_type(exc),
+            }
+
+        job.result_entity_type = EntityType.REPORT.value
+        job.result_entity_id = report.id
+        job.finished_at = utc_now()
+        job.latency_ms = max(0, int((perf_counter() - started) * 1000))
+        job.job_metadata = {
+            **job.job_metadata,
+            "provider_latency_ms": job.latency_ms,
+            "provider_observability_version": "v1",
+            "usage": self._daily_report_usage_metadata(job.job_metadata.get("usage")),
+        }
+        db.flush()
+        return {
+            "summary": output["summary"],
+            "suggestions": output["suggestions"],
+            "ai_job_id": str(job.id),
+            "ai_job_status": job.status.value,
+            "fallback_reason": job.job_metadata.get("fallback_reason"),
+        }
+
+    def _daily_report_context(self, metrics: DailyReportMetrics) -> dict:
+        return {
+            "report_date": metrics.report_date.isoformat(),
+            "daily_plan_id": str(metrics.daily_plan_id) if metrics.daily_plan_id else None,
+            "generated_from_plan_version": metrics.generated_from_plan_version,
+            "completed_task_count": metrics.completed_task_count,
+            "postponed_task_count": metrics.postponed_task_count,
+            "interrupted_count": metrics.interrupted_count,
+            "focus_minutes": metrics.focus_minutes,
+            "completion_rate": metrics.completion_rate,
+            "planned_task_count": metrics.planned_task_count,
+        }
+
+    def _daily_report_fallback_output(self, *, summary: str, suggestions: list[str]) -> dict:
+        return {
+            "ai_summary": summary,
+            "ai_suggestions": suggestions,
+            "confidence": 0.68,
+        }
+
+    def _clean_daily_report_output(self, output: DailyReportOutput) -> dict:
+        summary = " ".join(output.ai_summary.strip().split())
+        suggestions = [" ".join(suggestion.strip().split()) for suggestion in output.ai_suggestions]
+        suggestions = [suggestion for suggestion in suggestions if suggestion]
+        if not summary:
+            raise ValueError("Daily report agent returned no usable summary")
+        if not suggestions:
+            raise ValueError("Daily report agent returned no usable suggestions")
+        return {"summary": summary, "suggestions": suggestions[:3]}
+
+    def _daily_report_usage_metadata(self, usage: object) -> dict:
+        if not isinstance(usage, dict):
+            return empty_llm_usage()
+        return {**empty_llm_usage(), **usage}
+
+    def _daily_report_fallback_reason(self, exc: Exception) -> str:
+        if isinstance(exc, ValueError):
+            return "daily_report_agent_invalid_output"
+        return "daily_report_agent_failed"
+
+    def _daily_report_failure_type(self, exc: Exception) -> str:
+        if isinstance(exc, ValueError):
+            return "invalid_output"
+        if isinstance(exc, LLMProviderError):
+            return "provider_error"
+        return "agent_error"
+
+    def _root_error_type(self, exc: Exception) -> str:
+        root = exc
+        while root.__cause__ is not None:
+            root = root.__cause__
+        return root.__class__.__name__
 
     def _report_copy(self, metrics: DailyReportMetrics) -> tuple[str, list[str]]:
         if metrics.planned_task_count == 0 and metrics.focus_minutes == 0:

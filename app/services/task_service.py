@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from time import perf_counter
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.ai.agents.task_breakdown import TaskBreakdownAgent, task_breakdown_agent
+from app.ai.providers.base import LLMProviderError, empty_llm_usage
+from app.ai.providers.registry import llm_provider_registry
+from app.ai.schemas.task_breakdown import TaskBreakdownOutput
 from app.models.activity_event import ActivityEvent
 from app.models.ai_job import AIJob
 from app.models.daily_plan import DailyPlan, DailyPlanItem
@@ -36,6 +41,9 @@ from app.services.errors import InvalidStateError, NotFoundError, ValidationDoma
 
 
 class TaskService:
+    def __init__(self, *, breakdown_agent: TaskBreakdownAgent | None = None) -> None:
+        self.breakdown_agent = breakdown_agent or task_breakdown_agent
+
     def create_task(
         self,
         db: Session,
@@ -330,47 +338,104 @@ class TaskService:
             allowed={TaskStatus.ACTIVE, TaskStatus.IN_FOCUS, TaskStatus.POSTPONED},
             action="broken down",
         )
+        provider = llm_provider_registry.current_provider()
         job = ai_job_service.create_job(
             db,
             user_id=user_id,
             job_type=AIJobType.TASK_BREAKDOWN,
             input_entity_type=EntityType.TASK.value,
             input_entity_id=task.id,
-            provider="rule",
-            model="task-breakdown-rule",
-            prompt_version="p1-rule-v1",
-            metadata={"mode": "sync_rule_mock"},
+            provider=provider.provider_name,
+            model=provider.model_name,
+            prompt_version=self.breakdown_agent.prompt_version,
+            metadata={
+                "mode": "sync_structured_agent",
+                "prompt_checksum": self.breakdown_agent.prompt_checksum,
+                "fallback_generator": "rule-task-breakdown-v1",
+            },
             commit=False,
         )
         job.status = AIJobStatus.RUNNING
         job.started_at = utc_now()
+        started = perf_counter()
 
         existing_steps = sorted(task.steps, key=lambda step: (step.sort_order, step.created_at))
         if existing_steps:
             job.status = AIJobStatus.SUCCEEDED_WITH_FALLBACK
             job.result_entity_type = EntityType.TASK.value
             job.result_entity_id = task.id
+            job.finished_at = utc_now()
+            job.latency_ms = max(0, int((perf_counter() - started) * 1000))
             job.job_metadata = {
                 **job.job_metadata,
+                "output_applied": False,
                 "fallback_reason": "existing_steps_preserved",
                 "created_step_ids": [],
+                "usage": empty_llm_usage(),
             }
-            job.finished_at = utc_now()
             self._add_breakdown_event(db, task=task, user_id=user_id, job=job, created_steps=[])
             db.commit()
             db.refresh(job)
             return {"ai_job": self._ai_job_summary(job), "created_steps": []}
 
-        created_steps = self._create_breakdown_steps(db, task=task, user_id=user_id)
-        job.status = AIJobStatus.SUCCEEDED_WITH_FALLBACK
+        try:
+            agent_result = self.breakdown_agent.run(
+                task_context=self._task_breakdown_context(task),
+                fallback_output=self._breakdown_fallback_output(task),
+                provider=provider,
+            )
+            step_titles = self._step_titles_from_agent_output(agent_result.output)
+            created_steps = self._create_breakdown_steps(
+                db,
+                task=task,
+                user_id=user_id,
+                titles=step_titles,
+                source="task_breakdown_agent",
+            )
+            job.provider = agent_result.provider
+            job.model = agent_result.model
+            job.prompt_version = agent_result.prompt_version
+            job.status = AIJobStatus.SUCCEEDED
+            job.job_metadata = {
+                **job.job_metadata,
+                "output_applied": True,
+                "confidence": agent_result.output.confidence,
+                "step_count": len(created_steps),
+                "prompt_checksum": agent_result.prompt_checksum,
+                "provider_response_id": agent_result.response_id,
+                "usage": agent_result.usage,
+                "summary": agent_result.output.summary,
+            }
+        except Exception as exc:  # noqa: BLE001 - breakdown should still offer editable steps.
+            created_steps = self._create_breakdown_steps(
+                db,
+                task=task,
+                user_id=user_id,
+                titles=self._breakdown_step_titles(task),
+                source="task_breakdown_fallback",
+            )
+            job.status = AIJobStatus.SUCCEEDED_WITH_FALLBACK
+            job.error_message = str(exc)
+            job.job_metadata = {
+                **job.job_metadata,
+                "output_applied": False,
+                "fallback_reason": self._task_breakdown_fallback_reason(exc),
+                "fallback_error_type": exc.__class__.__name__,
+                "fallback_root_error_type": self._root_error_type(exc),
+                "failure_type": self._task_breakdown_failure_type(exc),
+            }
+
         job.result_entity_type = EntityType.TASK.value
         job.result_entity_id = task.id
+        job.finished_at = utc_now()
+        job.latency_ms = max(0, int((perf_counter() - started) * 1000))
         job.job_metadata = {
             **job.job_metadata,
-            "fallback_reason": "rule_mock_breakdown",
             "created_step_ids": [str(step.id) for step in created_steps],
+            "provider_latency_ms": job.latency_ms,
+            "provider_observability_version": "v1",
+            "usage": self._usage_metadata(job.job_metadata.get("usage")),
         }
-        job.finished_at = utc_now()
         self._add_breakdown_event(db, task=task, user_id=user_id, job=job, created_steps=created_steps)
         db.commit()
         for step in created_steps:
@@ -398,7 +463,8 @@ class TaskService:
                 "ai_job_id": str(job.id),
                 "created_step_ids": [str(step.id) for step in created_steps],
                 "fallback_reason": job.job_metadata.get("fallback_reason"),
-                "mode": "rule_mock",
+                "mode": job.job_metadata.get("mode"),
+                "ai_job_status": job.status.value,
             },
         )
 
@@ -713,8 +779,15 @@ class TaskService:
             "deadline": task.deadline,
         }
 
-    def _create_breakdown_steps(self, db: Session, *, task: Task, user_id: uuid.UUID) -> list[TaskStep]:
-        titles = self._breakdown_step_titles(task)
+    def _create_breakdown_steps(
+        self,
+        db: Session,
+        *,
+        task: Task,
+        user_id: uuid.UUID,
+        titles: list[str],
+        source: str,
+    ) -> list[TaskStep]:
         created_steps: list[TaskStep] = []
         for sort_order, title in enumerate(titles, start=1):
             step = TaskStep(task_id=task.id, title=title, sort_order=sort_order)
@@ -727,10 +800,85 @@ class TaskService:
                 entity_id=task.id,
                 event_type="TASK_STEP_CREATED",
                 related_task_id=task.id,
-                payload={"step_id": str(step.id), "title": title, "source": "task_breakdown"},
+                payload={"step_id": str(step.id), "title": title, "source": source},
             )
             created_steps.append(step)
         return created_steps
+
+    def _step_titles_from_agent_output(self, output: TaskBreakdownOutput) -> list[str]:
+        titles: list[str] = []
+        seen_titles: set[str] = set()
+        for step in sorted(output.steps, key=lambda item: item.sort_order):
+            title = " ".join(step.title.strip().split())[:255]
+            if not title:
+                continue
+            normalized = title.lower()
+            if normalized in seen_titles:
+                continue
+            seen_titles.add(normalized)
+            titles.append(title)
+        if not titles:
+            raise ValueError("Task breakdown agent returned no usable steps")
+        return titles[:6]
+
+    def _task_breakdown_context(self, task: Task) -> dict:
+        return {
+            "task_id": str(task.id),
+            "title": task.title,
+            "description": task.description,
+            "estimated_duration_min": task.estimated_duration_min,
+            "priority": task.priority,
+            "value_level": task.value_level.value,
+            "deadline": task.deadline.isoformat() if task.deadline else None,
+            "goal": self._task_breakdown_goal_context(task),
+        }
+
+    def _task_breakdown_goal_context(self, task: Task) -> dict | None:
+        if task.goal is None:
+            return None
+        return {
+            "goal_id": str(task.goal.id),
+            "title": task.goal.title,
+            "deadline": task.goal.deadline.isoformat() if task.goal.deadline else None,
+            "value_level": task.goal.value_level.value,
+        }
+
+    def _breakdown_fallback_output(self, task: Task) -> dict:
+        return {
+            "steps": [
+                {
+                    "title": title,
+                    "sort_order": sort_order,
+                    "rationale": "Rule fallback step for local mock mode.",
+                }
+                for sort_order, title in enumerate(self._breakdown_step_titles(task), start=1)
+            ],
+            "confidence": 0.68,
+            "summary": "Rule fallback breakdown for local mock mode.",
+        }
+
+    def _usage_metadata(self, usage: object) -> dict:
+        if not isinstance(usage, dict):
+            return empty_llm_usage()
+        return {**empty_llm_usage(), **usage}
+
+    def _task_breakdown_fallback_reason(self, exc: Exception) -> str:
+        if isinstance(exc, ValueError):
+            return "task_breakdown_agent_invalid_output"
+        return "task_breakdown_agent_failed"
+
+    def _task_breakdown_failure_type(self, exc: Exception) -> str:
+        if isinstance(exc, ValueError):
+            return "invalid_output"
+        if isinstance(exc, LLMProviderError):
+            return "provider_error"
+        return "agent_error"
+
+    def _root_error_type(self, exc: Exception) -> str:
+        root = exc
+        while root.__cause__ is not None:
+            root = root.__cause__
+        return root.__class__.__name__
 
     def _breakdown_step_titles(self, task: Task) -> list[str]:
         if task.estimated_duration_min and task.estimated_duration_min >= 60:
@@ -754,6 +902,9 @@ class TaskService:
             "result_entity_type": job.result_entity_type,
             "result_entity_id": job.result_entity_id,
             "error_message": job.error_message,
+            "provider": job.provider,
+            "model": job.model,
+            "prompt_version": job.prompt_version,
             "job_metadata": job.job_metadata,
         }
 

@@ -1,15 +1,27 @@
 import unittest
 from datetime import datetime, timedelta
+import uuid
 from zoneinfo import ZoneInfo
 
-from app.models.enums import ValueLevel
+from app.ai.providers.base import LLMProviderError
+from app.models.ai_job import AIJob
+from app.models.enums import AIJobStatus, AIJobType, ValueLevel
 from app.services.focus_service import focus_service
 from app.services.goal_service import goal_service
-from app.services.insight_service import insight_service
+from app.services.insight_service import InsightService, insight_service
 from app.services.planning_service import planning_service
 from app.services.task_service import task_service
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
+
+
+class FailingInsightAgent:
+    prompt_version = "failing-insight-agent"
+    prompt_checksum = "0" * 64
+
+    def run(self, **kwargs):
+        del kwargs
+        raise LLMProviderError("insight provider unavailable")
 
 
 class InsightServiceTests(unittest.TestCase):
@@ -70,7 +82,44 @@ class InsightServiceTests(unittest.TestCase):
         self.assertTrue(insight["efficiency_windows"])
         self.assertTrue(insight["recommendations"])
         self.assertTrue(insight["strategy_notes"])
+        self.assertEqual(insight["source"]["generated_by"], "insight-agent-v1")
+        self.assertEqual(insight["source"]["ai_job_status"], "succeeded")
+        self.assertEqual(insight["source"]["model_name"], "structured-mock-v1")
+        self.assertEqual(insight["source"]["prompt_version"], "p2-insight-detail-agent-v1")
+        job = self.db.get(AIJob, uuid.UUID(insight["source"]["ai_job_id"]))
+        self.assertIsNotNone(job)
+        self.assertEqual(job.job_type, AIJobType.INSIGHT_GENERATOR)
+        self.assertEqual(job.status, AIJobStatus.SUCCEEDED)
+        self.assertEqual(job.result_entity_type, "insight_detail")
+        self.assertEqual(job.result_entity_id, self.user.id)
+
+    def test_insight_detail_falls_back_when_agent_fails(self):
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Fallback insight goal",
+            deadline=self.anchor_date,
+            value_level=ValueLevel.HIGH,
+        )
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Fallback overdue task",
+            deadline=self.anchor_date - timedelta(days=2),
+            value_level=ValueLevel.HIGH,
+        )
+        service = InsightService(insight_agent=FailingInsightAgent())
+
+        insight = service.get_detail(self.db, user_id=self.user.id, anchor_date=self.anchor_date)
+        job = self.db.get(AIJob, uuid.UUID(insight["source"]["ai_job_id"]))
+
         self.assertEqual(insight["source"]["generated_by"], "rule-insight-v1")
+        self.assertEqual(insight["source"]["ai_job_status"], "succeeded_with_fallback")
+        self.assertEqual(insight["source"]["fallback_reason"], "insight_detail_agent_failed")
+        self.assertEqual(job.status, AIJobStatus.SUCCEEDED_WITH_FALLBACK)
+        self.assertEqual(job.job_metadata["failure_type"], "provider_error")
+        self.assertIn("lagging_tasks", {pattern["key"] for pattern in insight["behavior_patterns"]})
 
     def _item_for_task(self, today: dict, task_id) -> dict:
         for section_items in today["sections"].values():

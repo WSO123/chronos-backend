@@ -71,6 +71,24 @@ class DailyPlannerAgent:
         )
 
     def _mock_output(self, *, candidates: list[dict], strategy_seed: dict) -> dict:
+        suggestions: list[dict] = [
+            {
+                "key": "start_with_first_task",
+                "title": "先开始第一项",
+                "message": "当前排序已经可执行，先从主序列第一项开始，完成后再看下一步。",
+                "signal": "positive",
+            }
+        ]
+        rolled_over_count = len([candidate for candidate in candidates if candidate["section"] == "rolled_over"])
+        if rolled_over_count:
+            suggestions.append(
+                {
+                    "key": "respect_rollover",
+                    "title": "保持滚动边界",
+                    "message": f"{rolled_over_count} 个任务已后移，今天先保护主序列，不急着全部拉回。",
+                    "signal": "watch",
+                }
+            )
         return {
             "mode": strategy_seed["mode"],
             "strategy_summary": strategy_seed["summary"],
@@ -84,6 +102,8 @@ class DailyPlannerAgent:
                 }
                 for candidate in candidates
             ],
+            "review_summary": "Planning Engine 的排序可以直接执行，LLM 只补充轻量审阅，不改变任务顺序。",
+            "suggestions": suggestions[:3],
             "confidence": 0.72,
         }
 

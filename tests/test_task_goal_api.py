@@ -344,7 +344,7 @@ class TaskGoalAPITests(unittest.TestCase):
         detail_response = self.client.get(f"/api/v1/tasks/{task_id}", headers=self.headers)
 
         self.assertEqual(breakdown_response.status_code, 200)
-        self.assertEqual(breakdown_response.json()["ai_job"]["status"], "succeeded_with_fallback")
+        self.assertEqual(breakdown_response.json()["ai_job"]["status"], "succeeded")
         self.assertEqual(len(breakdown_response.json()["created_steps"]), 4)
         self.assertEqual(job_response.status_code, 200)
         self.assertEqual(job_response.json()["id"], job_id)

@@ -507,9 +507,11 @@ Data Source 是 P3 自然生长模块的权限和连接状态底座，服务日�
 P1 Agent：
 
 - Capture Parser：解析输入为 Task / Goal / Inbox 候选项
-- Daily Planner：基于 Planning Engine candidates 输出结构化建议，业务层校验后生成今日推荐顺序
+- Daily Planner：基于 Planning Engine candidates 输出结构化审阅和建议，业务层校验后生成今日推荐顺序
+- Strategy Explanation：解释 Planning Engine v1 的排序因子，不改变计划
 - Task Breakdown：拆解任务步骤
 - Daily Report Generator：生成每日复盘建议
+- Insight Detail：解释周级行为模式和策略建议，不改变业务状态
 
 P3 Worker：
 
@@ -1017,7 +1019,7 @@ DailyReport {
 AIJob {
   id
   user_id
-  job_type                // capture_parser | daily_planner | task_breakdown | daily_report_generator
+  job_type                // capture_parser | daily_planner | strategy_explanation | task_breakdown | daily_report_generator | insight_generator
   status                  // queued | running | succeeded | succeeded_with_fallback | failed | canceled
   input_entity_type
   input_entity_id
@@ -1373,7 +1375,10 @@ GET /api/v1/insights/detail
 说明：
 
 - P2 返回行为模式、高低效时段、任务安排建议和滚动策略补充说明。
-- 当前是规则聚合，不持久化 Insight，不接真实 LLM。
+- 当前已接入 `InsightDetailAgent` v1：先生成规则洞察，再由 Agent 改写解释性文本。
+- 不持久化 Insight 表；AIJob 记录 `job_type=insight_generator`，source 返回 `ai_job_id`、status、model 和 prompt version。
+- Agent 只影响 `behavior_patterns`、`recommendations`、`strategy_notes`，不修改 `overview`、`efficiency_windows`、Task / Goal / Today 状态。
+- Agent 失败或输出不合法时，保留 `rule-insight-v1` 输出，`AIJob.status=succeeded_with_fallback`。
 - 只读接口，不改变 Task / Goal / Today 状态。
 
 ### AI Jobs
@@ -1457,12 +1462,34 @@ StrategyDetailResponse {
     focus_minutes
   }
   explanation[]
-  task_rationales[]
+  score_explanation {
+    summary
+    signals[] {
+      key
+      title
+      message
+      signal
+      score
+    }
+    source
+  }
+  planner_review?
+  task_rationales[] {
+    ...TodayTaskResponse
+    dominant_factor
+    dominant_reason
+    score_signals[]
+  }
   source {
     strategy_snapshot_id
+    ai_job_id                 // Daily Planner trace
     model_name
     prompt_version
     generated_at
+    explanation_ai_job_id     // Strategy Explanation trace
+    explanation_model_name
+    explanation_prompt_version
+    explanation_status
   }
 }
 ```
@@ -1473,6 +1500,9 @@ StrategyDetailResponse {
 - 如果用户进入 Strategy Detail，再调用单独接口获取解释。
 - Strategy Detail 只能解释当前 plan，不直接重新排序或改变 Task / Goal 状态；无 plan 时与 `GET /today` 一致 lazy create。
 - P2 调度信号包括任务价值、优先级、deadline、postpone 状态、任务依赖和用户优先级修正；其中依赖和修正只在 Strategy Detail 暴露轻量计数，不进入 Today 首屏驾驶舱。
+- `score_explanation` 和 `task_rationales[].score_signals` 是 Planning Engine 对 `score_breakdown` 的可读归纳，供 Strategy Detail 渲染 2-4 条关键解释；前端不要自行解释原始权重。
+- 已接入 `StrategyExplanationAgent` v1：基于 `StrategySnapshot`、`score_breakdown` 和 factors 生成自然解释；失败时回退规则解释。
+- `source.ai_job_id` 指向 Daily Planner，`source.explanation_ai_job_id` 指向 Strategy Explanation，避免混淆计划生成和解释生成。
 - Today 要像每日执行入口，不要像数据驾驶舱。
 
 ---
@@ -1496,6 +1526,8 @@ StrategyDetailResponse {
 
 - 输出必须结构化。
 - 低置信度结果进入 Inbox，不直接生成正式 Task。
+- 已接入 `CaptureParserAgent` v1：`CaptureService` 创建 `AIJob(job_type=capture_parser)`，调用 provider-backed structured output，失败时回退 rule parser。
+- 当前 Agent 结果只落到 `AIParseResult` / `InboxItem`，`result_entity` 指向 InboxItem，不能绕过 Inbox 直接创建 Task / Goal。
 
 ### Daily Planner
 
@@ -1518,9 +1550,11 @@ StrategyDetailResponse {
 要求：
 
 - 当前使用 Planning Engine v1 生成 deterministic candidates，读取价值、优先级、deadline、估时、依赖、用户修正、行为反馈、容量和 Energy 信号。
-- Daily Planner Agent shell 只返回 structured output；默认 provider 为 mock，不调用真实 LLM；显式开启后可使用 OpenAI-compatible provider。
+- Daily Planner Agent 返回 structured output；默认 provider 为 mock，不调用真实 LLM；显式开启后可使用 OpenAI-compatible provider。
 - Daily Planner prompt 由 prompt registry 加载，当前版本为 `p2-daily-planner-agent-v1`，checksum 记录到 `AIJob.job_metadata`。
 - `PlanningService` 必须校验 Agent 输出。v1 不允许 Agent 改变任务集合、`sort_order` 或 `section`。
+- Agent 可输出 `review_summary` 和 `suggestions`，只在 Strategy Detail 的 `planner_review` 中展示，不进入 Today 首屏。
+- `planner_review` 是 critique / suggestion，不代表系统已经修改计划；用户需要手动 replan 或调整任务。
 - Agent 失败或输出不合法时，使用 Planning Engine v1 fallback，`AIJob.status=succeeded_with_fallback`，并记录实际 provider / model、latency、failure_type 和 root error type。
 - `AIJob.job_metadata.usage` 保持稳定 token / cost 结构；真实 provider 返回 usage 时回填 token 统计，mock / fallback 保持空结构。
 - 后续再增加成本估算、长期行为学习和更复杂的多轮 replanning。
@@ -1539,6 +1573,9 @@ StrategyDetailResponse {
 
 - 用户需要确认或可编辑。
 - 不应自动覆盖已有步骤。
+- 已接入 `TaskBreakdownAgent` v1：`TaskService.breakdown_task` 创建 `AIJob(job_type=task_breakdown)`，调用 provider-backed structured output，失败时回退 rule breakdown。
+- Agent 输出只生成可编辑 `TaskStep`，不改变 Task 本体字段。
+- 任务已有步骤时不调用 Agent、不覆盖、不追加，返回空 `created_steps`。
 
 ### Daily Report Generator
 
@@ -1557,6 +1594,31 @@ StrategyDetailResponse {
 
 - P1 输出简洁建议。
 - 不要让洞察抢走行动感。
+- 已接入 `DailyReportAgent` v1：`ReportService.generate_daily_report` 创建 `AIJob(job_type=daily_report_generator)`，通过 structured output 生成 `DailyReport.ai_summary` 和 `DailyReport.ai_suggestions`。
+- Agent 只写 DailyReport 复盘文案，不修改 Task / Goal / DailyPlan / FocusSession。
+- Agent 失败或输出不合法时，保留规则复盘模板，`AIJob.status=succeeded_with_fallback`，并在 `DAILY_REPORT_GENERATED` 事件中记录 `ai_job_id` 和 fallback reason。
+
+### Insight Detail
+
+输入：
+
+- Weekly Report summary
+- FocusSession efficiency windows
+- rule-generated behavior patterns
+- rule-generated recommendations
+
+输出：
+
+- Insight Detail behavior_patterns
+- Insight Detail recommendations
+- Insight Detail strategy_notes
+
+要求：
+
+- 保持 Insight Detail 是二级反馈页，不抢 Today 的行动感。
+- 已接入 `InsightDetailAgent` v1：`InsightService.get_detail` 创建 `AIJob(job_type=insight_generator)`，通过 structured output 改写洞察解释。
+- Agent 不修改事实指标，不改 Task / Goal / DailyPlan / FocusSession / DailyReport。
+- Agent 失败或输出不合法时，保留规则洞察，source 标记 `generated_by=rule-insight-v1`，job 标记 `succeeded_with_fallback`。
 
 ---
 
@@ -1879,7 +1941,7 @@ AI output -> schema validation -> service decision -> DB write
 - P3 Notification / Reminder Center
 - P4 Social / Group 协作模块
 
-下一步应继续沿 P3 自然生长模块推进：先补 provider adapter / worker 观测能力，再进入 Health / Energy 或 Reminder。
+下一步继续沿核心 AI 主线推进：优先补 Daily Planner Agent critique / suggestion，让 LLM 基于 Planning Engine 结果做建议而不接管排序；P3 自然生长、真实 provider 验收和生产级安全上线能力后置。
 
 ---
 
