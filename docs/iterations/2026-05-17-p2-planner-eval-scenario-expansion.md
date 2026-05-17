@@ -303,6 +303,6 @@ git diff --check
 
 ## 13. 后续迭代建议
 
-1. 增加 JSONL 对比脚本，读取多次评估并输出 provider / prompt 差异摘要。
+1. 已在后续迭代补充 JSONL 对比脚本，读取多次评估并输出 provider / prompt 差异摘要。
 2. 增加真实 provider 手动验收记录模板，记录 model、usage、prompt checksum 和结论。
 3. 增加多 Goal 竞争 / 超期目标恢复的 planner eval 场景。

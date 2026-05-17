@@ -579,6 +579,15 @@ uv run python scripts/evaluate_planning_engine.py
 uv run python scripts/evaluate_planning_engine.py --jsonl-output /tmp/chronos-planner-eval.jsonl
 ```
 
+需要比较两次 JSONL 评估时，使用离线对比脚本：
+
+```bash
+uv run python scripts/compare_planner_eval_jsonl.py /tmp/chronos-planner-eval-baseline.jsonl /tmp/chronos-planner-eval-candidate.jsonl
+uv run python scripts/compare_planner_eval_jsonl.py /tmp/chronos-planner-eval-baseline.jsonl /tmp/chronos-planner-eval-candidate.jsonl --fail-on-regression
+```
+
+`--fail-on-regression` 只用于显式比较流程，不进入默认 CI / `verify_local`。默认行为应保持“报告差异”，避免评估工具反过来阻塞日常开发节奏。
+
 涉及 Daily Planner Agent shell 或 LLM provider 时，额外执行：
 
 ```bash

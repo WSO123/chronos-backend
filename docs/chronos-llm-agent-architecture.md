@@ -358,7 +358,8 @@ class CaptureParseOutput(BaseModel):
 - Agent 失败或输出不合法时，`AIJob.status=succeeded_with_fallback`，继续使用 Planning Engine v1 输出。
 - 每个 `DailyPlanItem` 会保存 `score_breakdown`，Strategy Detail 可以解释排序，Today 首屏不展开完整评分。
 - 超出容量的非保护任务进入 `section=rolled_over`；系统容量滚动不把 Task 本体改为 postponed。
-- 已提供 `scripts/evaluate_planning_engine.py` 固定场景评估，覆盖容量滚动、受保护任务超载、低精力保护、高精力深度任务适配、依赖链保护、用户手动优先级修正和重复中断行为反馈；支持 `--jsonl-output` 写出 run summary 和 scenario records，后续 LLM Daily Planner 必须通过这些基线或显式更新评估预期。
+- 已提供 `scripts/evaluate_planning_engine.py` 固定场景评估，覆盖容量滚动、受保护任务超载、低精力保护、高精力深度任务适配、依赖链保护、用户手动优先级修正和重复中断行为反馈；支持 `--jsonl-output` 写出 run summary 和 scenario records。
+- 已提供 `scripts/compare_planner_eval_jsonl.py` 比较两次 planner eval JSONL，默认只报告 scenario 通过状态、排序和 `item_signals` 差异；显式加 `--fail-on-regression` 时才作为回归 gate。后续 LLM Daily Planner 必须通过这些基线、用 compare 工具说明差异，或显式更新评估预期。
 
 输入：
 
