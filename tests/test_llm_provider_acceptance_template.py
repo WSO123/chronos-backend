@@ -17,6 +17,8 @@ class LLMProviderAcceptanceTemplateTests(unittest.TestCase):
             "LLM_API_KEY=<redacted>",
             "scripts/smoke_llm_provider.py --allow-real-llm",
             "scripts/compare_planner_eval_jsonl.py",
+            "scripts/check_planner_eval_policy.py",
+            "scripts/generate_llm_acceptance_record.py",
             "Input tokens",
             "Output tokens",
             "Total tokens",

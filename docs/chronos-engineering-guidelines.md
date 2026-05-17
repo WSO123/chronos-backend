@@ -599,6 +599,18 @@ uv run python scripts/verify_local.py --planner-eval-policy
 
 Planner eval policy 只作为手动 / 发布前 gate：`regressed` 必须修复或显式更新 evaluator 预期，`changed` 必须记录原因和结论，默认不纳入基础 CI。
 
+需要把真实 provider smoke、planner compare 和 policy check 汇总为验收记录草稿时，使用：
+
+```bash
+uv run python scripts/generate_llm_acceptance_record.py \
+  --smoke-json /tmp/chronos-llm-smoke.json \
+  --compare-json /tmp/chronos-planner-compare.json \
+  --policy-json /tmp/chronos-planner-policy.json \
+  --output docs/llm-provider-acceptance/YYYY-MM-DD-provider-model-purpose.md
+```
+
+生成结果仍必须人工 review；脚本默认隐藏 provider response id，不应把 API key、真实用户输入或 provider 原始响应写入验收记录。
+
 涉及 Daily Planner Agent shell 或 LLM provider 时，额外执行：
 
 ```bash

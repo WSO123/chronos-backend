@@ -6,7 +6,7 @@
 
 ## 使用方式
 
-1. 从 [TEMPLATE.md](./TEMPLATE.md) 复制一份记录。
+1. 优先使用 `scripts/generate_llm_acceptance_record.py` 从 smoke / compare / policy JSON 输出生成草稿；必要时从 [TEMPLATE.md](./TEMPLATE.md) 手动复制一份记录。
 2. 文件命名建议：
 
 ```text
@@ -66,3 +66,18 @@ uv run python scripts/evaluate_planning_engine.py --run-id candidate --jsonl-out
 uv run python scripts/compare_planner_eval_jsonl.py /tmp/chronos-planner-baseline.jsonl /tmp/chronos-planner-candidate.jsonl
 uv run python scripts/check_planner_eval_policy.py /tmp/chronos-planner-candidate.jsonl
 ```
+
+生成验收草稿：
+
+```bash
+uv run python scripts/generate_llm_acceptance_record.py \
+  --smoke-json /tmp/chronos-llm-smoke.json \
+  --compare-json /tmp/chronos-planner-compare.json \
+  --policy-json /tmp/chronos-planner-policy.json \
+  --provider openai \
+  --model gpt-4.1-mini \
+  --purpose daily-planner-smoke \
+  --output docs/llm-provider-acceptance/YYYY-MM-DD-openai-gpt-4-1-mini-daily-planner-smoke.md
+```
+
+脚本只生成草稿，不调用真实 provider，不代表免 review。生成后仍需人工核对 task ids、fallback 和 changed 原因。

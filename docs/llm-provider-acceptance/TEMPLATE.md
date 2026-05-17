@@ -88,6 +88,18 @@
 
 ## 4. 执行命令
 
+### 生成验收草稿
+
+```bash
+uv run python scripts/generate_llm_acceptance_record.py \
+  --smoke-json /tmp/chronos-llm-smoke.json \
+  --compare-json /tmp/chronos-planner-compare.json \
+  --policy-json /tmp/chronos-planner-policy.json \
+  --output docs/llm-provider-acceptance/YYYY-MM-DD-provider-model-purpose.md
+```
+
+该脚本只读取已有 JSON 输出并生成 Markdown 草稿，不调用真实 provider；生成后仍需人工 review。
+
 ### 默认安全检查
 
 ```bash
