@@ -20,3 +20,23 @@ class InvalidStateError(DomainError):
 class ValidationDomainError(DomainError):
     status_code = 400
     code = "VALIDATION_ERROR"
+
+
+class AuthenticationError(DomainError):
+    status_code = 401
+    code = "AUTHENTICATION_FAILED"
+
+
+class ForbiddenError(DomainError):
+    status_code = 403
+    code = "FORBIDDEN"
+
+
+class ConflictError(DomainError):
+    status_code = 409
+    code = "CONFLICT"
+
+
+class SecurityConfigurationError(DomainError):
+    status_code = 500
+    code = "INSECURE_AUTH_CONFIGURATION"

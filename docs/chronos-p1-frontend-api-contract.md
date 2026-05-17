@@ -62,6 +62,64 @@ uv run python scripts/dev_seed_user.py
 uv run python scripts/dev_seed_demo.py
 ```
 
+### Auth Endpoints
+
+#### POST `/auth/register`
+
+注册用户并返回 access / refresh token。MVP 阶段用于正式 token 闭环，不承担复杂账号体系。
+
+Request:
+
+```json
+{
+  "email": "alice@example.com",
+  "password": "safe-password",
+  "name": "Alice",
+  "timezone": "Asia/Shanghai"
+}
+```
+
+Response key fields:
+
+```json
+{
+  "token_type": "bearer",
+  "access_token": "jwt",
+  "expires_in": 1800,
+  "refresh_token": "opaque-token",
+  "refresh_expires_in": 2592000,
+  "user": {
+    "id": "uuid",
+    "email": "alice@example.com",
+    "name": "Alice",
+    "timezone": "Asia/Shanghai",
+    "is_active": true
+  }
+}
+```
+
+#### POST `/auth/login`
+
+使用 email / password 登录，返回同样的 token pair。
+
+#### POST `/auth/refresh`
+
+使用 refresh token 换取新的 access / refresh token。refresh token 会被轮换，旧 token 不能复用。
+
+```json
+{
+  "refresh_token": "opaque-token"
+}
+```
+
+#### POST `/auth/logout`
+
+撤销 refresh token。接口是幂等语义，重复提交已撤销 token 仍返回成功。
+
+#### GET `/auth/me`
+
+JWT 模式下用当前 Bearer token 返回当前用户基础信息。
+
 ### Error Shape
 
 所有显式业务错误统一返回：
@@ -89,6 +147,9 @@ uv run python scripts/dev_seed_demo.py
 | `USER_NOT_FOUND` | 404 | 当前 user 不存在，重新 seed / 登录 |
 | `USER_INACTIVE` | 403 | 用户已停用，退出当前会话 |
 | `INSECURE_AUTH_CONFIGURATION` | 500 | 后端认证配置不安全，前端提示环境配置错误 |
+| `AUTHENTICATION_FAILED` | 401 | 登录失败或 refresh token 无效，回到登录 |
+| `CONFLICT` | 409 | 注册邮箱已存在 |
+| `FORBIDDEN` | 403 | 用户或操作被禁止 |
 | `NOT_FOUND` | 404 | 资源不存在或不属于当前用户 |
 | `INVALID_STATE` | 400 | 按钮状态过期，刷新当前页面 |
 | `VALIDATION_ERROR` | 400 | 业务字段不合法 |

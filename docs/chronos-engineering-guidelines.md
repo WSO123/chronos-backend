@@ -240,6 +240,7 @@ P1 即使是单用户开发模式，也保留 `user_id`。
 - 本地开发可以使用 `AUTH_MODE=dev_header` + `X-User-Id`，但只允许在 `ENVIRONMENT` 非 production 且 `ALLOW_DEV_AUTH_HEADER=true` 时启用。
 - 生产或准生产环境必须使用 `AUTH_MODE=jwt` + `Authorization: Bearer <access_token>`。
 - production 环境使用 JWT 时，`SECRET_KEY` 不能保留默认值。
+- refresh token 只允许以不可逆 hash 形式落库，不能保存明文 token。
 - 无论认证模式如何，业务 Service 仍必须按 `user_id` 过滤资源，保持多用户隔离。
 - `is_active=false` 的用户必须在 API 入口被拒绝，不能进入业务 Service。
 

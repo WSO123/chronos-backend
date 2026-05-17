@@ -102,6 +102,16 @@ uv run alembic upgrade head
 uv run python scripts/dev_seed_user.py
 ```
 
+正式 token 闭环已提供：
+
+```text
+POST /api/v1/auth/register
+POST /api/v1/auth/login
+POST /api/v1/auth/refresh
+POST /api/v1/auth/logout
+GET  /api/v1/auth/me
+```
+
 准备一组可用于前端联调和手动验收的 P1 demo 数据：
 
 ```bash

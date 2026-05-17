@@ -15,10 +15,11 @@ from app.models.reminder_delivery import ReminderDeliveryAttempt
 from app.models.task import Task
 from app.models.task_dependency import TaskDependency
 from app.models.task_step import TaskStep
-from app.models.user import User, UserSettings
+from app.models.user import AuthRefreshToken, User, UserSettings
 
 __all__ = [
     "ActivityEvent",
+    "AuthRefreshToken",
     "AIJob",
     "AIParseResult",
     "CaptureInput",
