@@ -567,6 +567,33 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(recommended[1]["task_id"], interrupted_task.id)
         self.assertLess(recommended[1]["score_breakdown"]["behavior_feedback_score"], 0)
 
+    def test_planning_engine_uses_execution_feedback_for_remaining_estimate(self):
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Continue partially executed work",
+            estimated_duration_min=90,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task.actual_duration_min = 25
+        self.db.commit()
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        item = today["sections"]["recommended_tasks"][0]
+        self.assertEqual(item["task_id"], task.id)
+        self.assertEqual(item["estimated_duration_min"], 65)
+        self.assertEqual(item["score_breakdown"]["base_estimated_duration_min"], 90)
+        self.assertEqual(item["score_breakdown"]["actual_duration_min"], 25)
+        self.assertEqual(item["score_breakdown"]["remaining_estimated_duration_min"], 65)
+        self.assertTrue(item["score_breakdown"]["execution_feedback_applied"])
+        self.assertEqual(item["score_breakdown"]["execution_feedback_reason"], "actual_duration_remaining")
+        self.assertEqual(strategy["factors"]["execution_feedback_count"], 1)
+        self.assertEqual(strategy["factors"]["selected_estimated_minutes"], 65)
+        self.assertEqual(strategy["task_rationales"][0]["dominant_factor"], "execution_feedback")
+
     def test_planning_engine_high_energy_prioritizes_deeper_work_without_expanding_capacity(self):
         energy_service.upsert_daily_metric(
             self.db,

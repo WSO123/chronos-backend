@@ -305,6 +305,9 @@ class FocusService:
         payload: dict | None = None,
     ) -> None:
         event_payload = {"actual_duration_min": actual_duration_min}
+        if session.planned_duration_min is not None:
+            event_payload["planned_duration_min"] = session.planned_duration_min
+            event_payload["duration_delta_min"] = actual_duration_min - session.planned_duration_min
         if payload:
             event_payload.update(payload)
         activity_event_service.add_event(

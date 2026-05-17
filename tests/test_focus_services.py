@@ -55,6 +55,9 @@ class FocusServiceTests(unittest.TestCase):
         self.assertIn("FOCUS_SESSION_STARTED", {event.event_type for event in events})
         self.assertIn("FOCUS_SESSION_COMPLETED", {event.event_type for event in events})
         self.assertIn("TASK_COMPLETED", {event.event_type for event in events})
+        completed_event = next(event for event in events if event.event_type == "FOCUS_SESSION_COMPLETED")
+        self.assertEqual(completed_event.payload["planned_duration_min"], 25)
+        self.assertEqual(completed_event.payload["duration_delta_min"], -7)
 
     def test_start_focus_without_item_auto_links_current_today_item(self):
         task = task_service.create_task(self.db, user_id=self.user.id, title="Auto link Today item")

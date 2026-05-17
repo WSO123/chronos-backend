@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from math import ceil
 from time import perf_counter
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -820,7 +821,8 @@ class PlanningService:
 
     def _score_breakdown_for(self, task: Task, *, context: PlanningContext, signals: dict) -> dict:
         semantic_signal = signals["semantic_by_task_id"].get(task.id)
-        estimated_minutes = self._estimated_minutes_for(task, semantic_signal=semantic_signal)
+        duration_estimate = self._duration_estimate_for(task, semantic_signal=semantic_signal)
+        estimated_minutes = int(duration_estimate["estimated_duration_min"])
         behavior = signals["behavior_by_task_id"].get(
             task.id,
             {"completed": 0, "postponed": 0, "interrupted": 0},
@@ -887,7 +889,7 @@ class PlanningService:
             "postponement_penalty": int(postponement_penalty),
             "priority_score": int(priority_score),
             **semantic_scores,
-            "estimated_duration_min": int(estimated_minutes),
+            **duration_estimate,
             "user_estimated_duration_min": task.estimated_duration_min,
             "daily_capacity_minutes": int(context.daily_capacity_minutes),
             "energy_level": context.energy_level,
@@ -901,6 +903,34 @@ class PlanningService:
         if semantic_signal is not None and semantic_signal.estimated_duration_min:
             return semantic_signal.estimated_duration_min
         return 25
+
+    def _duration_estimate_for(self, task: Task, *, semantic_signal: TaskPlanningSignal | None) -> dict:
+        base_estimate = self._estimated_minutes_for(task, semantic_signal=semantic_signal)
+        actual_minutes = max(0, int(task.actual_duration_min or 0))
+        progress_ratio = max(0.0, min(1.0, float(task.progress or 0)))
+        remaining_estimate = base_estimate
+        feedback_reason = None
+
+        if 0 < progress_ratio < 1:
+            remaining_estimate = max(15, ceil(base_estimate * (1 - progress_ratio)))
+            feedback_reason = "task_progress_remaining"
+        elif actual_minutes > 0:
+            if actual_minutes < base_estimate:
+                remaining_estimate = max(15, base_estimate - actual_minutes)
+                feedback_reason = "actual_duration_remaining"
+            else:
+                remaining_estimate = max(25, min(45, base_estimate))
+                feedback_reason = "actual_duration_overrun"
+
+        return {
+            "estimated_duration_min": int(remaining_estimate),
+            "base_estimated_duration_min": int(base_estimate),
+            "remaining_estimated_duration_min": int(remaining_estimate),
+            "actual_duration_min": actual_minutes,
+            "progress_ratio": round(progress_ratio, 2),
+            "execution_feedback_applied": remaining_estimate != base_estimate,
+            "execution_feedback_reason": feedback_reason if remaining_estimate != base_estimate else None,
+        }
 
     def _semantic_signal_scores(
         self,
@@ -1422,6 +1452,9 @@ class PlanningService:
         minimum_viable_progress_count = len(
             [planned for planned in active_tasks if planned.score_breakdown.get("minimum_viable_progress_applied")]
         )
+        execution_feedback_count = len(
+            [planned for planned in active_tasks if planned.score_breakdown.get("execution_feedback_applied")]
+        )
         first_breakdown = planned_tasks[0].score_breakdown if planned_tasks else {}
         daily_capacity_minutes = int(first_breakdown.get("daily_capacity_minutes") or 0)
         energy_level = str(first_breakdown.get("energy_level") or "unknown")
@@ -1451,6 +1484,7 @@ class PlanningService:
                     "semantic_signal_count": 0,
                     "semantic_protected_count": 0,
                     "minimum_viable_progress_count": 0,
+                    "execution_feedback_count": 0,
                     "energy_level": energy_level,
                     "energy_applied": energy_applied,
                 },
@@ -1486,6 +1520,7 @@ class PlanningService:
                 "semantic_signal_count": semantic_signal_count,
                 "semantic_protected_count": semantic_protected_count,
                 "minimum_viable_progress_count": minimum_viable_progress_count,
+                "execution_feedback_count": execution_feedback_count,
                 "energy_level": energy_level,
                 "energy_applied": energy_applied,
                 "average_score": round(
@@ -1684,6 +1719,16 @@ class PlanningService:
                     "score": factors["minimum_viable_progress_count"],
                 }
             )
+        if factors["execution_feedback_count"]:
+            signals.append(
+                {
+                    "key": "execution_feedback",
+                    "title": "执行反馈校准",
+                    "message": f"{factors['execution_feedback_count']} 个任务根据实际投入时间校准了今日剩余估时。",
+                    "signal": "info",
+                    "score": factors["execution_feedback_count"],
+                }
+            )
         if factors["energy_applied"]:
             signals.append(
                 {
@@ -1789,6 +1834,7 @@ class PlanningService:
             "semantic_signal_count": int(score_factors.get("semantic_signal_count", 0) or 0),
             "semantic_protected_count": int(score_factors.get("semantic_protected_count", 0) or 0),
             "minimum_viable_progress_count": int(score_factors.get("minimum_viable_progress_count", 0) or 0),
+            "execution_feedback_count": int(score_factors.get("execution_feedback_count", 0) or 0),
             "energy_level": str(score_factors.get("energy_level") or "unknown"),
             "energy_applied": bool(score_factors.get("energy_applied") or False),
             "planner_agent_latency_ms": score_factors.get("planner_agent_latency_ms"),
@@ -1819,6 +1865,8 @@ class PlanningService:
             explanation.append(f"{factors['semantic_signal_count']} 个任务读取了语义规划信号，用来理解目标对齐、复杂度和最小推进动作。")
         if factors["minimum_viable_progress_count"]:
             explanation.append(f"{factors['minimum_viable_progress_count']} 个高价值大任务只安排最小推进动作，避免 Today 变成不可执行清单。")
+        if factors["execution_feedback_count"]:
+            explanation.append(f"{factors['execution_feedback_count']} 个任务读取了真实执行时间，用来校准下一轮剩余估时。")
         if strategy.mode == PlanningPreference.LIGHT:
             explanation.append("今天保持轻量，让第一个动作更容易开始。")
         elif strategy.mode == PlanningPreference.SPRINT:
@@ -2122,6 +2170,24 @@ class PlanningService:
                     "message": "任务本身偏大，Today 只保护一个今天做得出来的推进切片。",
                     "signal": "positive",
                     "score": score_breakdown.get("planned_duration_min"),
+                }
+            )
+
+        if score_breakdown.get("execution_feedback_applied"):
+            reason = score_breakdown.get("execution_feedback_reason")
+            if reason == "actual_duration_overrun":
+                message = "这个任务已经超过原估时但还没完成，Today 先按较小推进块继续安排。"
+            elif reason == "task_progress_remaining":
+                message = "这个任务已有部分进度，Today 按剩余进度重新估算时长。"
+            else:
+                message = "这个任务已经投入过时间，Today 按剩余工作量重新估算时长。"
+            signals.append(
+                {
+                    "key": "execution_feedback",
+                    "title": "执行反馈校准",
+                    "message": message,
+                    "signal": "info",
+                    "score": score_breakdown.get("remaining_estimated_duration_min"),
                 }
             )
 

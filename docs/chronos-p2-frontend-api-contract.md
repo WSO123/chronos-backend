@@ -118,6 +118,7 @@ P2 新增字段：
   "semantic_signal_count": 1,
   "semantic_protected_count": 1,
   "minimum_viable_progress_count": 1,
+  "execution_feedback_count": 1,
   "energy_level": "unknown",
   "energy_applied": false,
   "planner_agent_latency_ms": 12,
@@ -134,6 +135,7 @@ P2 新增字段：
 - `semantic_signal_count` 表示当前计划读取到 TaskPlanningSignal 的任务数量。
 - `semantic_protected_count` 表示因为语义信号对目标推进价值较高而被保护的任务数量。
 - `minimum_viable_progress_count` 表示有多少大任务在 Today 中只保护“今天做得出来的最小推进动作”。
+- `execution_feedback_count` 表示有多少任务读取了真实执行时间，并用它校准今日剩余估时。
 - `daily_capacity_minutes` 是 Planning Engine 的当日容量参考，不是严格日历时间块。
 - `selected_estimated_minutes` 是今天主执行序列的估时总量。
 - `rolled_over_estimated_minutes` 是被滚动到未来、保留可见但不计入主执行序列的估时。
@@ -218,7 +220,12 @@ P2 新增字段：
     "goal_alignment_signal_score": 13,
     "semantic_priority_signal_score": 10,
     "semantic_minimum_viable_step": "先完成一个可验证的小结果",
-    "original_estimated_duration_min": 180,
+    "base_estimated_duration_min": 180,
+    "actual_duration_min": 30,
+    "remaining_estimated_duration_min": 150,
+    "execution_feedback_applied": true,
+    "execution_feedback_reason": "actual_duration_remaining",
+    "original_estimated_duration_min": 150,
     "planned_duration_min": 45,
     "minimum_viable_progress_applied": true,
     "daily_capacity_minutes": 150,
@@ -243,6 +250,7 @@ P2 新增字段：
 - `score_breakdown` 是解释数据，不要在 Today 首屏展示成复杂驾驶舱。
 - Strategy Detail 优先展示 `dominant_reason` 和 `score_signals`，不要让前端自行解释原始权重。
 - `semantic_*` 字段来自 TaskPlanningSignal，只表示 Planning Engine 读取到语义信号；它不是 LLM 直接改排序。
+- `base_estimated_duration_min` 是任务原始 / 语义估时，`remaining_estimated_duration_min` 是结合 Focus 实际投入后的剩余估时，`original_estimated_duration_min` 是最小推进切片前的本轮估时。
 - `selected_for_today=false` 且 `rollover_reason=capacity` 表示任务被系统滚动到未来，不代表任务被用户手动延后；此时 `item_status` 仍可为 `planned`，前端应以 `section=rolled_over` 判断展示位置。
 - 若 `capacity_status=overloaded`，Today 可在 Insights Preview 展示一条轻量风险提示，但不要展示完整容量面板。
 
