@@ -60,11 +60,16 @@ def confirm_inbox_item(
     db: Session = Depends(get_db),
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
-    item = inbox_service.confirm_item(db, item_id=item_id, user_id=user_id)
+    item, today_impact = inbox_service.confirm_item_with_today_impact(
+        db,
+        item_id=item_id,
+        user_id=user_id,
+    )
     return {
         "inbox_item": item,
         "result_entity_type": item.result_entity_type,
         "result_entity_id": item.result_entity_id,
+        "today_impact": today_impact,
     }
 
 

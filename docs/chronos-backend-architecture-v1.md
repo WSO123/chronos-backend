@@ -1170,6 +1170,9 @@ POST /api/v1/inbox/{item_id}/discard
 
 - Inbox 是 AI 解析和正式任务库之间的确认层。
 - confirm 后生成 Task 或 Goal。
+- Task 型 confirm 若当天已有 active Today plan，会触发 Planning Engine 的 `system_refresh` revision，并在响应中返回 `today_impact`。
+- 重复 confirm 已确认 item 必须保持幂等，只返回当前影响结果，不再次刷新 Today。
+- 若当天还没有 active Today plan，Inbox confirm 不会隐式创建 Today；Today 仍由 `GET /today` 作为决策入口生成。
 
 ### Today
 

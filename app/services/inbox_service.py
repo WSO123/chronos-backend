@@ -10,6 +10,7 @@ from app.models.inbox import InboxItem
 from app.services.activity_event_service import activity_event_service
 from app.services.errors import InvalidStateError, NotFoundError, ValidationDomainError
 from app.services.goal_service import goal_service
+from app.services.planning_service import planning_service
 from app.services.task_service import task_service
 
 
@@ -60,12 +61,23 @@ class InboxService:
         return item
 
     def confirm_item(self, db: Session, *, item_id: uuid.UUID, user_id: uuid.UUID) -> InboxItem:
+        item, _ = self.confirm_item_with_today_impact(db, item_id=item_id, user_id=user_id)
+        return item
+
+    def confirm_item_with_today_impact(
+        self,
+        db: Session,
+        *,
+        item_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> tuple[InboxItem, dict | None]:
         item = self._get_item_for_update(db, item_id=item_id, user_id=user_id)
         if item.status == InboxItemStatus.CONFIRMED:
             if item.result_entity_type and item.result_entity_id:
+                today_impact = self._today_impact_for_result(db, user_id=user_id, item=item)
                 db.commit()
                 db.refresh(item)
-                return item
+                return item, today_impact
             raise InvalidStateError("confirmed inbox item is missing result entity")
 
         if item.status not in {InboxItemStatus.PENDING, InboxItemStatus.EDITED}:
@@ -88,6 +100,11 @@ class InboxService:
             item.status = InboxItemStatus.CONFIRMED
             item.result_entity_type = "task"
             item.result_entity_id = task.id
+            today_impact = planning_service.include_confirmed_task_from_inbox(
+                db,
+                user_id=user_id,
+                task_id=task.id,
+            )
         elif item.item_type == InboxItemType.GOAL:
             goal = goal_service.create_goal(
                 db,
@@ -101,6 +118,7 @@ class InboxService:
             item.status = InboxItemStatus.CONFIRMED
             item.result_entity_type = "goal"
             item.result_entity_id = goal.id
+            today_impact = None
         else:
             raise ValidationDomainError("Only task or goal inbox items can be confirmed")
 
@@ -114,7 +132,7 @@ class InboxService:
         )
         db.commit()
         db.refresh(item)
-        return item
+        return item, today_impact
 
     def discard_item(self, db: Session, *, item_id: uuid.UUID, user_id: uuid.UUID) -> InboxItem:
         item = self.get_item(db, item_id=item_id, user_id=user_id)
@@ -155,6 +173,15 @@ class InboxService:
         if capture_source == CaptureSource.CALENDAR:
             return TaskSource.CALENDAR
         return TaskSource.CAPTURE
+
+    def _today_impact_for_result(self, db: Session, *, user_id: uuid.UUID, item: InboxItem) -> dict | None:
+        if item.result_entity_type != "task" or item.result_entity_id is None:
+            return None
+        return planning_service.describe_task_today_impact(
+            db,
+            user_id=user_id,
+            task_id=item.result_entity_id,
+        )
 
 
 inbox_service = InboxService()

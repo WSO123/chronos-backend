@@ -44,6 +44,8 @@ class CaptureInboxAPITests(unittest.TestCase):
         confirm_body = confirm_response.json()
         self.assertEqual(confirm_body["result_entity_type"], "task")
         self.assertEqual(confirm_body["inbox_item"]["status"], "confirmed")
+        self.assertEqual(confirm_body["today_impact"]["plan_exists"], False)
+        self.assertEqual(confirm_body["today_impact"]["reason"], "no_active_today_plan")
 
         pending_response = self.client.get("/api/v1/inbox", headers=self.headers)
         all_status_response = self.client.get("/api/v1/inbox?include_all=true", headers=self.headers)
@@ -65,6 +67,48 @@ class CaptureInboxAPITests(unittest.TestCase):
         self.assertEqual(second_confirm_response.status_code, 200)
         self.assertEqual(second_confirm_response.json()["result_entity_id"], confirm_body["result_entity_id"])
 
+    def test_confirm_task_replans_existing_today_plan(self):
+        self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Existing Today task", "priority": 2},
+            headers=self.headers,
+        )
+        today_response = self.client.get("/api/v1/today", headers=self.headers)
+        self.assertEqual(today_response.status_code, 200)
+        initial_today = today_response.json()
+
+        capture_response = self.client.post(
+            "/api/v1/captures",
+            json={"raw_text": "完成 Today 滚动纳入验证"},
+            headers=self.headers,
+        )
+        item_id = capture_response.json()["inbox_item"]["id"]
+
+        confirm_response = self.client.post(f"/api/v1/inbox/{item_id}/confirm", headers=self.headers)
+
+        self.assertEqual(confirm_response.status_code, 200)
+        body = confirm_response.json()
+        impact = body["today_impact"]
+        self.assertEqual(impact["plan_exists"], True)
+        self.assertEqual(impact["replanned"], True)
+        self.assertEqual(impact["daily_plan_id"], initial_today["daily_plan_id"])
+        self.assertEqual(impact["plan_version"], initial_today["plan_version"] + 1)
+        self.assertEqual(impact["task_in_today"], True)
+        self.assertEqual(impact["reason"], "replanned_existing_today_plan")
+        self.assertIsNotNone(impact["daily_plan_item_id"])
+
+        refreshed_today = self.client.get("/api/v1/today", headers=self.headers)
+        section_items = refreshed_today.json()["sections"].values()
+        task_ids = {item["task_id"] for section in section_items for item in section}
+        self.assertIn(body["result_entity_id"], task_ids)
+
+        second_confirm_response = self.client.post(f"/api/v1/inbox/{item_id}/confirm", headers=self.headers)
+        second_impact = second_confirm_response.json()["today_impact"]
+        self.assertEqual(second_confirm_response.status_code, 200)
+        self.assertEqual(second_impact["replanned"], False)
+        self.assertEqual(second_impact["plan_version"], impact["plan_version"])
+        self.assertEqual(second_impact["reason"], "already_in_today_plan")
+
     def test_capture_goal_confirm_happy_path(self):
         capture_response = self.client.post(
             "/api/v1/captures",
@@ -77,6 +121,7 @@ class CaptureInboxAPITests(unittest.TestCase):
 
         self.assertEqual(confirm_response.status_code, 200)
         self.assertEqual(confirm_response.json()["result_entity_type"], "goal")
+        self.assertIsNone(confirm_response.json()["today_impact"])
 
     def test_edit_unknown_item_then_confirm(self):
         capture_response = self.client.post(

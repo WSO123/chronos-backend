@@ -155,6 +155,80 @@ class PlanningService:
             db.commit()
         return self._build_today_response(db, plan=plan)
 
+    def describe_task_today_impact(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        task_id: uuid.UUID,
+    ) -> dict:
+        plan_date = self._resolve_plan_date(db, user_id=user_id, plan_date=None)
+        plan = self._get_active_plan(db, user_id=user_id, plan_date=plan_date)
+        if plan is None:
+            return self._no_active_today_impact(plan_date=plan_date)
+
+        current_item = self._current_item_for_task(db, plan=plan, task_id=task_id)
+        return self._today_impact_response(
+            plan=plan,
+            item=current_item,
+            plan_date=plan_date,
+            replanned=False,
+            reason="already_in_today_plan" if current_item else "not_in_today_plan",
+        )
+
+    def include_confirmed_task_from_inbox(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        task_id: uuid.UUID,
+    ) -> dict:
+        plan_date = self._resolve_plan_date(db, user_id=user_id, plan_date=None)
+        plan = self._get_active_plan(db, user_id=user_id, plan_date=plan_date)
+        if plan is None:
+            return self._no_active_today_impact(plan_date=plan_date)
+
+        current_item = self._current_item_for_task(db, plan=plan, task_id=task_id)
+        if current_item is None:
+            previous_version = plan.current_version
+            self._create_revision(
+                db,
+                plan=plan,
+                trigger=PlanRevisionTrigger.SYSTEM_REFRESH,
+                reason="Inbox confirmed task added to Today",
+            )
+            activity_event_service.add_event(
+                db,
+                user_id=user_id,
+                entity_type=EntityType.DAILY_PLAN,
+                entity_id=plan.id,
+                event_type="DAILY_PLAN_SYSTEM_REFRESHED",
+                actor_type=ActorType.SYSTEM,
+                related_task_id=task_id,
+                related_daily_plan_id=plan.id,
+                payload={
+                    "source": "inbox_confirm",
+                    "task_id": str(task_id),
+                    "previous_version": previous_version,
+                    "version": plan.current_version,
+                },
+            )
+            current_item = self._current_item_for_task(db, plan=plan, task_id=task_id)
+            replanned = True
+            reason = "replanned_existing_today_plan"
+        else:
+            self._sync_current_items(db, plan=plan)
+            replanned = False
+            reason = "already_in_today_plan"
+
+        return self._today_impact_response(
+            plan=plan,
+            item=current_item,
+            plan_date=plan_date,
+            replanned=replanned,
+            reason=reason,
+        )
+
     def update_item_status(
         self,
         db: Session,
@@ -2051,6 +2125,62 @@ class PlanningService:
             .order_by(DailyPlanItem.sort_order)
         )
         return list(db.scalars(stmt).all())
+
+    def _current_item_for_task(
+        self,
+        db: Session,
+        *,
+        plan: DailyPlan,
+        task_id: uuid.UUID,
+    ) -> DailyPlanItem | None:
+        if plan.current_revision_id is None:
+            return None
+        stmt = (
+            select(DailyPlanItem)
+            .where(
+                DailyPlanItem.daily_plan_id == plan.id,
+                DailyPlanItem.plan_revision_id == plan.current_revision_id,
+                DailyPlanItem.task_id == task_id,
+            )
+            .order_by(DailyPlanItem.sort_order)
+        )
+        return db.scalars(stmt).first()
+
+    def _today_impact_response(
+        self,
+        *,
+        plan: DailyPlan,
+        item: DailyPlanItem | None,
+        plan_date: date,
+        replanned: bool,
+        reason: str,
+    ) -> dict:
+        return {
+            "plan_date": plan_date,
+            "plan_exists": True,
+            "replanned": replanned,
+            "daily_plan_id": plan.id,
+            "plan_version": plan.current_version,
+            "daily_plan_item_id": item.id if item else None,
+            "task_in_today": item is not None,
+            "section": item.section if item else None,
+            "item_status": item.status if item else None,
+            "reason": reason,
+        }
+
+    def _no_active_today_impact(self, *, plan_date: date) -> dict:
+        return {
+            "plan_date": plan_date,
+            "plan_exists": False,
+            "replanned": False,
+            "daily_plan_id": None,
+            "plan_version": None,
+            "daily_plan_item_id": None,
+            "task_in_today": False,
+            "section": None,
+            "item_status": None,
+            "reason": "no_active_today_plan",
+        }
 
     def _current_strategy(self, db: Session, *, plan: DailyPlan) -> StrategySnapshot:
         stmt = select(StrategySnapshot).where(

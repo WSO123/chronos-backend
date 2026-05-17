@@ -110,6 +110,12 @@ POST /auth/register
 -> GET /me/overview
 ```
 
+`POST /inbox/{id}/confirm` 会返回 `today_impact`：
+
+- 如果已有 active Today plan，Task 型 Inbox confirm 会刷新 Today version，并返回 `replanned=true`。
+- 如果还没有 active Today plan，返回 `plan_exists=false`，随后进入 `GET /today` 时再生成今日计划。
+- Goal 型 Inbox confirm 返回 `today_impact=null`。
+
 ---
 
 ## 5. 手动 Curl Walkthrough

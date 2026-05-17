@@ -57,6 +57,8 @@ def run_smoke(*, email: str, password: str, name: str, timezone: str) -> dict[st
         )
         if confirmed["result_entity_type"] != "task":
             raise RuntimeError(f"confirmed inbox item should create task, got {confirmed['result_entity_type']}")
+        if confirmed["today_impact"]["plan_exists"]:
+            raise RuntimeError("fresh capture smoke should not create Today before GET /today")
         task_id = confirmed["result_entity_id"]
 
         today = _expect(client.get("/api/v1/today", headers=headers), 200, "get today")

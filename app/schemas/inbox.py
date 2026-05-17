@@ -3,7 +3,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import InboxItemStatus, InboxItemType
+from app.models.enums import DailyPlanItemSection, DailyPlanItemStatus, InboxItemStatus, InboxItemType
 from app.schemas.common import TimestampedResponse
 
 
@@ -33,7 +33,21 @@ class InboxItemResponse(TimestampedResponse):
     result_entity_id: uuid.UUID | None
 
 
+class InboxConfirmTodayImpactResponse(BaseModel):
+    plan_date: date
+    plan_exists: bool
+    replanned: bool
+    daily_plan_id: uuid.UUID | None = None
+    plan_version: int | None = None
+    daily_plan_item_id: uuid.UUID | None = None
+    task_in_today: bool
+    section: DailyPlanItemSection | None = None
+    item_status: DailyPlanItemStatus | None = None
+    reason: str
+
+
 class InboxConfirmResponse(BaseModel):
     inbox_item: InboxItemResponse
     result_entity_type: str
     result_entity_id: uuid.UUID
+    today_impact: InboxConfirmTodayImpactResponse | None = None

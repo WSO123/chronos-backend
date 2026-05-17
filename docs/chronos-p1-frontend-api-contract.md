@@ -324,13 +324,29 @@ Response:
     "result_entity_id": "uuid"
   },
   "result_entity_type": "task",
-  "result_entity_id": "uuid"
+  "result_entity_id": "uuid",
+  "today_impact": {
+    "plan_date": "2026-05-17",
+    "plan_exists": true,
+    "replanned": true,
+    "daily_plan_id": "uuid",
+    "plan_version": 2,
+    "daily_plan_item_id": "uuid",
+    "task_in_today": true,
+    "section": "recommended",
+    "item_status": "planned",
+    "reason": "replanned_existing_today_plan"
+  }
 }
 ```
 
 Frontend notes:
 
 - `result_entity_type=task` 后可以跳 Task Detail 或回 Today。
+- `today_impact=null` 表示本次确认不影响 Today，例如确认 Goal。
+- `today_impact.plan_exists=false` 表示当前还没有 active Today plan；前端不需要假设任务已进入今日编排，用户进入 Today 时由 `GET /today` 生成。
+- `today_impact.replanned=true` 表示已有 Today plan 被系统刷新，新任务已纳入当前 plan version；前端可以刷新 Today 数据。
+- 对已确认 item 重复调用 confirm 是幂等的：不会再次刷新 Today，只返回当前 `today_impact`。
 - `result_entity_type=goal` 后 P1 可以轻提示创建成功；完整 Goal Detail 是 P2。
 - 已确认 / 已丢弃 item 不可再编辑确认，前端应禁用操作。
 
