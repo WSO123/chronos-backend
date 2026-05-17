@@ -13,6 +13,7 @@
 - [Chronos App 产品信息架构](./chronos-information-architecture-final.md)：页面结构、核心路径和分期建议。
 - [Chronos Interaction Flow Design](./chronos-interaction-flow-design.md)：交互主路径、页面跳转和后端对象映射。
 - [Chronos LLM & Agent Architecture](./chronos-llm-agent-architecture.md)：LLM 接入、Agent 职责、AIJob 生命周期和 fallback 策略。
+- [Chronos Mainline Capability Review](./chronos-mainline-capability-review-2026-05-17.md)：当前 P1/P2 主线能力成熟度、暂缓范围、后续优先级和防偏航清单。
 - [Chronos Engineering Guidelines](./chronos-engineering-guidelines.md)：代码结构、分层调用、数据/API/AI/测试开发规范。
 - [Chronos P2 Frontend API Contract](./chronos-p2-frontend-api-contract.md)：P2 前端接口合同总览。
 - [Chronos PRD V3.5](./chronos-prd-v3.5.md)：长期愿景、能力池和路线图。
