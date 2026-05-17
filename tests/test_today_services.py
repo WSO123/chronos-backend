@@ -744,6 +744,62 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["factors"]["selected_estimated_minutes"], 125)
         self.assertEqual(strategy["task_rationales"][0]["dominant_factor"], "minimum_viable_progress")
 
+    def test_planning_engine_protects_next_action_for_each_high_value_goal(self):
+        launch_goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Launch important product",
+            value_level=ValueLevel.HIGH,
+        )
+        learning_goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Advance learning path",
+            value_level=ValueLevel.HIGH,
+        )
+        launch_next = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=launch_goal.id,
+            title="Draft launch narrative",
+            estimated_duration_min=45,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        launch_later = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=launch_goal.id,
+            title="Polish launch appendix",
+            estimated_duration_min=45,
+            priority=5,
+            value_level=ValueLevel.MEDIUM,
+        )
+        learning_next = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=learning_goal.id,
+            title="Finish learning milestone",
+            estimated_duration_min=45,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        main_items = today["sections"]["pinned_tasks"] + today["sections"]["recommended_tasks"]
+        main_task_ids = [item["task_id"] for item in main_items]
+        ordered_task_ids = main_task_ids + [item["task_id"] for item in today["sections"]["low_priority_tasks"]]
+
+        self.assertIn(launch_next.id, main_task_ids)
+        self.assertIn(learning_next.id, main_task_ids)
+        self.assertLess(ordered_task_ids.index(launch_next.id), ordered_task_ids.index(launch_later.id))
+        self.assertEqual(strategy["factors"]["goal_next_action_count"], 2)
+        protected_rationales = [
+            rationale for rationale in strategy["task_rationales"] if rationale["task_id"] in {launch_next.id, learning_next.id}
+        ]
+        self.assertTrue(all(rationale["dominant_factor"] == "goal_next_action" for rationale in protected_rationales))
+
     def test_today_planner_orders_prerequisites_before_dependent_tasks(self):
         prerequisite = task_service.create_task(
             self.db,

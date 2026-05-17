@@ -365,7 +365,7 @@ class CaptureParserOutput(BaseModel):
 当前实现状态：
 
 - 已落地 Planning Engine v1，作为 deterministic planner core 和未来 LLM Daily Planner 的 fallback。
-- Planning Engine v1 已读取任务价值、Goal 价值、任务 / Goal deadline、优先级、剩余估时、依赖、用户修正、真实执行反馈、当日容量、Energy 信号和 TaskPlanningSignal 语义信号。
+- Planning Engine v1 已读取任务价值、Goal 价值、Goal 下一步保护、任务 / Goal deadline、优先级、剩余估时、依赖、用户修正、真实执行反馈、当日容量、Energy 信号和 TaskPlanningSignal 语义信号。
 - 已接入 Daily Planner Agent critique / suggestion：`PlanningService` 先生成 deterministic candidates，再调用 Agent 返回 structured review。
 - 默认 provider 是 `mock`，模型标识为 `structured-mock-v1`；`AI_ENABLE_REAL_LLM=false` 时不会调用外部模型。
 - 已接入 OpenAI-compatible provider adapter，可通过 `LLM_PROVIDER=openai` 或 `LLM_PROVIDER=openai-compatible` 显式启用；本地和 CI 默认关闭。

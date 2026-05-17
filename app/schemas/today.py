@@ -106,6 +106,7 @@ class StrategyDetailFactorsResponse(BaseModel):
     over_capacity_minutes: int
     capacity_status: str
     dependency_protected_count: int
+    goal_next_action_count: int = 0
     user_adjusted_count: int
     semantic_signal_count: int = 0
     semantic_protected_count: int = 0

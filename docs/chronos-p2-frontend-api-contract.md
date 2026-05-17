@@ -114,6 +114,7 @@ P2 新增字段：
   "over_capacity_minutes": 0,
   "capacity_status": "within_capacity",
   "dependency_protected_count": 1,
+  "goal_next_action_count": 2,
   "user_adjusted_count": 1,
   "semantic_signal_count": 1,
   "semantic_protected_count": 1,
@@ -131,6 +132,7 @@ P2 新增字段：
 说明：
 
 - `dependency_protected_count` 表示被提前保护的前置任务数量。
+- `goal_next_action_count` 表示有多少高价值 / 临近截止目标各自保留了一个下一步行动。
 - `user_adjusted_count` 表示当前计划读取到用户优先级修正事件的任务数量。
 - `semantic_signal_count` 表示当前计划读取到 TaskPlanningSignal 的任务数量。
 - `semantic_protected_count` 表示因为语义信号对目标推进价值较高而被保护的任务数量。
@@ -218,6 +220,7 @@ P2 新增字段：
     "semantic_signal_applied": true,
     "semantic_total_score": 38,
     "goal_alignment_signal_score": 13,
+    "goal_next_action_score": 10,
     "semantic_priority_signal_score": 10,
     "semantic_minimum_viable_step": "先完成一个可验证的小结果",
     "base_estimated_duration_min": 180,

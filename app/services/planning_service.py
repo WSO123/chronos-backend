@@ -531,7 +531,7 @@ class PlanningService:
         )
         tasks = list(db.scalars(stmt).all())
         context = self._planning_context(db, user_id=user_id, plan_date=plan_date)
-        signals = self._planning_signals(db, user_id=user_id, tasks=tasks)
+        signals = self._planning_signals(db, user_id=user_id, tasks=tasks, plan_date=plan_date)
         scored_tasks: list[PlannedTask] = []
         for task in tasks:
             score_breakdown = self._score_breakdown_for(task, context=context, signals=signals)
@@ -544,6 +544,7 @@ class PlanningService:
                 task,
                 plan_date=plan_date,
                 unlocking_task_ids=signals["unlocking_task_ids"],
+                goal_next_action_task_ids=signals["goal_next_action_task_ids"],
                 semantic_by_task_id=signals["semantic_by_task_id"],
             )
             scored_tasks.append(
@@ -556,6 +557,7 @@ class PlanningService:
                         unlocking_task_ids=signals["unlocking_task_ids"],
                         blocked_task_ids=signals["blocked_task_ids"],
                         adjusted_task_ids=signals["adjusted_task_ids"],
+                        goal_next_action_task_ids=signals["goal_next_action_task_ids"],
                         semantic_by_task_id=signals["semantic_by_task_id"],
                         score_breakdown=score_breakdown,
                     ),
@@ -836,6 +838,7 @@ class PlanningService:
             dependency_score += 18
         if task.id in signals["blocked_task_ids"]:
             dependency_score -= 10
+        goal_next_action_score = 10 if task.id in signals["goal_next_action_task_ids"] else 0
         duration_fit_score = self._duration_fit_score(estimated_minutes, capacity=context.daily_capacity_minutes)
         energy_fit_score = self._energy_fit_score(
             estimated_minutes,
@@ -863,6 +866,7 @@ class PlanningService:
             + urgency_score
             + goal_urgency_score
             + dependency_score
+            + goal_next_action_score
             + duration_fit_score
             + energy_fit_score
             + behavior_feedback_score
@@ -882,6 +886,7 @@ class PlanningService:
             "urgency_score": int(urgency_score),
             "goal_urgency_score": int(goal_urgency_score),
             "dependency_score": int(dependency_score),
+            "goal_next_action_score": int(goal_next_action_score),
             "duration_fit_score": int(duration_fit_score),
             "energy_fit_score": int(energy_fit_score),
             "behavior_feedback_score": int(behavior_feedback_score),
@@ -1188,13 +1193,14 @@ class PlanningService:
             priority_adjusted=planned.priority_adjusted,
         )
 
-    def _planning_signals(self, db: Session, *, user_id: uuid.UUID, tasks: list[Task]) -> dict:
+    def _planning_signals(self, db: Session, *, user_id: uuid.UUID, tasks: list[Task], plan_date: date) -> dict:
         task_by_id = {task.id: task for task in tasks}
         if not task_by_id:
             return {
                 "dependency_depth_by_task_id": {},
                 "unlocking_task_ids": set(),
                 "blocked_task_ids": set(),
+                "goal_next_action_task_ids": set(),
                 "adjusted_task_ids": set(),
                 "behavior_by_task_id": {},
                 "semantic_by_task_id": {},
@@ -1237,6 +1243,13 @@ class PlanningService:
 
         for task_id in task_ids:
             dependency_depth(task_id)
+
+        goal_next_action_task_ids = self._goal_next_action_task_ids(
+            tasks=tasks,
+            blocked_task_ids=blocked_task_ids,
+            depth_by_task_id=depth_by_task_id,
+            plan_date=plan_date,
+        )
 
         adjusted_task_ids = set(
             db.scalars(
@@ -1299,10 +1312,53 @@ class PlanningService:
             "dependency_depth_by_task_id": depth_by_task_id,
             "unlocking_task_ids": unlocking_task_ids,
             "blocked_task_ids": blocked_task_ids,
+            "goal_next_action_task_ids": goal_next_action_task_ids,
             "adjusted_task_ids": adjusted_task_ids,
             "behavior_by_task_id": behavior_by_task_id,
             "semantic_by_task_id": semantic_by_task_id,
         }
+
+    def _goal_next_action_task_ids(
+        self,
+        *,
+        tasks: list[Task],
+        blocked_task_ids: set[uuid.UUID],
+        depth_by_task_id: dict[uuid.UUID, int],
+        plan_date: date,
+    ) -> set[uuid.UUID]:
+        tasks_by_goal_id: dict[uuid.UUID, list[Task]] = {}
+        for task in tasks:
+            if task.goal_id is None or task.goal is None:
+                continue
+            if not self._goal_needs_next_action_protection(task=task, plan_date=plan_date):
+                continue
+            tasks_by_goal_id.setdefault(task.goal_id, []).append(task)
+
+        protected_task_ids: set[uuid.UUID] = set()
+        for goal_tasks in tasks_by_goal_id.values():
+            next_action = sorted(
+                goal_tasks,
+                key=lambda task: (
+                    task.id in blocked_task_ids,
+                    task.status == TaskStatus.POSTPONED,
+                    depth_by_task_id.get(task.id, 0),
+                    task.deadline or date.max,
+                    task.priority,
+                    self._estimated_minutes_for(task, semantic_signal=None),
+                    task.created_at,
+                ),
+            )[0]
+            protected_task_ids.add(next_action.id)
+        return protected_task_ids
+
+    def _goal_needs_next_action_protection(self, *, task: Task, plan_date: date) -> bool:
+        if task.goal is None:
+            return False
+        if task.goal.value_level == ValueLevel.HIGH:
+            return True
+        if task.goal.deadline is None:
+            return False
+        return (task.goal.deadline - plan_date).days <= 7
 
     def _completed_carryover_tasks(self, db: Session, *, plan: DailyPlan) -> list[PlannedTask]:
         carryovers: list[PlannedTask] = []
@@ -1333,12 +1389,15 @@ class PlanningService:
         *,
         plan_date: date,
         unlocking_task_ids: set[uuid.UUID],
+        goal_next_action_task_ids: set[uuid.UUID],
         semantic_by_task_id: dict[uuid.UUID, TaskPlanningSignal],
     ) -> DailyPlanItemSection:
         semantic_signal = semantic_by_task_id.get(task.id)
         if task.status == TaskStatus.POSTPONED:
             return DailyPlanItemSection.ROLLED_OVER
         if task.id in unlocking_task_ids:
+            return DailyPlanItemSection.PINNED
+        if task.id in goal_next_action_task_ids:
             return DailyPlanItemSection.PINNED
         if (
             semantic_signal is not None
@@ -1374,6 +1433,7 @@ class PlanningService:
         unlocking_task_ids: set[uuid.UUID],
         blocked_task_ids: set[uuid.UUID],
         adjusted_task_ids: set[uuid.UUID],
+        goal_next_action_task_ids: set[uuid.UUID],
         semantic_by_task_id: dict[uuid.UUID, TaskPlanningSignal],
         score_breakdown: dict,
     ) -> str:
@@ -1402,6 +1462,8 @@ class PlanningService:
             and score_breakdown.get("semantic_total_score", 0) >= 28
         ):
             return "AI 语义信号判断它能有效推进目标，因此今天保护一个最小可执行动作。"
+        if task.id in goal_next_action_task_ids:
+            return "这是关联目标当前最适合推进的下一步，系统会保护它进入今日主序列。"
         if task.value_level == ValueLevel.HIGH:
             return "High-value task protected from being crowded out by lighter work."
         if task.goal is not None and task.goal.value_level == ValueLevel.HIGH:
@@ -1414,7 +1476,7 @@ class PlanningService:
             return "Placed here because the task shape fits today's energy signal."
         return "Balanced task placed in the recommended execution order."
 
-    def _planned_sort_key(self, planned: PlannedTask) -> tuple[int, int, int, int, int, int, date, int, int, datetime]:
+    def _planned_sort_key(self, planned: PlannedTask) -> tuple[int, int, int, int, int, int, int, date, int, int, datetime]:
         section_rank = {
             DailyPlanItemSection.PINNED: 0,
             DailyPlanItemSection.RECOMMENDED: 1,
@@ -1428,6 +1490,7 @@ class PlanningService:
             0 if planned.unlocks_task else 1,
             1 if planned.blocked_by_dependency else 0,
             0 if planned.priority_adjusted else 1,
+            0 if planned.score_breakdown.get("goal_next_action_score", 0) > 0 else 1,
             -planned.score,
             planned.task.deadline or date.max,
             planned.task.priority,
@@ -1442,6 +1505,9 @@ class PlanningService:
         total_minutes = sum(planned.estimated_duration_min for planned in active_tasks)
         rolled_over_minutes = sum(planned.estimated_duration_min for planned in rolled_over_tasks)
         dependency_protected_count = len([planned for planned in active_tasks if planned.unlocks_task])
+        goal_next_action_count = len(
+            [planned for planned in active_tasks if planned.score_breakdown.get("goal_next_action_score", 0) > 0]
+        )
         user_adjusted_count = len([planned for planned in active_tasks if planned.priority_adjusted])
         semantic_signal_count = len(
             [planned for planned in active_tasks if planned.score_breakdown.get("semantic_signal_applied")]
@@ -1480,6 +1546,7 @@ class PlanningService:
                     "over_capacity_minutes": 0,
                     "capacity_status": "within_capacity",
                     "dependency_protected_count": 0,
+                    "goal_next_action_count": 0,
                     "user_adjusted_count": 0,
                     "semantic_signal_count": 0,
                     "semantic_protected_count": 0,
@@ -1516,6 +1583,7 @@ class PlanningService:
                 "over_capacity_minutes": over_capacity_minutes,
                 "capacity_status": capacity_status,
                 "dependency_protected_count": dependency_protected_count,
+                "goal_next_action_count": goal_next_action_count,
                 "user_adjusted_count": user_adjusted_count,
                 "semantic_signal_count": semantic_signal_count,
                 "semantic_protected_count": semantic_protected_count,
@@ -1689,6 +1757,16 @@ class PlanningService:
                     "score": factors["dependency_protected_count"],
                 }
             )
+        if factors["goal_next_action_count"]:
+            signals.append(
+                {
+                    "key": "goal_next_action",
+                    "title": "目标下一步保护",
+                    "message": f"{factors['goal_next_action_count']} 个目标各自保留了一个最适合今天推进的下一步。",
+                    "signal": "positive",
+                    "score": factors["goal_next_action_count"],
+                }
+            )
         if factors["user_adjusted_count"]:
             signals.append(
                 {
@@ -1830,6 +1908,7 @@ class PlanningService:
             "over_capacity_minutes": over_capacity_minutes,
             "capacity_status": capacity_status,
             "dependency_protected_count": int(score_factors.get("dependency_protected_count", 0) or 0),
+            "goal_next_action_count": int(score_factors.get("goal_next_action_count", 0) or 0),
             "user_adjusted_count": int(score_factors.get("user_adjusted_count", 0) or 0),
             "semantic_signal_count": int(score_factors.get("semantic_signal_count", 0) or 0),
             "semantic_protected_count": int(score_factors.get("semantic_protected_count", 0) or 0),
@@ -1859,6 +1938,8 @@ class PlanningService:
             )
         if factors["dependency_protected_count"]:
             explanation.append(f"{factors['dependency_protected_count']} 个前置任务被提前，用来保护任务依赖顺序。")
+        if factors["goal_next_action_count"]:
+            explanation.append(f"{factors['goal_next_action_count']} 个目标各自保留了一个下一步行动，避免高价值方向被单个任务列表挤掉。")
         if factors["user_adjusted_count"]:
             explanation.append(f"{factors['user_adjusted_count']} 个任务读取了你的优先级修正，让 AI 判断保持可校正。")
         if factors["semantic_signal_count"]:
@@ -2204,6 +2285,18 @@ class PlanningService:
                     "message": message,
                     "signal": "info" if semantic_total_score < 28 else "positive",
                     "score": semantic_total_score,
+                }
+            )
+
+        goal_next_action_score = int(score_breakdown.get("goal_next_action_score") or 0)
+        if goal_next_action_score > 0:
+            signals.append(
+                {
+                    "key": "goal_next_action",
+                    "title": "目标下一步",
+                    "message": "这是关联目标当前最适合推进的下一步，系统会保护它不被零散任务挤掉。",
+                    "signal": "positive",
+                    "score": goal_next_action_score,
                 }
             )
 

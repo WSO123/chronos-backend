@@ -70,6 +70,7 @@ P2 只保留和执行主线强相关的部分：Goals、依赖、洞察、解释
 | --- | --- | --- | --- |
 | Goals Home / Goal Detail | L2-L3 | 已能展示目标进度、任务列表、推荐下一步 | 不做复杂项目管理 |
 | Goal recommended next task | L3 | 已避开仍有未完成前置任务的后续任务 | 若全部任务被阻塞，允许 fallback 到最高价值未完成任务 |
+| Goal Next Action Coverage | L2-L3 | Today 会为高价值 / 临近截止目标各自保护一个下一步行动，避免某个目标的任务列表挤掉其他重要方向 | 只做轻量保护，不做复杂项目排程 |
 | Task Dependency | L3 | 依赖新增 / 删除会在涉及当前 Today 时触发 `system_refresh` | 依赖是执行顺序信号，不做甘特图替代品 |
 | Priority / Value Adjustment | L3 | 用户调整当前 Today 任务会触发 `manual_adjust` revision，并返回 `today_impact` | 不做复杂手动排序系统 |
 | Strategy Detail | L3 | 解释 Planning Engine 结果、依赖保护、用户修正、容量状态和 agent review | 不进入 Today 首屏 |

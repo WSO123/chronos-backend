@@ -476,7 +476,11 @@ def _scenario_multi_goal_competition_protects_high_value_goal() -> ScenarioResul
             ),
             (
                 "recommendation explains high-value goal protection",
-                bool(protected_item) and "High-value goal" in protected_item["recommendation_reason"],
+                bool(protected_item)
+                and (
+                    "High-value goal" in protected_item["recommendation_reason"]
+                    or "关联目标当前最适合推进的下一步" in protected_item["recommendation_reason"]
+                ),
             ),
             ("optional low-goal work rolls over", bool(rolled) and rolled[0]["task_id"] == optional_low_goal_task.id),
             ("main sequence still respects capacity", strategy["factors"]["selected_estimated_minutes"] == 150),
