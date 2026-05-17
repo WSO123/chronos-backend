@@ -54,6 +54,36 @@ class FocusAPITests(unittest.TestCase):
         self.assertEqual(refreshed_today.json()["progress"]["completed_count"], 1)
         self.assertEqual(refreshed_today.json()["progress"]["focus_minutes"], 12)
 
+    def test_focus_without_item_auto_links_current_today_item(self):
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={"title": "Auto link Focus API task"},
+            headers=self.headers,
+        )
+        task_id = task_response.json()["id"]
+        today_response = self.client.get("/api/v1/today", headers=self.headers)
+        item_id = today_response.json()["sections"]["recommended_tasks"][0]["daily_plan_item_id"]
+
+        start_response = self.client.post(
+            "/api/v1/focus-sessions",
+            json={"task_id": task_id, "planned_duration_min": 25},
+            headers=self.headers,
+        )
+        session_id = start_response.json()["id"]
+        complete_response = self.client.post(
+            f"/api/v1/focus-sessions/{session_id}/complete",
+            json={"actual_duration_min": 9},
+            headers=self.headers,
+        )
+        refreshed_today = self.client.get("/api/v1/today", headers=self.headers)
+
+        self.assertEqual(start_response.status_code, 201)
+        self.assertEqual(start_response.json()["daily_plan_item_id"], item_id)
+        self.assertEqual(complete_response.status_code, 200)
+        self.assertEqual(complete_response.json()["daily_plan_item_id"], item_id)
+        self.assertEqual(refreshed_today.json()["progress"]["completed_count"], 1)
+        self.assertEqual(refreshed_today.json()["progress"]["focus_minutes"], 9)
+
     def test_interrupt_focus_session_then_start_again(self):
         task_response = self.client.post("/api/v1/tasks", json={"title": "Interrupt API task"}, headers=self.headers)
         task_id = task_response.json()["id"]

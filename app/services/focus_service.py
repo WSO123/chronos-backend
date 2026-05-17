@@ -47,6 +47,17 @@ class FocusService:
             if item.status in {DailyPlanItemStatus.COMPLETED, DailyPlanItemStatus.SKIPPED}:
                 raise InvalidStateError(f"{item.status.value} daily plan item cannot start focus")
             daily_plan_id = item.daily_plan_id
+        else:
+            item = planning_service.get_current_today_item_for_task(
+                db,
+                user_id=user_id,
+                task_id=task.id,
+            )
+            if item is not None:
+                if item.status in {DailyPlanItemStatus.COMPLETED, DailyPlanItemStatus.SKIPPED}:
+                    raise InvalidStateError(f"{item.status.value} daily plan item cannot start focus")
+                daily_plan_item_id = item.id
+                daily_plan_id = item.daily_plan_id
 
         task.status = TaskStatus.IN_FOCUS
         session = FocusSession(

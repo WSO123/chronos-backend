@@ -176,6 +176,19 @@ class PlanningService:
             reason="already_in_today_plan" if current_item else "not_in_today_plan",
         )
 
+    def get_current_today_item_for_task(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        task_id: uuid.UUID,
+    ) -> DailyPlanItem | None:
+        plan_date = self._resolve_plan_date(db, user_id=user_id, plan_date=None)
+        plan = self._get_active_plan(db, user_id=user_id, plan_date=plan_date)
+        if plan is None:
+            return None
+        return self._current_item_for_task(db, plan=plan, task_id=task_id)
+
     def include_confirmed_task_from_inbox(
         self,
         db: Session,

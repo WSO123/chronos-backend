@@ -56,6 +56,31 @@ class FocusServiceTests(unittest.TestCase):
         self.assertIn("FOCUS_SESSION_COMPLETED", {event.event_type for event in events})
         self.assertIn("TASK_COMPLETED", {event.event_type for event in events})
 
+    def test_start_focus_without_item_auto_links_current_today_item(self):
+        task = task_service.create_task(self.db, user_id=self.user.id, title="Auto link Today item")
+        today = planning_service.get_today(self.db, user_id=self.user.id)
+        item_id = today["sections"]["recommended_tasks"][0]["daily_plan_item_id"]
+
+        session = focus_service.start_session(
+            self.db,
+            user_id=self.user.id,
+            task_id=task.id,
+            planned_duration_min=25,
+        )
+        completed = focus_service.complete_session(
+            self.db,
+            session_id=session.id,
+            user_id=self.user.id,
+            actual_duration_min=14,
+        )
+        refreshed_today = planning_service.get_today(self.db, user_id=self.user.id)
+
+        self.assertEqual(session.daily_plan_item_id, item_id)
+        self.assertEqual(completed.daily_plan_item_id, item_id)
+        self.assertEqual(refreshed_today["progress"]["completed_count"], 1)
+        self.assertEqual(refreshed_today["progress"]["focus_minutes"], 14)
+        self.assertEqual(refreshed_today["sections"]["recommended_tasks"][0]["item_status"], DailyPlanItemStatus.COMPLETED)
+
     def test_interrupt_focus_returns_task_to_active_and_keeps_item_planned(self):
         task = task_service.create_task(self.db, user_id=self.user.id, title="Interruptible task")
         today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)

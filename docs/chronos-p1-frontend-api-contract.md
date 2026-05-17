@@ -804,6 +804,9 @@ Frontend notes:
 
 - 同一用户同一时间只能有一个 active focus session。
 - 如果存在 active session，Task Detail 的 `actions.can_start_focus=false`。
+- `daily_plan_item_id` 推荐使用 Task Detail 的 `today_context.daily_plan_item_id` 传入。
+- 如果前端未传 `daily_plan_item_id`，后端会尝试自动绑定当前 active Today 中的同一任务，保证 Focus 完成后 Today 进度和 Focus 时长不分叉。
+- 如果任务不在当前 Today，Focus 仍可启动，但返回的 `daily_plan_item_id=null`，完成后只更新 Task / FocusSession / Report，不更新 Today item。
 
 ### Finish Focus
 

@@ -1253,6 +1253,8 @@ POST  /api/v1/focus-sessions/{session_id}/postpone
 说明：
 
 - Focus 操作必须写入 FocusSession 和 ActivityEvent。
+- `daily_plan_item_id` 可由 Task Detail 的 `today_context` 显式传入；若未传，后端必须尝试自动绑定当前 active Today 中的同一 Task。
+- Focus 完成 / 中断 / 延后后，Task、FocusSession、DailyPlanItem、DailyPlan progress 和 Daily Report 可汇总指标必须保持一致。
 
 ### Reports
 
