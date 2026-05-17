@@ -46,9 +46,12 @@ app/
       router.py
 
   ai/
-    client.py
-    config.py
+    agents/
+      daily_planner.py
     providers/
+      base.py
+      mock.py
+      registry.py
     schemas/
     prompts/
 
@@ -97,11 +100,6 @@ app/
 
   workers/
     tasks.py
-    agents/
-      capture_parser.py
-      daily_planner.py
-      task_breakdown.py
-      daily_report_generator.py
 ```
 
 ### 2.1 api/
@@ -499,6 +497,14 @@ AI 测试默认用 mock provider。
 - AIJob 状态流转
 - retry
 
+涉及 Daily Planner Agent / Planning Engine 时，必须覆盖：
+
+- mock provider structured output
+- Agent 失败 fallback
+- Agent 输出不合法 fallback
+- `AIJob(job_type=daily_planner)` 可通过 Strategy Detail source 追踪
+- Planning Engine evaluation 不退化
+
 ### 8.4 Migration 测试
 
 模型变更必须有 Alembic migration。
@@ -543,6 +549,12 @@ uv run python scripts/smoke_p2_goal_insight_loop.py
 
 ```bash
 uv run python scripts/evaluate_planning_engine.py
+```
+
+涉及 Daily Planner Agent shell 或 LLM provider 时，额外执行：
+
+```bash
+uv run python -m unittest tests.test_daily_planner_agent tests.test_today_services tests.test_today_api
 ```
 
 或通过统一验证入口追加：

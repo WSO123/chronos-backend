@@ -75,6 +75,24 @@ P2 新增字段：
 - `task_rationales`
 - `source`
 
+`source` 当前包含：
+
+```json
+{
+  "strategy_snapshot_id": "uuid",
+  "ai_job_id": "uuid",
+  "model_name": "planning-engine-v1",
+  "prompt_version": "p2-planning-engine-v1",
+  "generated_at": "2026-05-17T09:00:00Z"
+}
+```
+
+说明：
+
+- `model_name` / `prompt_version` 指向最终落库的 Planning Engine strategy snapshot。
+- `ai_job_id` 指向 Daily Planner Agent shell 的调用记录，可通过 `GET /api/v1/ai-jobs/{id}` 查看 provider、model、status、fallback 和 metadata。
+- Strategy Detail 可以把 `ai_job_id` 用于调试或深层解释；Today 首屏不展示这个字段。
+
 `factors` 当前包含：
 
 ```json

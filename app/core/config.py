@@ -35,6 +35,16 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
+    # LLM
+    AI_ENABLE_REAL_LLM: bool = False
+    LLM_PROVIDER: str = "mock"
+    LLM_MODEL: str = "structured-mock-v1"
+    LLM_API_KEY: str | None = None
+    LLM_BASE_URL: str | None = None
+    LLM_FALLBACK_PROVIDER: str = "mock"
+    LLM_TIMEOUT_SECONDS: int = 30
+    LLM_MAX_RETRIES: int = 2
+
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
 
 settings = Settings()

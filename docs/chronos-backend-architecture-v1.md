@@ -507,7 +507,7 @@ Data Source 是 P3 自然生长模块的权限和连接状态底座，服务日�
 P1 Agent：
 
 - Capture Parser：解析输入为 Task / Goal / Inbox 候选项
-- Daily Planner：生成今日推荐顺序
+- Daily Planner：基于 Planning Engine candidates 输出结构化建议，业务层校验后生成今日推荐顺序
 - Task Breakdown：拆解任务步骤
 - Daily Report Generator：生成每日复盘建议
 
@@ -519,6 +519,7 @@ P3 Worker：
 关键要求：
 
 - LLM 输出必须经过 schema 校验。
+- Daily Planner v1 不允许 LLM 直接改变任务集合、排序或 section；PlanningService 负责校验和取舍。
 - AI 任务失败时要保留失败状态和错误信息。
 - 所有异步 AI 执行都要有 AIJob / AgentRun 记录，供前端轮询和失败重试。
 - 核心流程要有 deterministic fallback，不能因为 AI 失败导致用户无法使用。
@@ -1512,11 +1513,15 @@ StrategyDetailResponse {
 - DailyPlan
 - DailyPlanItem
 - StrategySnapshot
+- AIJob trace
 
 要求：
 
-- P1 先用简单可控规则 + AI 摘要。
-- 后续再增加复杂行为学习和精力预测。
+- 当前使用 Planning Engine v1 生成 deterministic candidates，读取价值、优先级、deadline、估时、依赖、用户修正、行为反馈、容量和 Energy 信号。
+- Daily Planner Agent shell 只返回 structured output；默认 provider 为 mock，不调用真实 LLM。
+- `PlanningService` 必须校验 Agent 输出。v1 不允许 Agent 改变任务集合、`sort_order` 或 `section`。
+- Agent 失败或输出不合法时，使用 Planning Engine v1 fallback，`AIJob.status=succeeded_with_fallback`。
+- 后续再增加真实 provider、长期行为学习和更复杂的多轮 replanning。
 
 ### Task Breakdown
 
@@ -1576,6 +1581,17 @@ app/
     celery.py
     security.py
 
+  ai/
+    agents/
+      daily_planner.py
+    providers/
+      base.py
+      mock.py
+      registry.py
+    schemas/
+      planning.py
+    prompts/
+
   models/
     user.py
     goal.py
@@ -1616,11 +1632,6 @@ app/
 
   workers/
     tasks.py
-    agents/
-      capture_parser.py
-      daily_planner.py
-      task_breakdown.py
-      daily_report_generator.py
 ```
 
 ---

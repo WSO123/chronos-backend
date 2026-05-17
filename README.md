@@ -51,6 +51,17 @@ uv sync
 
 ### 3. 启动服务
 
+本地默认关闭真实 LLM，Today 使用 Planning Engine v1 + mock Daily Planner Agent shell：
+
+```env
+AI_ENABLE_REAL_LLM=false
+LLM_PROVIDER=mock
+LLM_MODEL=structured-mock-v1
+LLM_FALLBACK_PROVIDER=mock
+```
+
+真实 provider 需要单独接入和开启，不能让 LLM 绕过业务层校验或用户确认。
+
 执行数据库迁移：
 
 ```bash
@@ -129,6 +140,7 @@ uv run celery -A app.core.celery.celery_app worker --loglevel=info
 chronos-backend/
 ├── app/
 │   ├── api/                # 接口层：处理 HTTP 请求，不做复杂逻辑
+│   ├── ai/                 # AI Agent / provider / structured output schema
 │   ├── core/               # 核心层：全局配置、数据库连接、Celery 配置
 │   ├── models/             # 数据模型 (SQLAlchemy)
 │   ├── schemas/            # API 输入输出结构
@@ -201,9 +213,10 @@ uv add pandas
 
 ### 创建新的 AI Agent
 
-1.  在 `app/workers/agents/` 下定义你的 LangGraph StateGraph。
-2.  在 `app/workers/tasks.py` 中注册一个新的 Celery Task 来调用这个 Graph。
-3.  在 `app/api/` 中添加一个 Endpoint 来触发这个 Task。
+1.  在 `app/ai/schemas/` 定义 structured output schema。
+2.  在 `app/ai/agents/` 定义普通 Agent function；只有多步骤、有状态、需要循环反思时再升级为 LangGraph。
+3.  在 service 层调用 Agent 并校验输出，禁止 Agent 直接写业务表。
+4.  需要异步执行时，再在 `app/workers/tasks.py` 注册 Celery Task，并通过 API 触发。
 
 ##  注意事项
 

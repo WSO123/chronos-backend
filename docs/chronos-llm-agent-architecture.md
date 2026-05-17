@@ -165,7 +165,12 @@ P1 默认建议：
 AI_ENABLE_REAL_LLM=false
 ```
 
-先用 rule / mock 跑通核心闭环，再打开真实 LLM。
+当前默认：
+
+- `AI_ENABLE_REAL_LLM=false`
+- Daily Planner 使用 mock provider 和 structured output shell。
+- Planning Engine v1 仍是最终排序和 fallback 核心。
+- 真实 provider 必须单独迭代接入，不能绕过业务层校验和用户确认边界。
 
 ---
 
@@ -303,6 +308,11 @@ class CaptureParseOutput(BaseModel):
 
 - 已落地 Planning Engine v1，作为 deterministic planner core 和未来 LLM Daily Planner 的 fallback。
 - Planning Engine v1 已读取任务价值、优先级、deadline、估时、依赖、用户修正、行为反馈、当日容量和 Energy 信号。
+- 已接入 Daily Planner Agent shell：`PlanningService` 先生成 deterministic candidates，再调用 Agent 返回 structured output。
+- 默认 provider 是 `mock`，模型标识为 `structured-mock-v1`；`AI_ENABLE_REAL_LLM=false` 时不会调用外部模型。
+- 每次 plan revision 都记录一条 `AIJob(job_type=daily_planner)`，Strategy Detail `source.ai_job_id` 可追踪调用结果。
+- v1 只允许 Agent 更新策略摘要和推荐理由；业务层校验禁止 Agent 改变任务集合、排序和 section。
+- Agent 失败或输出不合法时，`AIJob.status=succeeded_with_fallback`，继续使用 Planning Engine v1 输出。
 - 每个 `DailyPlanItem` 会保存 `score_breakdown`，Strategy Detail 可以解释排序，Today 首屏不展开完整评分。
 - 超出容量的非保护任务进入 `section=rolled_over`；系统容量滚动不把 Task 本体改为 postponed。
 - 已提供 `scripts/evaluate_planning_engine.py` 固定场景评估，覆盖容量滚动、受保护任务超载、低精力保护和高精力深度任务适配；后续 LLM Daily Planner 必须通过这些基线或显式更新评估预期。
@@ -509,7 +519,7 @@ Chronos 的核心闭环不能依赖 LLM 成功。
 | Agent | LLM 失败时 |
 | --- | --- |
 | Capture Parser | 原始输入进入 Inbox，类型 unknown，job 标记为 `succeeded_with_fallback` |
-| Daily Planner | 使用规则排序生成 DailyPlan，job 标记为 `succeeded_with_fallback` |
+| Daily Planner | 使用 Planning Engine v1 生成 DailyPlan，job 标记为 `succeeded_with_fallback` |
 | Task Breakdown | 不生成步骤，不写 `TaskStep`，用户手动添加，job 标记为 `succeeded_with_fallback` |
 | Daily Report Generator | 使用统计模板生成基础报告，job 标记为 `succeeded_with_fallback` |
 
@@ -536,7 +546,7 @@ P1 可先不复杂使用 LangGraph：
 - Capture Parser：普通 function 足够。
 - Task Breakdown：普通 function 足够。
 - Daily Report Generator：普通 function 足够。
-- Daily Planner：可以先规则 + LLM summary，后续再升级为 LangGraph。
+- Daily Planner：当前是 Planning Engine v1 + structured Agent shell，后续多轮反馈和长期行为学习再升级为 LangGraph。
 
 后续适合 LangGraph 的场景：
 
@@ -637,7 +647,7 @@ P1 至少记录：
 | AI 能力 | 输入对象 | 输出对象 | 是否用户确认 |
 | --- | --- | --- | --- |
 | Capture Parser | CaptureInput | AIParseResult / InboxItem | 是 |
-| Daily Planner | Task / Goal / ActivityEvent | DailyPlan / DailyPlanItem / StrategySnapshot | 用户可 replan / 调整 |
+| Daily Planner | Task / Goal / ActivityEvent / Planning Engine candidates | DailyPlan / DailyPlanItem / StrategySnapshot / AIJob trace | 用户可 replan / 调整 |
 | Task Breakdown | Task | TaskStep candidates | 用户可编辑 |
 | Daily Report Generator | ActivityEvent / FocusSession / DailyPlan | DailyReport | 不强制确认 |
 

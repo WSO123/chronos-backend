@@ -115,6 +115,7 @@ class StrategyDetailFactorsResponse(BaseModel):
 
 class StrategyDetailSourceResponse(BaseModel):
     strategy_snapshot_id: uuid.UUID
+    ai_job_id: uuid.UUID | None = None
     model_name: str | None
     prompt_version: str | None
     generated_at: datetime

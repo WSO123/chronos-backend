@@ -8,10 +8,15 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.ai.agents.daily_planner import DailyPlannerAgent, daily_planner_agent
+from app.ai.schemas.planning import DailyPlannerOutput
 from app.models.activity_event import ActivityEvent
+from app.models.ai_job import AIJob
 from app.models.daily_plan import DailyPlan, DailyPlanItem, PlanRevision, StrategySnapshot
 from app.models.enums import (
     ActorType,
+    AIJobStatus,
+    AIJobType,
     AIStrategyPreference,
     DailyPlanItemSection,
     DailyPlanItemStatus,
@@ -22,10 +27,12 @@ from app.models.enums import (
     TaskStatus,
     ValueLevel,
 )
+from app.models.mixins import utc_now
 from app.models.task_dependency import TaskDependency
 from app.models.task import Task
 from app.models.user import User, UserSettings
 from app.services.activity_event_service import activity_event_service
+from app.services.ai_job_service import ai_job_service
 from app.services.energy_service import energy_service
 from app.services.errors import InvalidStateError, NotFoundError
 from app.services.task_service import task_service
@@ -61,6 +68,9 @@ class PlanningContext:
 
 
 class PlanningService:
+    def __init__(self, *, planner_agent: DailyPlannerAgent | None = None) -> None:
+        self.planner_agent = planner_agent or daily_planner_agent
+
     def get_today(self, db: Session, *, user_id: uuid.UUID, plan_date: date | None = None) -> dict:
         resolved_date = self._resolve_plan_date(db, user_id=user_id, plan_date=plan_date)
         plan = self._get_active_plan(db, user_id=user_id, plan_date=resolved_date)
@@ -251,6 +261,19 @@ class PlanningService:
         db.add(revision)
         db.flush()
 
+        strategy_tasks = [planned for planned in planned_tasks if planned.contributes_to_strategy]
+        strategy_payload = self._strategy_for(strategy_tasks)
+        planner_result = self._run_daily_planner_agent(
+            db,
+            plan=plan,
+            revision=revision,
+            planned_tasks=planned_tasks,
+            strategy_payload=strategy_payload,
+        )
+        planned_tasks = planner_result["planned_tasks"]
+        strategy_payload = planner_result["strategy_payload"]
+        planner_job = planner_result["ai_job"]
+
         for sort_order, planned in enumerate(planned_tasks, start=1):
             status = planned.status or (
                 DailyPlanItemStatus.POSTPONED
@@ -271,8 +294,6 @@ class PlanningService:
                 )
             )
 
-        strategy_tasks = [planned for planned in planned_tasks if planned.contributes_to_strategy]
-        strategy_payload = self._strategy_for(strategy_tasks)
         db.add(
             StrategySnapshot(
                 daily_plan_id=plan.id,
@@ -285,6 +306,8 @@ class PlanningService:
                 prompt_version="p2-planning-engine-v1",
             )
         )
+        planner_job.result_entity_type = EntityType.DAILY_PLAN.value
+        planner_job.result_entity_id = plan.id
         db.flush()
         plan.current_version = version
         plan.current_revision_id = revision.id
@@ -330,6 +353,154 @@ class PlanningService:
                 )
             )
         return self._apply_capacity(sorted(scored_tasks, key=self._planned_sort_key), context=context)
+
+    def _run_daily_planner_agent(
+        self,
+        db: Session,
+        *,
+        plan: DailyPlan,
+        revision: PlanRevision,
+        planned_tasks: list[PlannedTask],
+        strategy_payload: dict,
+    ) -> dict:
+        job = ai_job_service.create_job(
+            db,
+            user_id=plan.user_id,
+            job_type=AIJobType.DAILY_PLANNER,
+            input_entity_type=EntityType.DAILY_PLAN.value,
+            input_entity_id=plan.id,
+            provider="mock",
+            model="structured-mock-v1",
+            prompt_version=self.planner_agent.prompt_version,
+            metadata={
+                "mode": "sync_structured_shell",
+                "plan_revision_id": str(revision.id),
+                "candidate_count": len(planned_tasks),
+                "planner_core": "planning-engine-v1",
+            },
+            commit=False,
+        )
+        job.status = AIJobStatus.RUNNING
+        job.started_at = utc_now()
+
+        try:
+            agent_result = self.planner_agent.run(
+                plan_context={
+                    "plan_date": plan.plan_date.isoformat(),
+                    "daily_plan_id": str(plan.id),
+                    "plan_revision_id": str(revision.id),
+                },
+                candidates=self._planner_candidates(planned_tasks),
+                strategy_seed={
+                    "mode": strategy_payload["mode"].value,
+                    "summary": strategy_payload["summary"],
+                    "primary_reason": strategy_payload["primary_reason"],
+                    "score_factors": strategy_payload["score_factors"],
+                },
+            )
+            job.provider = agent_result.provider
+            job.model = agent_result.model
+            job.prompt_version = agent_result.prompt_version
+            planned_tasks, strategy_payload = self._apply_daily_planner_output(
+                planned_tasks=planned_tasks,
+                strategy_payload=strategy_payload,
+                output=agent_result.output,
+            )
+            job.status = AIJobStatus.SUCCEEDED
+            job.job_metadata = {
+                **job.job_metadata,
+                "output_applied": True,
+                "confidence": agent_result.output.confidence,
+                "item_count": len(agent_result.output.items),
+            }
+        except Exception as exc:  # noqa: BLE001 - fallback is the product boundary here.
+            fallback_reason = (
+                "daily_planner_agent_invalid_output"
+                if isinstance(exc, ValueError)
+                else "daily_planner_agent_failed"
+            )
+            job.status = AIJobStatus.SUCCEEDED_WITH_FALLBACK
+            job.error_message = str(exc)
+            job.job_metadata = {
+                **job.job_metadata,
+                "output_applied": False,
+                "fallback_reason": fallback_reason,
+                "fallback_error_type": exc.__class__.__name__,
+            }
+
+        job.finished_at = utc_now()
+        strategy_payload["score_factors"] = {
+            **strategy_payload["score_factors"],
+            "ai_job_id": str(job.id),
+            "planner_agent_status": job.status.value,
+            "planner_agent_provider": job.provider,
+            "planner_agent_model": job.model,
+            "planner_agent_prompt_version": job.prompt_version,
+            "planner_agent_output_applied": job.job_metadata.get("output_applied", False),
+        }
+        return {"planned_tasks": planned_tasks, "strategy_payload": strategy_payload, "ai_job": job}
+
+    def _planner_candidates(self, planned_tasks: list[PlannedTask]) -> list[dict]:
+        return [
+            {
+                "task_id": str(planned.task.id),
+                "title": planned.task.title,
+                "section": planned.section.value,
+                "sort_order": index,
+                "recommendation_reason": planned.recommendation_reason,
+                "estimated_duration_min": planned.estimated_duration_min,
+                "score_breakdown": planned.score_breakdown,
+            }
+            for index, planned in enumerate(planned_tasks, start=1)
+        ]
+
+    def _apply_daily_planner_output(
+        self,
+        *,
+        planned_tasks: list[PlannedTask],
+        strategy_payload: dict,
+        output: DailyPlannerOutput,
+    ) -> tuple[list[PlannedTask], dict]:
+        item_by_task_id = {item.task_id: item for item in output.items}
+        expected_task_ids = [str(planned.task.id) for planned in planned_tasks]
+        if (
+            len(output.items) != len(expected_task_ids)
+            or len(item_by_task_id) != len(expected_task_ids)
+            or set(item_by_task_id) != set(expected_task_ids)
+        ):
+            raise ValueError("Daily planner output task ids do not match deterministic plan")
+
+        applied_tasks: list[PlannedTask] = []
+        for index, planned in enumerate(planned_tasks, start=1):
+            output_item = item_by_task_id[str(planned.task.id)]
+            if output_item.sort_order != index:
+                raise ValueError("Daily planner output cannot reorder tasks in v1")
+            if output_item.section != planned.section.value:
+                raise ValueError("Daily planner output cannot move tasks across sections in v1")
+            applied_tasks.append(
+                PlannedTask(
+                    task=planned.task,
+                    section=planned.section,
+                    recommendation_reason=output_item.recommendation_reason,
+                    estimated_duration_min=planned.estimated_duration_min,
+                    score=planned.score,
+                    score_breakdown=planned.score_breakdown,
+                    status=planned.status,
+                    contributes_to_strategy=planned.contributes_to_strategy,
+                    dependency_depth=planned.dependency_depth,
+                    unlocks_task=planned.unlocks_task,
+                    blocked_by_dependency=planned.blocked_by_dependency,
+                    priority_adjusted=planned.priority_adjusted,
+                )
+            )
+
+        strategy_payload = {
+            **strategy_payload,
+            "summary": output.strategy_summary,
+            "mode": PlanningPreference(output.mode),
+            "primary_reason": output.primary_reason,
+        }
+        return applied_tasks, strategy_payload
 
     def _planning_context(self, db: Session, *, user_id: uuid.UUID, plan_date: date) -> PlanningContext:
         settings = self._settings_for(db, user_id=user_id)
@@ -846,6 +1017,7 @@ class PlanningService:
             "task_rationales": [self._item_response(item) for item in items],
             "source": {
                 "strategy_snapshot_id": strategy.id,
+                "ai_job_id": strategy.score_factors.get("ai_job_id"),
                 "model_name": strategy.model_name,
                 "prompt_version": strategy.prompt_version,
                 "generated_at": strategy.created_at,

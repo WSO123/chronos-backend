@@ -76,6 +76,12 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(body["energy"]["applied_to_plan"], False)
         self.assertEqual(body["energy"]["source"], "none")
         self.assertEqual(body["source"]["model_name"], "planning-engine-v1")
+        self.assertIsNotNone(body["source"]["ai_job_id"])
+        job_response = self.client.get(f"/api/v1/ai-jobs/{body['source']['ai_job_id']}", headers=self.headers)
+        self.assertEqual(job_response.status_code, 200)
+        self.assertEqual(job_response.json()["job_type"], "daily_planner")
+        self.assertEqual(job_response.json()["status"], "succeeded")
+        self.assertEqual(job_response.json()["provider"], "mock")
 
     def test_strategy_detail_returns_energy_explanation_with_planning_signal(self):
         energy_service.upsert_daily_metric(

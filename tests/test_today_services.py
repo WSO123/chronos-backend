@@ -1,11 +1,15 @@
 import unittest
 from datetime import date, timedelta
+from types import SimpleNamespace
+import uuid
 
+from app.ai.schemas.planning import DailyPlannerOutput
 from app.models.activity_event import ActivityEvent
-from app.models.enums import DailyPlanItemStatus, EntityType, TaskStatus, ValueLevel
+from app.models.ai_job import AIJob
+from app.models.enums import AIJobStatus, AIJobType, DailyPlanItemStatus, EntityType, TaskStatus, ValueLevel
 from app.models.task import Task
 from app.services.energy_service import energy_service
-from app.services.planning_service import planning_service
+from app.services.planning_service import PlanningService, planning_service
 from app.services.task_service import task_service
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
@@ -121,6 +125,104 @@ class TodayServiceTests(unittest.TestCase):
         self.assertIn("value_score", strategy["task_rationales"][0]["score_breakdown"])
         self.assertTrue(strategy["explanation"])
         self.assertEqual(strategy["source"]["model_name"], "planning-engine-v1")
+        self.assertIsNotNone(strategy["source"]["ai_job_id"])
+        planner_job = self.db.get(AIJob, uuid.UUID(strategy["source"]["ai_job_id"]))
+        self.assertIsNotNone(planner_job)
+        self.assertEqual(planner_job.job_type, AIJobType.DAILY_PLANNER)
+        self.assertEqual(planner_job.status, AIJobStatus.SUCCEEDED)
+        self.assertEqual(planner_job.provider, "mock")
+        self.assertEqual(planner_job.result_entity_id, strategy["daily_plan_id"])
+        self.assertEqual(planner_job.job_metadata["output_applied"], True)
+
+    def test_daily_planner_agent_failure_falls_back_to_planning_engine(self):
+        class FailingPlannerAgent:
+            prompt_version = "test-failing-planner"
+
+            def run(self, **kwargs):
+                raise RuntimeError("planner unavailable")
+
+        service = PlanningService(planner_agent=FailingPlannerAgent())
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Fallback protected task",
+            estimated_duration_min=30,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+        )
+
+        strategy = service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        self.assertEqual(strategy["task_rationales"][0]["title"], "Fallback protected task")
+        planner_job = self.db.get(AIJob, uuid.UUID(strategy["source"]["ai_job_id"]))
+        self.assertEqual(planner_job.status, AIJobStatus.SUCCEEDED_WITH_FALLBACK)
+        self.assertEqual(planner_job.job_metadata["output_applied"], False)
+        self.assertEqual(planner_job.job_metadata["fallback_reason"], "daily_planner_agent_failed")
+        self.assertEqual(planner_job.job_metadata["fallback_error_type"], "RuntimeError")
+
+    def test_daily_planner_agent_invalid_output_falls_back_to_planning_engine(self):
+        class InvalidPlannerAgent:
+            prompt_version = "test-invalid-planner"
+
+            def run(self, **kwargs):
+                candidates = kwargs["candidates"]
+                strategy_seed = kwargs["strategy_seed"]
+                return SimpleNamespace(
+                    output=DailyPlannerOutput(
+                        mode=strategy_seed["mode"],
+                        strategy_summary=strategy_seed["summary"],
+                        primary_reason=strategy_seed["primary_reason"],
+                        items=[
+                            {
+                                "task_id": candidate["task_id"],
+                                "section": candidate["section"],
+                                "sort_order": candidate["sort_order"],
+                                "recommendation_reason": candidate["recommendation_reason"],
+                            }
+                            for candidate in candidates
+                        ]
+                        + [
+                            {
+                                "task_id": candidates[0]["task_id"],
+                                "section": candidates[0]["section"],
+                                "sort_order": candidates[0]["sort_order"],
+                                "recommendation_reason": candidates[0]["recommendation_reason"],
+                            }
+                        ],
+                        confidence=0.3,
+                    ),
+                    provider="test",
+                    model="test-model",
+                    prompt_version="test-invalid-planner",
+                )
+
+        service = PlanningService(planner_agent=InvalidPlannerAgent())
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Invalid output fallback task",
+            estimated_duration_min=30,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+        )
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Second invalid output fallback task",
+            estimated_duration_min=20,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+
+        strategy = service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        self.assertEqual(strategy["task_rationales"][0]["title"], "Invalid output fallback task")
+        planner_job = self.db.get(AIJob, uuid.UUID(strategy["source"]["ai_job_id"]))
+        self.assertEqual(planner_job.status, AIJobStatus.SUCCEEDED_WITH_FALLBACK)
+        self.assertEqual(planner_job.provider, "test")
+        self.assertEqual(planner_job.job_metadata["output_applied"], False)
+        self.assertEqual(planner_job.job_metadata["fallback_reason"], "daily_planner_agent_invalid_output")
+        self.assertEqual(planner_job.job_metadata["fallback_error_type"], "ValueError")
 
     def test_planning_engine_rolls_over_work_beyond_today_capacity(self):
         task_service.create_task(
