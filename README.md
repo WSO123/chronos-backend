@@ -169,6 +169,16 @@ docs/chronos-p2-frontend-api-contract.md
 docs/chronos-p3-frontend-api-contract.md
 ```
 
+## CI
+
+GitHub Actions 会在 push / pull request 上执行基础验证：
+
+```bash
+uv run python scripts/verify_local.py
+```
+
+Smoke 仍按改动范围在本地显式执行，避免 CI 在没有本地开发数据库和 worker 环境时误报。
+
 ##  开发指南
 
 ### 添加新依赖

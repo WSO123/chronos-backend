@@ -552,6 +552,20 @@ Smoke 脚本约束：
 - 必须验证产品主路径，而不是只检查内部函数能运行。
 - 必须保持克制，不为了 smoke 引入只服务测试的业务字段。
 
+### 8.6 CI 验证边界
+
+GitHub Actions 默认只执行基础验证：
+
+```bash
+uv run python scripts/verify_local.py
+```
+
+说明：
+
+- CI 不默认执行 P1/P2/P3 smoke，避免缺少本地开发数据库、worker 或外部服务时误报。
+- 涉及 smoke 覆盖面的迭代，仍必须在本地按影响范围显式执行对应 smoke。
+- 如果后续 CI 增加 Postgres / Redis service containers，再把 smoke 分阶段接入。
+
 ---
 
 ## 9. 文档同步规范
