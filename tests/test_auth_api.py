@@ -183,6 +183,19 @@ class AuthAPITests(unittest.TestCase):
         self.assertEqual(second_logout_response.status_code, 200)
         self.assertEqual(second_logout_response.json()["revoked"], True)
 
+    def test_refresh_rejects_unknown_token_with_frontend_stable_error(self):
+        response = self.client.post("/api/v1/auth/refresh", json={"refresh_token": "not-a-real-refresh-token"})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"]["code"], "AUTHENTICATION_FAILED")
+
+    def test_logout_unknown_refresh_token_is_idempotent_noop(self):
+        response = self.client.post("/api/v1/auth/logout", json={"refresh_token": "not-a-real-refresh-token"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["revoked"], False)
+        self.assertIsNone(response.json()["revoked_at"])
+
 
 if __name__ == "__main__":
     unittest.main()

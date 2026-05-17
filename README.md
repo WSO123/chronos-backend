@@ -138,6 +138,12 @@ uv run python scripts/dev_seed_demo.py --password local-password --emit-token
 uv run python scripts/smoke_auth_token_loop.py
 ```
 
+跑一遍前端 Auth 错误契约 smoke 验证：
+
+```bash
+uv run python scripts/smoke_auth_frontend_error_contract.py
+```
+
 跑一遍 Bearer token 下真实 Capture 主链路 smoke 验证：
 
 ```bash
@@ -184,6 +190,7 @@ uv run python scripts/generate_llm_acceptance_record.py --smoke-json /tmp/chrono
 
 ```bash
 uv run python scripts/verify_local.py --smoke auth
+uv run python scripts/verify_local.py --smoke auth-errors
 uv run python scripts/verify_local.py --smoke p1-bearer
 uv run python scripts/verify_local.py --smoke p1-bearer-capture
 uv run python scripts/verify_local.py --smoke p3
@@ -201,6 +208,7 @@ P2: Goals -> Goal Detail / Timeline -> Reports / Insights -> Me
 P3: Data Source -> Capture / Inbox -> Today -> Energy -> Reminder Center -> Scheduler
 AI Mainline: Capture Parser -> Daily Planner -> Strategy Explanation -> Task Breakdown -> Daily Report -> Insight Detail
 Auth: Register -> Login -> Auth Me -> Business API -> Refresh Rotation -> Logout
+Auth Errors: Duplicate Register -> Invalid Login -> Token Errors -> Refresh Rotation -> Logout No-op
 P1 Bearer: Seed Demo Token -> Auth Me -> Today -> Task Detail -> Focus -> Daily Report -> Me
 P1 Bearer Capture: Register -> Capture -> Inbox -> Today -> Task Detail -> Focus -> Daily Report -> Me
 ```
@@ -254,6 +262,7 @@ Capture -> Inbox -> Today -> Task Detail -> Focus -> Report / Me
 uv run alembic upgrade head
 uv run python scripts/dev_seed_demo.py
 uv run python scripts/smoke_auth_token_loop.py
+uv run python scripts/smoke_auth_frontend_error_contract.py
 uv run python scripts/smoke_p1_bearer_execution_loop.py
 uv run python scripts/smoke_p1_bearer_capture_loop.py
 uv run python scripts/smoke_p1_execution_loop.py
@@ -268,6 +277,7 @@ git diff --check
 `scripts/dev_seed_demo.py` 用于前端和手动体验，默认创建 `demo@chronos.local` 用户并输出开发态 `X-User-Id`。
 `scripts/dev_seed_user.py` 和 `scripts/dev_seed_demo.py` 都支持 `--password` 写入本地登录密码，配合 `--emit-token` 可输出 JWT token pair，方便前端从开发态 header 迁移到 Bearer token 联调。
 `scripts/smoke_auth_token_loop.py` 用于验证 Auth token 闭环：register、login、Bearer 访问业务 API、refresh token 轮换和 logout 撤销。
+`scripts/smoke_auth_frontend_error_contract.py` 用于验证前端登录页和请求拦截器依赖的稳定错误码：重复注册、错密码、缺 token、非法 header、过期 access token、refresh 复用和 logout 幂等。
 `scripts/smoke_p1_bearer_execution_loop.py` 用于验证 Bearer token 模式下 P1 主闭环：demo token、Today、Task Detail、Focus、Daily Report 和 Me Overview。
 `scripts/smoke_p1_bearer_capture_loop.py` 用于验证 Bearer token 模式下真实输入闭环：register、Capture、Inbox confirm、Today、Task Detail、Focus、Daily Report 和 Me Overview。
 `scripts/smoke_p1_execution_loop.py` 用于开发后快速防回归，每次默认创建一个独立 smoke 用户，不会重置数据库。
@@ -285,6 +295,7 @@ git diff --check
 前端联调接口契约见：
 
 ```text
+docs/chronos-auth-mvp-frontend-handling.md
 docs/chronos-p1-frontend-api-contract.md
 docs/chronos-p1-bearer-api-walkthrough.md
 docs/chronos-p2-frontend-api-contract.md

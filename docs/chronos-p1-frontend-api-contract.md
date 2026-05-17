@@ -14,6 +14,8 @@ P2 已完成能力的集中合同见：[Chronos P2 Frontend API Contract](./chro
 
 Bearer token 版 P1 本地联调 walkthrough 见：[Chronos P1 Bearer API Walkthrough](./chronos-p1-bearer-api-walkthrough.md)。
 
+登录、注册、refresh 和错误码处理建议见：[Chronos Auth MVP Frontend Handling](./chronos-auth-mvp-frontend-handling.md)。
+
 Chronos P1 的主路径是：
 
 ```text
@@ -76,6 +78,8 @@ Auth token 闭环 smoke：
 ```bash
 uv run python scripts/smoke_auth_token_loop.py
 uv run python scripts/verify_local.py --smoke auth
+uv run python scripts/smoke_auth_frontend_error_contract.py
+uv run python scripts/verify_local.py --smoke auth-errors
 ```
 
 ### Auth Endpoints

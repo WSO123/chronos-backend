@@ -37,7 +37,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--smoke",
         action="append",
-        choices=("p1", "p1-bearer", "p1-bearer-capture", "p2", "p3", "auth", "ai-mainline", "llm-fallback"),
+        choices=(
+            "p1",
+            "p1-bearer",
+            "p1-bearer-capture",
+            "p2",
+            "p3",
+            "auth",
+            "auth-errors",
+            "ai-mainline",
+            "llm-fallback",
+        ),
         default=[],
         help="Run a smoke script after the base checks. Can be repeated.",
     )
@@ -117,6 +127,7 @@ def _smoke_step(smoke: str) -> VerificationStep:
         "p2": "scripts/smoke_p2_goal_insight_loop.py",
         "p3": "scripts/smoke_p3_natural_growth_loop.py",
         "auth": "scripts/smoke_auth_token_loop.py",
+        "auth-errors": "scripts/smoke_auth_frontend_error_contract.py",
         "ai-mainline": "scripts/smoke_core_ai_mainline.py",
         "llm-fallback": "scripts/smoke_daily_planner_fallback.py",
     }
