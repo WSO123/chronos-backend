@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     LLM_FALLBACK_PROVIDER: str = "mock"
     LLM_TIMEOUT_SECONDS: int = 30
     LLM_MAX_RETRIES: int = 2
+    LLM_ALLOWED_PROVIDERS: str = "openai,openai-compatible"
+    LLM_ALLOWED_MODELS: str = "gpt-4.1-mini"
+    LLM_MAX_OUTPUT_TOKENS: int = 800
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
 

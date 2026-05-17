@@ -7,6 +7,7 @@ from openai import OpenAI, OpenAIError
 from pydantic import ValidationError
 
 from app.ai.providers.base import LLMProviderError, LLMStructuredGeneration, T, empty_llm_usage
+from app.ai.providers.guard import validate_real_llm_request
 from app.core.config import settings
 
 
@@ -35,12 +36,14 @@ class OpenAICompatibleProvider:
         metadata: dict | None = None,
     ) -> LLMStructuredGeneration[T]:
         try:
+            validate_real_llm_request(self.provider_name, self.model_name)
             response = self._client_instance().responses.parse(
                 model=self.model_name,
                 instructions=prompt,
                 input=self._input_from_metadata(metadata),
                 text_format=schema,
                 temperature=temperature,
+                max_output_tokens=settings.LLM_MAX_OUTPUT_TOKENS,
             )
             parsed = getattr(response, "output_parsed", None)
             if parsed is None:

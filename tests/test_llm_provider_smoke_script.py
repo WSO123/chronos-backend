@@ -26,12 +26,18 @@ class LLMProviderSmokeScriptTests(unittest.TestCase):
             "LLM_PROVIDER": settings.LLM_PROVIDER,
             "LLM_MODEL": settings.LLM_MODEL,
             "LLM_API_KEY": settings.LLM_API_KEY,
+            "LLM_ALLOWED_PROVIDERS": settings.LLM_ALLOWED_PROVIDERS,
+            "LLM_ALLOWED_MODELS": settings.LLM_ALLOWED_MODELS,
+            "LLM_MAX_OUTPUT_TOKENS": settings.LLM_MAX_OUTPUT_TOKENS,
         }
         try:
             settings.AI_ENABLE_REAL_LLM = False
             settings.LLM_PROVIDER = "openai"
-            settings.LLM_MODEL = "gpt-test"
+            settings.LLM_MODEL = "gpt-4.1-mini"
             settings.LLM_API_KEY = "test"
+            settings.LLM_ALLOWED_PROVIDERS = "openai,openai-compatible"
+            settings.LLM_ALLOWED_MODELS = "gpt-4.1-mini"
+            settings.LLM_MAX_OUTPUT_TOKENS = 800
             with self.assertRaisesRegex(RuntimeError, "AI_ENABLE_REAL_LLM"):
                 smoke_llm_provider._validate_real_llm_config()
 
@@ -49,11 +55,23 @@ class LLMProviderSmokeScriptTests(unittest.TestCase):
             settings.LLM_MODEL = "structured-mock-v1"
             with self.assertRaisesRegex(RuntimeError, "LLM_MODEL"):
                 smoke_llm_provider._validate_real_llm_config()
+
+            settings.LLM_MODEL = "expensive-model"
+            with self.assertRaisesRegex(RuntimeError, "LLM_ALLOWED_MODELS"):
+                smoke_llm_provider._validate_real_llm_config()
+
+            settings.LLM_MODEL = "gpt-4.1-mini"
+            settings.LLM_MAX_OUTPUT_TOKENS = 0
+            with self.assertRaisesRegex(RuntimeError, "LLM_MAX_OUTPUT_TOKENS"):
+                smoke_llm_provider._validate_real_llm_config()
         finally:
             settings.AI_ENABLE_REAL_LLM = original["AI_ENABLE_REAL_LLM"]
             settings.LLM_PROVIDER = original["LLM_PROVIDER"]
             settings.LLM_MODEL = original["LLM_MODEL"]
             settings.LLM_API_KEY = original["LLM_API_KEY"]
+            settings.LLM_ALLOWED_PROVIDERS = original["LLM_ALLOWED_PROVIDERS"]
+            settings.LLM_ALLOWED_MODELS = original["LLM_ALLOWED_MODELS"]
+            settings.LLM_MAX_OUTPUT_TOKENS = original["LLM_MAX_OUTPUT_TOKENS"]
 
 
 if __name__ == "__main__":

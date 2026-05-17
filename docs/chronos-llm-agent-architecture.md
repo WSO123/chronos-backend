@@ -165,6 +165,9 @@ LLM_BASE_URL=
 LLM_FALLBACK_PROVIDER=mock
 LLM_TIMEOUT_SECONDS=30
 LLM_MAX_RETRIES=2
+LLM_ALLOWED_PROVIDERS=openai,openai-compatible
+LLM_ALLOWED_MODELS=gpt-4.1-mini
+LLM_MAX_OUTPUT_TOKENS=800
 ```
 
 P1 默认建议：
@@ -190,14 +193,24 @@ LLM_MODEL=gpt-4.1-mini
 LLM_API_KEY=...
 LLM_BASE_URL=
 LLM_FALLBACK_PROVIDER=mock
+LLM_ALLOWED_PROVIDERS=openai
+LLM_ALLOWED_MODELS=gpt-4.1-mini
+LLM_MAX_OUTPUT_TOKENS=800
 ```
 
 真实 provider smoke 必须手动显式允许，默认不发网络请求：
 
 ```bash
 uv run python scripts/smoke_llm_provider.py
-AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_API_KEY=... uv run python scripts/smoke_llm_provider.py --allow-real-llm
+AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_ALLOWED_MODELS=gpt-4.1-mini LLM_API_KEY=... uv run python scripts/smoke_llm_provider.py --allow-real-llm
 ```
+
+真实 provider 保护边界：
+
+- `LLM_ALLOWED_PROVIDERS` 限制可发起真实请求的 provider。
+- `LLM_ALLOWED_MODELS` 限制可发起真实请求的 model；OpenAI-compatible 自定义模型必须显式加入。
+- `LLM_MAX_OUTPUT_TOKENS` 为真实 structured output 调用设置输出上限。
+- provider / model / token guard 失败时，Daily Planner 走 Planning Engine fallback，并在 AIJob 中记录 provider error。
 
 ---
 

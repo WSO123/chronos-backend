@@ -589,8 +589,15 @@ uv run python -m unittest tests.test_daily_planner_agent tests.test_today_servic
 
 ```bash
 uv run python scripts/smoke_llm_provider.py
-AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_API_KEY=... uv run python scripts/smoke_llm_provider.py --allow-real-llm
+AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_ALLOWED_MODELS=gpt-4.1-mini LLM_API_KEY=... uv run python scripts/smoke_llm_provider.py --allow-real-llm
 ```
+
+真实 provider 相关改动必须确认：
+
+- `LLM_ALLOWED_PROVIDERS` 覆盖目标 provider。
+- `LLM_ALLOWED_MODELS` 覆盖目标 model。
+- `LLM_MAX_OUTPUT_TOKENS` 为正数且足够小。
+- guard 失败时 Today / Strategy 仍走 fallback，不阻塞执行闭环。
 
 或通过统一验证入口追加：
 

@@ -12,6 +12,8 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.ai.agents.daily_planner import DailyPlannerAgent
+from app.ai.providers.base import LLMProviderError
+from app.ai.providers.guard import validate_real_llm_request
 from app.ai.providers.registry import llm_provider_registry
 from app.core.config import settings
 
@@ -108,6 +110,10 @@ def _validate_real_llm_config() -> None:
         raise RuntimeError("LLM_API_KEY is required for real provider smoke.")
     if not settings.LLM_MODEL or settings.LLM_MODEL == "structured-mock-v1":
         raise RuntimeError("LLM_MODEL must be set to a real provider model.")
+    try:
+        validate_real_llm_request(settings.LLM_PROVIDER, settings.LLM_MODEL)
+    except LLMProviderError as exc:
+        raise RuntimeError(str(exc)) from exc
 
 
 def _parse_args() -> argparse.Namespace:

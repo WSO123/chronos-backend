@@ -303,12 +303,14 @@ class TodayServiceTests(unittest.TestCase):
             "LLM_PROVIDER": settings.LLM_PROVIDER,
             "LLM_MODEL": settings.LLM_MODEL,
             "LLM_API_KEY": settings.LLM_API_KEY,
+            "LLM_ALLOWED_MODELS": settings.LLM_ALLOWED_MODELS,
         }
         try:
             settings.AI_ENABLE_REAL_LLM = True
             settings.LLM_PROVIDER = "openai"
-            settings.LLM_MODEL = "gpt-test"
+            settings.LLM_MODEL = "gpt-4.1-mini"
             settings.LLM_API_KEY = None
+            settings.LLM_ALLOWED_MODELS = "gpt-4.1-mini"
             task_service.create_task(
                 self.db,
                 user_id=self.user.id,
@@ -323,7 +325,7 @@ class TodayServiceTests(unittest.TestCase):
             planner_job = self.db.get(AIJob, uuid.UUID(strategy["source"]["ai_job_id"]))
             self.assertEqual(planner_job.status, AIJobStatus.SUCCEEDED_WITH_FALLBACK)
             self.assertEqual(planner_job.provider, "openai")
-            self.assertEqual(planner_job.model, "gpt-test")
+            self.assertEqual(planner_job.model, "gpt-4.1-mini")
             self.assertEqual(planner_job.job_metadata["output_applied"], False)
             self.assertEqual(planner_job.job_metadata["fallback_reason"], "daily_planner_agent_failed")
             self.assertEqual(planner_job.job_metadata["failure_type"], "provider_error")
@@ -336,6 +338,46 @@ class TodayServiceTests(unittest.TestCase):
             settings.LLM_PROVIDER = original["LLM_PROVIDER"]
             settings.LLM_MODEL = original["LLM_MODEL"]
             settings.LLM_API_KEY = original["LLM_API_KEY"]
+            settings.LLM_ALLOWED_MODELS = original["LLM_ALLOWED_MODELS"]
+
+    def test_disallowed_real_llm_model_falls_back_without_blocking_today(self):
+        original = {
+            "AI_ENABLE_REAL_LLM": settings.AI_ENABLE_REAL_LLM,
+            "LLM_PROVIDER": settings.LLM_PROVIDER,
+            "LLM_MODEL": settings.LLM_MODEL,
+            "LLM_API_KEY": settings.LLM_API_KEY,
+            "LLM_ALLOWED_MODELS": settings.LLM_ALLOWED_MODELS,
+        }
+        try:
+            settings.AI_ENABLE_REAL_LLM = True
+            settings.LLM_PROVIDER = "openai"
+            settings.LLM_MODEL = "expensive-model"
+            settings.LLM_API_KEY = "test"
+            settings.LLM_ALLOWED_MODELS = "gpt-4.1-mini"
+            task_service.create_task(
+                self.db,
+                user_id=self.user.id,
+                title="Guarded provider fallback task",
+                estimated_duration_min=30,
+                priority=1,
+                value_level=ValueLevel.HIGH,
+            )
+
+            strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+            planner_job = self.db.get(AIJob, uuid.UUID(strategy["source"]["ai_job_id"]))
+            self.assertEqual(planner_job.status, AIJobStatus.SUCCEEDED_WITH_FALLBACK)
+            self.assertEqual(planner_job.provider, "openai")
+            self.assertEqual(planner_job.model, "expensive-model")
+            self.assertEqual(planner_job.job_metadata["failure_type"], "provider_error")
+            self.assertIn("LLM_ALLOWED_MODELS", planner_job.error_message)
+            self.assertEqual(strategy["factors"]["planner_agent_failure_type"], "provider_error")
+        finally:
+            settings.AI_ENABLE_REAL_LLM = original["AI_ENABLE_REAL_LLM"]
+            settings.LLM_PROVIDER = original["LLM_PROVIDER"]
+            settings.LLM_MODEL = original["LLM_MODEL"]
+            settings.LLM_API_KEY = original["LLM_API_KEY"]
+            settings.LLM_ALLOWED_MODELS = original["LLM_ALLOWED_MODELS"]
 
     def test_planning_engine_rolls_over_work_beyond_today_capacity(self):
         task_service.create_task(

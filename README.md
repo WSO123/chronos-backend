@@ -58,6 +58,9 @@ AI_ENABLE_REAL_LLM=false
 LLM_PROVIDER=mock
 LLM_MODEL=structured-mock-v1
 LLM_FALLBACK_PROVIDER=mock
+LLM_ALLOWED_PROVIDERS=openai,openai-compatible
+LLM_ALLOWED_MODELS=gpt-4.1-mini
+LLM_MAX_OUTPUT_TOKENS=800
 ```
 
 真实 provider 需要显式开启，不能让 LLM 绕过业务层校验或用户确认：
@@ -69,13 +72,16 @@ LLM_MODEL=gpt-4.1-mini
 LLM_API_KEY=...
 LLM_BASE_URL=
 LLM_FALLBACK_PROVIDER=mock
+LLM_ALLOWED_PROVIDERS=openai
+LLM_ALLOWED_MODELS=gpt-4.1-mini
+LLM_MAX_OUTPUT_TOKENS=800
 ```
 
 真实 provider smoke 默认不会进入本地验证链路；需要手动显式允许：
 
 ```bash
 uv run python scripts/smoke_llm_provider.py
-AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_API_KEY=... uv run python scripts/smoke_llm_provider.py --allow-real-llm
+AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_ALLOWED_MODELS=gpt-4.1-mini LLM_API_KEY=... uv run python scripts/smoke_llm_provider.py --allow-real-llm
 ```
 
 执行数据库迁移：
