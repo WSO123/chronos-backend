@@ -138,7 +138,10 @@ class ReportService:
     ) -> DailyReport:
         resolved_date = self._resolve_report_date(db, user_id=user_id, report_date=report_date)
         report = self._get_daily_report(db, user_id=user_id, report_date=resolved_date)
-        if report is not None:
+        if report is None:
+            return self.generate_daily_report(db, user_id=user_id, report_date=resolved_date)
+        metrics = self.daily_metrics(db, user_id=user_id, report_date=resolved_date)
+        if self._report_matches_metrics(report, metrics):
             return report
         return self.generate_daily_report(db, user_id=user_id, report_date=resolved_date)
 
@@ -262,6 +265,17 @@ class ReportService:
             DailyReport.report_date == report_date,
         )
         return db.scalars(stmt).first()
+
+    def _report_matches_metrics(self, report: DailyReport, metrics: DailyReportMetrics) -> bool:
+        return (
+            report.daily_plan_id == metrics.daily_plan_id
+            and report.completed_task_count == metrics.completed_task_count
+            and report.postponed_task_count == metrics.postponed_task_count
+            and report.interrupted_count == metrics.interrupted_count
+            and report.focus_minutes == metrics.focus_minutes
+            and report.completion_rate == metrics.completion_rate
+            and report.generated_from_plan_version == metrics.generated_from_plan_version
+        )
 
     def _is_daily_report_unique_violation(self, exc: IntegrityError) -> bool:
         diag = getattr(exc.orig, "diag", None)

@@ -266,6 +266,40 @@ class ReportAndMeServiceTests(unittest.TestCase):
         self.assertEqual(first.id, refreshed.id)
         self.assertEqual(self.db.query(DailyReport).filter(DailyReport.user_id == self.user.id).count(), 1)
 
+    def test_get_daily_report_refreshes_when_execution_metrics_change(self):
+        task = task_service.create_task(self.db, user_id=self.user.id, title="Late report focus task")
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.report_date)
+        item_id = today["sections"]["recommended_tasks"][0]["daily_plan_item_id"]
+        initial = report_service.get_or_generate_daily_report(
+            self.db,
+            user_id=self.user.id,
+            report_date=self.report_date,
+        )
+        initial_refreshed_at = initial.refreshed_at
+
+        focus = focus_service.start_session(
+            self.db,
+            user_id=self.user.id,
+            task_id=task.id,
+            daily_plan_item_id=item_id,
+        )
+        focus_service.complete_session(
+            self.db,
+            session_id=focus.id,
+            user_id=self.user.id,
+            actual_duration_min=22,
+        )
+        refreshed = report_service.get_or_generate_daily_report(
+            self.db,
+            user_id=self.user.id,
+            report_date=self.report_date,
+        )
+
+        self.assertEqual(refreshed.id, initial.id)
+        self.assertEqual(refreshed.completed_task_count, 1)
+        self.assertEqual(refreshed.focus_minutes, 22)
+        self.assertGreater(refreshed.refreshed_at, initial_refreshed_at)
+
     def test_me_overview_returns_basic_feedback_without_generating_report(self):
         task_service.create_task(self.db, user_id=self.user.id, title="Overview task")
         data_source_service.connect_source(

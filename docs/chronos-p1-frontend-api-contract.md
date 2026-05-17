@@ -828,7 +828,7 @@ Query:
 report_date=YYYY-MM-DD  // optional
 ```
 
-如果当日没有 report，会生成一个。
+如果当日没有 report，会生成一个；如果已有 report 但完成数、延后数、中断数、Focus 时长或来源 plan version 已变化，会自动刷新同一条 Daily Report。
 
 ### POST `/reports/daily/generate`
 
@@ -855,6 +855,7 @@ Response key fields:
 Frontend notes:
 
 - P1 Daily Report 可以作为完成 Focus 后的轻量复盘入口。
+- 前端可以直接 GET；后端会保证关键执行指标和最新 Focus / Today 数据对齐。`POST /generate` 仍可作为显式强制刷新入口。
 - `ai_suggestions` 是短建议列表，不要做成复杂洞察页。
 
 ### GET `/reports/weekly`

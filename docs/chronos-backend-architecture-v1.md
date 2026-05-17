@@ -1271,6 +1271,8 @@ GET  /api/v1/reports/monthly
 
 说明：
 
+- `GET /reports/daily` 在 report 不存在时生成；如果 report 已存在但执行指标或来源 plan version 已变化，必须刷新同一条 report，避免 Focus 完成后反馈层返回旧数据。
+- `POST /reports/daily/generate` 保留为显式强制刷新入口。
 - P1 已支持 Daily Report。
 - P2 已支持 Weekly Report 轻量聚合，不单独持久化，不抢 Today 的执行决策。
 - P2 已支持 Monthly Report 轻量聚合，不单独持久化，用于长期趋势回看。
