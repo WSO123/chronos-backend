@@ -233,7 +233,7 @@ class ReportService:
             end_at=end_at,
         )
         if completed_task_count == 0 and plan_completed_count:
-            completed_task_count = plan_completed_count
+            completed_task_count = self._completed_task_count_from_plan(db, plan=plan)
 
         return DailyReportMetrics(
             report_date=resolved_date,
@@ -306,6 +306,22 @@ class ReportService:
         completed_count = len([item for item in items if item.status == DailyPlanItemStatus.COMPLETED])
         completion_rate = round(completed_count / total_count, 2) if total_count else 0.0
         return total_count, completed_count, completion_rate
+
+    def _completed_task_count_from_plan(self, db: Session, *, plan: DailyPlan | None) -> int:
+        if plan is None or plan.current_revision_id is None:
+            return 0
+        stmt = (
+            select(func.count(distinct(DailyPlanItem.task_id)))
+            .join(Task, Task.id == DailyPlanItem.task_id)
+            .where(
+                DailyPlanItem.daily_plan_id == plan.id,
+                DailyPlanItem.plan_revision_id == plan.current_revision_id,
+                DailyPlanItem.section != DailyPlanItemSection.ROLLED_OVER,
+                DailyPlanItem.status == DailyPlanItemStatus.COMPLETED,
+                Task.status == TaskStatus.COMPLETED,
+            )
+        )
+        return int(db.scalar(stmt) or 0)
 
     def _distinct_task_event_count(
         self,

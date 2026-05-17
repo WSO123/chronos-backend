@@ -14,6 +14,7 @@ from app.services.me_service import me_service
 from app.services.planning_service import planning_service
 from app.services.reminder_service import reminder_service
 from app.services.report_service import ReportService, report_service
+from app.services.task_planning_signal_service import task_planning_signal_service
 from app.services.task_service import task_service
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
@@ -111,6 +112,52 @@ class ReportAndMeServiceTests(unittest.TestCase):
         self.assertEqual(today_trend["high_value_completed_task_count"], 1)
         self.assertEqual(report["lagging_tasks"][0]["id"], lagging_task.id)
         self.assertTrue(report["ai_suggestions"])
+
+    def test_daily_report_counts_minimum_viable_slice_as_plan_progress_not_completed_task(self):
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Large report goal",
+            value_level=ValueLevel.HIGH,
+        )
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="完成一个很大的日报切片任务",
+            estimated_duration_min=180,
+            priority=4,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task_planning_signal_service.generate_signal(self.db, task_id=task.id, user_id=self.user.id)
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.report_date)
+        item = self._item_for_task(self._today_items(today), task.id)
+        session = focus_service.start_session(
+            self.db,
+            user_id=self.user.id,
+            task_id=task.id,
+            daily_plan_item_id=item["daily_plan_item_id"],
+        )
+        focus_service.complete_session(
+            self.db,
+            session_id=session.id,
+            user_id=self.user.id,
+            actual_duration_min=40,
+        )
+
+        metrics = report_service.daily_metrics(self.db, user_id=self.user.id, report_date=self.report_date)
+        report = report_service.get_or_generate_daily_report(
+            self.db,
+            user_id=self.user.id,
+            report_date=self.report_date,
+        )
+
+        self.assertEqual(metrics.planned_task_count, 1)
+        self.assertEqual(metrics.completed_task_count, 0)
+        self.assertEqual(metrics.completion_rate, 1.0)
+        self.assertEqual(metrics.focus_minutes, 40)
+        self.assertEqual(report.completed_task_count, 0)
+        self.assertEqual(report.completion_rate, 1.0)
 
     def test_monthly_report_aggregates_daily_and_weekly_trends(self):
         goal = goal_service.create_goal(

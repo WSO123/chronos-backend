@@ -58,7 +58,7 @@ Capture -> Inbox -> Today -> Task Detail -> Focus -> Report
 | Task Detail 承接层 | L3 | 聚合 Goal、AI info、Today context、Focus state 和 actions | 避免继续堆成信息仓库 |
 | Task Detail -> Focus | L3 | 未传 `daily_plan_item_id` 时后端会自动绑定当前 Today 中同任务 item | 任务不在 Today 时仍允许 Focus，但要保持 report 口径清晰 |
 | Focus 执行状态 | L3 | FocusSession、Task、DailyPlanItem、ActivityEvent 保持一致；最小推进切片不会误完成整个 Task | 后续只补必要状态边界，不做复杂控制面板 |
-| Daily Report | L3 | GET 会自动刷新关键指标，避免旧数据 | 周/月报告仍是 P2 聚合，不替代 Today |
+| Daily Report | L3 | GET 会自动刷新关键指标；completion_rate 承认计划项完成，completed_task_count 只统计真正 completed Task | 周/月报告仍是 P2 聚合，不替代 Today |
 | Me 基础数据 | L2 | 已能承接基础数据反馈 | 不把 Me 扩成 P3/P4 入口大杂烩 |
 
 ---

@@ -492,6 +492,7 @@ P2 约束：
 - Weekly / Monthly Report 当前不持久化。
 - 不替代 Today 的每日执行顺序。
 - 规则建议不代表真实 LLM 洞察。
+- `completion_rate` 按当前 DailyPlanItem 完成情况计算；`completed_task_count` 只统计真正 completed 的 Task。最小推进切片完成会提高 completion_rate，但不会被误算为完成整个任务。
 
 ## 7. Insights
 
