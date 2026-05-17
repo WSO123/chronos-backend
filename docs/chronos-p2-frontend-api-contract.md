@@ -92,6 +92,7 @@ P2 新增字段：
 - `model_name` / `prompt_version` 指向最终落库的 Planning Engine strategy snapshot。
 - `ai_job_id` 指向 Daily Planner Agent shell 的调用记录，可通过 `GET /api/v1/ai-jobs/{id}` 查看 provider、model、status、fallback 和 metadata。
 - `AIJob.job_metadata.prompt_checksum` 可用于确认本次 planner agent 使用的具体 prompt 内容版本；前端一般不需要展示。
+- `AIJob.latency_ms`、`job_metadata.failure_type`、`job_metadata.provider_latency_ms` 和 `job_metadata.usage` 只用于 Strategy Detail 深层解释、调试或后台观测，不建议进入 Today 首屏。
 - Strategy Detail 可以把 `ai_job_id` 用于调试或深层解释；Today 首屏不展示这个字段。
 
 `factors` 当前包含：
@@ -114,6 +115,8 @@ P2 新增字段：
   "user_adjusted_count": 1,
   "energy_level": "unknown",
   "energy_applied": false,
+  "planner_agent_latency_ms": 12,
+  "planner_agent_failure_type": null,
   "completed_count": 0,
   "focus_minutes": 0
 }
@@ -129,6 +132,7 @@ P2 新增字段：
 - `over_capacity_minutes` 表示主执行序列超出当日容量参考的分钟数；只有受保护任务总量过重时才会大于 0。
 - `capacity_status` 当前为 `within_capacity` 或 `overloaded`，只用于 Strategy Detail 解释。
 - `energy_applied=true` 表示同日 Energy 数据已经作为排序和容量保护因子进入 Planning Engine；高精力不会自动增加工作量。
+- `planner_agent_latency_ms` 和 `planner_agent_failure_type` 只用于 Strategy Detail 深层解释、调试或后台观测；Today 首屏不展示。
 - 这些字段用于 Strategy Detail 的信任解释，不建议放到 Today 首屏。
 
 `task_rationales[]` 中每个任务会包含 `score_breakdown`：

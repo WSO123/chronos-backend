@@ -516,6 +516,7 @@ AI 测试默认用 mock provider。
 - 内部 `mock_output` / prompt trace 不发送给真实 provider
 - provider 错误统一包装为 `LLMProviderError`
 - service fallback 时 `AIJob.provider` / `AIJob.model` 记录实际选中的 provider
+- service fallback 时记录 `latency_ms`、`failure_type` 和 root error type
 
 涉及 Daily Planner Agent / Planning Engine 时，必须覆盖：
 
@@ -523,6 +524,7 @@ AI 测试默认用 mock provider。
 - Agent 失败 fallback
 - Agent 输出不合法 fallback
 - `AIJob(job_type=daily_planner)` 可通过 Strategy Detail source 追踪
+- `AIJob.latency_ms` / `job_metadata.provider_latency_ms` / `job_metadata.usage` 结构稳定
 - Planning Engine evaluation 不退化
 
 ### 8.4 Migration 测试

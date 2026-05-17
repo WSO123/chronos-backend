@@ -109,6 +109,8 @@ class StrategyDetailFactorsResponse(BaseModel):
     user_adjusted_count: int
     energy_level: str
     energy_applied: bool
+    planner_agent_latency_ms: int | None = None
+    planner_agent_failure_type: str | None = None
     completed_count: int
     focus_minutes: int
 

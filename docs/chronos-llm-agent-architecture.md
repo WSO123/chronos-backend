@@ -325,6 +325,7 @@ class CaptureParseOutput(BaseModel):
 - 已接入 OpenAI-compatible provider adapter，可通过 `LLM_PROVIDER=openai` 或 `LLM_PROVIDER=openai-compatible` 显式启用；本地和 CI 默认关闭。
 - 每次 plan revision 都记录一条 `AIJob(job_type=daily_planner)`，Strategy Detail `source.ai_job_id` 可追踪调用结果。
 - Daily Planner prompt 已迁移到 `app/ai/prompts/daily_planner/p2-daily-planner-agent-v1.md`，通过 prompt registry 加载，并在 `AIJob.job_metadata.prompt_checksum` 里记录 checksum。
+- Daily Planner provider 调用记录 `latency_ms`、`provider_latency_ms`、`failure_type` 和 usage 占位，便于后续真实 LLM 排障和成本统计。
 - v1 只允许 Agent 更新策略摘要和推荐理由；业务层校验禁止 Agent 改变任务集合、排序和 section。
 - Agent 失败或输出不合法时，`AIJob.status=succeeded_with_fallback`，继续使用 Planning Engine v1 输出。
 - 每个 `DailyPlanItem` 会保存 `score_breakdown`，Strategy Detail 可以解释排序，Today 首屏不展开完整评分。
@@ -541,6 +542,7 @@ Chronos 的核心闭环不能依赖 LLM 成功。
 
 - 记录 AIJob fallback 状态。
 - 记录实际选中的 provider / model，不能失败后误写为 mock。
+- 记录失败分类：`provider_error`、`invalid_output` 或 `agent_error`。
 - 保留 error_message。
 - 允许 retry。
 - 不阻塞用户继续使用产品。
@@ -654,6 +656,18 @@ P1 至少记录：
 - latency
 - error_message
 - retry_count
+
+Daily Planner v1 额外记录：
+
+- `AIJob.latency_ms`
+- `job_metadata.provider_latency_ms`
+- `job_metadata.provider_observability_version`
+- `job_metadata.failure_type`
+- `job_metadata.fallback_root_error_type`
+- `job_metadata.usage.input_tokens`
+- `job_metadata.usage.output_tokens`
+- `job_metadata.usage.total_tokens`
+- `job_metadata.usage.cost_usd`
 
 可选后续扩展：
 

@@ -361,6 +361,8 @@ Response key fields:
     "total_estimated_minutes": 95,
     "dependency_protected_count": 1,
     "user_adjusted_count": 1,
+    "planner_agent_latency_ms": 12,
+    "planner_agent_failure_type": null,
     "completed_count": 0,
     "focus_minutes": 0
   },
@@ -383,6 +385,7 @@ Frontend notes:
 - 默认展示 `summary`、`primary_reason`、`explanation` 和少量 `factors`。
 - `task_rationales` 复用 Today item 字段，可用于解释为什么某个任务被放在当前位置。
 - `dependency_protected_count` 和 `user_adjusted_count` 只服务信任解释，不建议放入 Today 首屏。
+- `planner_agent_latency_ms` 和 `planner_agent_failure_type` 只服务 Strategy Detail 深层解释或调试，不建议放入 Today 首屏。
 - `source.ai_job_id` 指向本次 Daily Planner Agent shell 的 `AIJob` 记录；前端可在调试或 Strategy Detail 深层解释中查询，不建议在 Today 首屏展示。`AIJob.job_metadata.prompt_checksum` 可用于确认本次调用使用的 prompt 内容。
 - 不要把完整 factors 做成复杂驾驶舱；它是信任解释，不是操作中心。
 

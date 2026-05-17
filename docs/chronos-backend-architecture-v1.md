@@ -1521,8 +1521,9 @@ StrategyDetailResponse {
 - Daily Planner Agent shell 只返回 structured output；默认 provider 为 mock，不调用真实 LLM；显式开启后可使用 OpenAI-compatible provider。
 - Daily Planner prompt 由 prompt registry 加载，当前版本为 `p2-daily-planner-agent-v1`，checksum 记录到 `AIJob.job_metadata`。
 - `PlanningService` 必须校验 Agent 输出。v1 不允许 Agent 改变任务集合、`sort_order` 或 `section`。
-- Agent 失败或输出不合法时，使用 Planning Engine v1 fallback，`AIJob.status=succeeded_with_fallback`，并记录实际 provider / model。
-- 后续再增加 token / latency / cost observability、长期行为学习和更复杂的多轮 replanning。
+- Agent 失败或输出不合法时，使用 Planning Engine v1 fallback，`AIJob.status=succeeded_with_fallback`，并记录实际 provider / model、latency、failure_type 和 root error type。
+- `AIJob.job_metadata.usage` 预留 token / cost 结构，真实 usage 统计后续接入。
+- 后续再增加 token usage 填充、长期行为学习和更复杂的多轮 replanning。
 
 ### Task Breakdown
 

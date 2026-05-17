@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from time import perf_counter
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -9,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.agents.daily_planner import DailyPlannerAgent, daily_planner_agent
+from app.ai.providers.base import LLMProviderError
 from app.ai.providers.registry import llm_provider_registry
 from app.ai.schemas.planning import DailyPlannerOutput
 from app.models.activity_event import ActivityEvent
@@ -385,6 +387,7 @@ class PlanningService:
         )
         job.status = AIJobStatus.RUNNING
         job.started_at = utc_now()
+        provider_call_started = perf_counter()
 
         try:
             agent_result = self.planner_agent.run(
@@ -419,21 +422,30 @@ class PlanningService:
                 "prompt_checksum": agent_result.prompt_checksum,
             }
         except Exception as exc:  # noqa: BLE001 - fallback is the product boundary here.
-            fallback_reason = (
-                "daily_planner_agent_invalid_output"
-                if isinstance(exc, ValueError)
-                else "daily_planner_agent_failed"
-            )
             job.status = AIJobStatus.SUCCEEDED_WITH_FALLBACK
             job.error_message = str(exc)
             job.job_metadata = {
                 **job.job_metadata,
                 "output_applied": False,
-                "fallback_reason": fallback_reason,
+                "fallback_reason": self._planner_fallback_reason(exc),
                 "fallback_error_type": exc.__class__.__name__,
+                "fallback_root_error_type": self._root_error_type(exc),
+                "failure_type": self._planner_failure_type(exc),
             }
 
         job.finished_at = utc_now()
+        job.latency_ms = max(0, int((perf_counter() - provider_call_started) * 1000))
+        job.job_metadata = {
+            **job.job_metadata,
+            "provider_latency_ms": job.latency_ms,
+            "provider_observability_version": "v1",
+            "usage": {
+                "input_tokens": None,
+                "output_tokens": None,
+                "total_tokens": None,
+                "cost_usd": None,
+            },
+        }
         strategy_payload["score_factors"] = {
             **strategy_payload["score_factors"],
             "ai_job_id": str(job.id),
@@ -442,9 +454,29 @@ class PlanningService:
             "planner_agent_model": job.model,
             "planner_agent_prompt_version": job.prompt_version,
             "planner_agent_prompt_checksum": job.job_metadata.get("prompt_checksum"),
+            "planner_agent_latency_ms": job.latency_ms,
+            "planner_agent_failure_type": job.job_metadata.get("failure_type"),
             "planner_agent_output_applied": job.job_metadata.get("output_applied", False),
         }
         return {"planned_tasks": planned_tasks, "strategy_payload": strategy_payload, "ai_job": job}
+
+    def _planner_fallback_reason(self, exc: Exception) -> str:
+        if isinstance(exc, ValueError):
+            return "daily_planner_agent_invalid_output"
+        return "daily_planner_agent_failed"
+
+    def _planner_failure_type(self, exc: Exception) -> str:
+        if isinstance(exc, ValueError):
+            return "invalid_output"
+        if isinstance(exc, LLMProviderError):
+            return "provider_error"
+        return "agent_error"
+
+    def _root_error_type(self, exc: Exception) -> str:
+        root = exc
+        while root.__cause__ is not None:
+            root = root.__cause__
+        return root.__class__.__name__
 
     def _planner_candidates(self, planned_tasks: list[PlannedTask]) -> list[dict]:
         return [
@@ -1106,6 +1138,8 @@ class PlanningService:
             "user_adjusted_count": int(score_factors.get("user_adjusted_count", 0) or 0),
             "energy_level": str(score_factors.get("energy_level") or "unknown"),
             "energy_applied": bool(score_factors.get("energy_applied") or False),
+            "planner_agent_latency_ms": score_factors.get("planner_agent_latency_ms"),
+            "planner_agent_failure_type": score_factors.get("planner_agent_failure_type"),
             "completed_count": plan.completed_count,
             "focus_minutes": plan.focus_minutes,
         }

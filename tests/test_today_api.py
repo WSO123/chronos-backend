@@ -69,6 +69,8 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(body["factors"]["user_adjusted_count"], 0)
         self.assertEqual(body["factors"]["capacity_status"], "within_capacity")
         self.assertEqual(body["factors"]["over_capacity_minutes"], 0)
+        self.assertIsNotNone(body["factors"]["planner_agent_latency_ms"])
+        self.assertIsNone(body["factors"]["planner_agent_failure_type"])
         self.assertEqual(body["task_rationales"][0]["title"], "Private strategy task")
         self.assertNotIn("Other strategy task", {item["title"] for item in body["task_rationales"]})
         self.assertTrue(body["explanation"])
@@ -82,6 +84,8 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(job_response.json()["job_type"], "daily_planner")
         self.assertEqual(job_response.json()["status"], "succeeded")
         self.assertEqual(job_response.json()["provider"], "mock")
+        self.assertEqual(job_response.json()["latency_ms"], body["factors"]["planner_agent_latency_ms"])
+        self.assertEqual(job_response.json()["job_metadata"]["provider_observability_version"], "v1")
 
     def test_strategy_detail_returns_energy_explanation_with_planning_signal(self):
         energy_service.upsert_daily_metric(

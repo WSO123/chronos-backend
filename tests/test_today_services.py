@@ -121,6 +121,8 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["factors"]["over_capacity_minutes"], 0)
         self.assertEqual(strategy["factors"]["capacity_status"], "within_capacity")
         self.assertEqual(strategy["factors"]["energy_applied"], False)
+        self.assertIsNotNone(strategy["factors"]["planner_agent_latency_ms"])
+        self.assertEqual(strategy["factors"]["planner_agent_failure_type"], None)
         self.assertEqual(len(strategy["task_rationales"]), 2)
         self.assertEqual(strategy["task_rationales"][0]["title"], "Protect strategy task")
         self.assertIn("value_score", strategy["task_rationales"][0]["score_breakdown"])
@@ -136,6 +138,12 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(planner_job.job_metadata["output_applied"], True)
         self.assertEqual(planner_job.prompt_version, "p2-daily-planner-agent-v1")
         self.assertEqual(len(planner_job.job_metadata["prompt_checksum"]), 64)
+        self.assertIsNotNone(planner_job.latency_ms)
+        self.assertGreaterEqual(planner_job.latency_ms, 0)
+        self.assertEqual(planner_job.job_metadata["provider_latency_ms"], planner_job.latency_ms)
+        self.assertEqual(planner_job.job_metadata["provider_observability_version"], "v1")
+        self.assertEqual(planner_job.job_metadata["usage"]["total_tokens"], None)
+        self.assertEqual(planner_job.job_metadata["usage"]["cost_usd"], None)
 
     def test_daily_planner_agent_failure_falls_back_to_planning_engine(self):
         class FailingPlannerAgent:
@@ -162,6 +170,10 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(planner_job.job_metadata["output_applied"], False)
         self.assertEqual(planner_job.job_metadata["fallback_reason"], "daily_planner_agent_failed")
         self.assertEqual(planner_job.job_metadata["fallback_error_type"], "RuntimeError")
+        self.assertEqual(planner_job.job_metadata["fallback_root_error_type"], "RuntimeError")
+        self.assertEqual(planner_job.job_metadata["failure_type"], "agent_error")
+        self.assertIsNotNone(planner_job.latency_ms)
+        self.assertEqual(strategy["factors"]["planner_agent_failure_type"], "agent_error")
 
     def test_daily_planner_agent_invalid_output_falls_back_to_planning_engine(self):
         class InvalidPlannerAgent:
@@ -226,6 +238,9 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(planner_job.job_metadata["output_applied"], False)
         self.assertEqual(planner_job.job_metadata["fallback_reason"], "daily_planner_agent_invalid_output")
         self.assertEqual(planner_job.job_metadata["fallback_error_type"], "ValueError")
+        self.assertEqual(planner_job.job_metadata["fallback_root_error_type"], "ValueError")
+        self.assertEqual(planner_job.job_metadata["failure_type"], "invalid_output")
+        self.assertEqual(strategy["factors"]["planner_agent_failure_type"], "invalid_output")
 
     def test_real_llm_provider_failure_records_provider_and_falls_back(self):
         original = {
@@ -256,6 +271,10 @@ class TodayServiceTests(unittest.TestCase):
             self.assertEqual(planner_job.model, "gpt-test")
             self.assertEqual(planner_job.job_metadata["output_applied"], False)
             self.assertEqual(planner_job.job_metadata["fallback_reason"], "daily_planner_agent_failed")
+            self.assertEqual(planner_job.job_metadata["failure_type"], "provider_error")
+            self.assertEqual(planner_job.job_metadata["fallback_root_error_type"], "LLMProviderError")
+            self.assertEqual(planner_job.job_metadata["provider_latency_ms"], planner_job.latency_ms)
+            self.assertEqual(strategy["factors"]["planner_agent_failure_type"], "provider_error")
             self.assertIn("LLM_API_KEY", planner_job.error_message)
         finally:
             settings.AI_ENABLE_REAL_LLM = original["AI_ENABLE_REAL_LLM"]
