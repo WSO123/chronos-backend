@@ -33,8 +33,18 @@ DEMO_NAME = "Chronos Demo"
 DEMO_TIMEZONE = "Asia/Shanghai"
 
 
-def seed_demo_data(*, email: str, name: str, timezone: str) -> dict:
-    user = seed_user(email=email, name=name, timezone=timezone)
+def seed_demo_data(
+    *,
+    email: str,
+    name: str,
+    timezone: str,
+    password: str | None = None,
+    emit_token: bool = False,
+) -> dict:
+    if emit_token and not password:
+        raise ValueError("emit_token requires password")
+    user = seed_user(email=email, name=name, timezone=timezone, password=password)
+    email = user.email
     user_id = user.id
     today = datetime.now(ZoneInfo(timezone)).date()
 
@@ -94,7 +104,7 @@ def seed_demo_data(*, email: str, name: str, timezone: str) -> dict:
         today_payload = planning_service.get_today(db, user_id=user_id, plan_date=today)
         report = report_service.generate_daily_report(db, user_id=user_id, report_date=today)
 
-        return {
+        result = {
             "user_id": user_id,
             "header": f"X-User-Id: {user_id}",
             "goal_id": goal.id,
@@ -106,6 +116,16 @@ def seed_demo_data(*, email: str, name: str, timezone: str) -> dict:
             "today_plan_version": today_payload["plan_version"],
             "daily_report_id": report.id,
         }
+        if password:
+            result["login"] = {
+                "email": email,
+                "endpoint": "POST /api/v1/auth/login",
+            }
+        if emit_token:
+            from scripts.dev_seed_user import issue_local_token
+
+            result["auth"] = issue_local_token(email=email, password=password)
+        return result
 
 
 def _get_or_create_goal(
@@ -187,9 +207,23 @@ def main() -> None:
     parser.add_argument("--email", default=DEMO_EMAIL)
     parser.add_argument("--name", default=DEMO_NAME)
     parser.add_argument("--timezone", default=DEMO_TIMEZONE)
+    parser.add_argument("--password", default=None, help="Optional local password for /api/v1/auth/login.")
+    parser.add_argument(
+        "--emit-token",
+        action="store_true",
+        help="Print a local auth token pair. Requires --password.",
+    )
     args = parser.parse_args()
+    if args.emit_token and not args.password:
+        parser.error("--emit-token requires --password")
 
-    result = seed_demo_data(email=args.email, name=args.name, timezone=args.timezone)
+    result = seed_demo_data(
+        email=args.email,
+        name=args.name,
+        timezone=args.timezone,
+        password=args.password,
+        emit_token=args.emit_token,
+    )
     print("Chronos P1 demo data ready.")
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
 

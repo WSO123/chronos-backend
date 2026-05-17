@@ -62,6 +62,20 @@ uv run python scripts/dev_seed_user.py
 uv run python scripts/dev_seed_demo.py
 ```
 
+如果前端要走 JWT 联调，可以直接让 seed 脚本写入本地密码并输出 token pair：
+
+```bash
+uv run python scripts/dev_seed_user.py --password local-password --emit-token
+uv run python scripts/dev_seed_demo.py --password local-password --emit-token
+```
+
+Auth token 闭环 smoke：
+
+```bash
+uv run python scripts/smoke_auth_token_loop.py
+uv run python scripts/verify_local.py --smoke auth
+```
+
 ### Auth Endpoints
 
 #### POST `/auth/register`

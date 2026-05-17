@@ -102,6 +102,12 @@ uv run alembic upgrade head
 uv run python scripts/dev_seed_user.py
 ```
 
+如果要直接联调 JWT 模式，可以给本地用户写入密码并输出 token pair：
+
+```bash
+uv run python scripts/dev_seed_user.py --password local-password --emit-token
+```
+
 正式 token 闭环已提供：
 
 ```text
@@ -116,6 +122,18 @@ GET  /api/v1/auth/me
 
 ```bash
 uv run python scripts/dev_seed_demo.py
+```
+
+demo 数据也支持同样的 token 输出，适合前端拿 Bearer token 跑真实会话：
+
+```bash
+uv run python scripts/dev_seed_demo.py --password local-password --emit-token
+```
+
+跑一遍 Auth token 闭环 smoke 验证：
+
+```bash
+uv run python scripts/smoke_auth_token_loop.py
 ```
 
 跑一遍 P1 主链路 smoke 验证：
@@ -157,6 +175,7 @@ uv run python scripts/generate_llm_acceptance_record.py --smoke-json /tmp/chrono
 也可以用统一验证入口跑基础检查和指定 smoke：
 
 ```bash
+uv run python scripts/verify_local.py --smoke auth
 uv run python scripts/verify_local.py --smoke p3
 uv run python scripts/verify_local.py --smoke ai-mainline
 uv run python scripts/verify_local.py --smoke llm-fallback
@@ -171,6 +190,7 @@ Capture -> Inbox -> Today -> Task Detail -> Focus -> Daily Report -> Me
 P2: Goals -> Goal Detail / Timeline -> Reports / Insights -> Me
 P3: Data Source -> Capture / Inbox -> Today -> Energy -> Reminder Center -> Scheduler
 AI Mainline: Capture Parser -> Daily Planner -> Strategy Explanation -> Task Breakdown -> Daily Report -> Insight Detail
+Auth: Register -> Login -> Auth Me -> Business API -> Refresh Rotation -> Logout
 ```
 
 **启动 API 后端 (热重载模式):**
@@ -221,6 +241,7 @@ Capture -> Inbox -> Today -> Task Detail -> Focus -> Report / Me
 ```bash
 uv run alembic upgrade head
 uv run python scripts/dev_seed_demo.py
+uv run python scripts/smoke_auth_token_loop.py
 uv run python scripts/smoke_p1_execution_loop.py
 uv run python scripts/smoke_p2_goal_insight_loop.py
 uv run python scripts/smoke_p3_natural_growth_loop.py
@@ -231,6 +252,8 @@ git diff --check
 ```
 
 `scripts/dev_seed_demo.py` 用于前端和手动体验，默认创建 `demo@chronos.local` 用户并输出开发态 `X-User-Id`。
+`scripts/dev_seed_user.py` 和 `scripts/dev_seed_demo.py` 都支持 `--password` 写入本地登录密码，配合 `--emit-token` 可输出 JWT token pair，方便前端从开发态 header 迁移到 Bearer token 联调。
+`scripts/smoke_auth_token_loop.py` 用于验证 Auth token 闭环：register、login、Bearer 访问业务 API、refresh token 轮换和 logout 撤销。
 `scripts/smoke_p1_execution_loop.py` 用于开发后快速防回归，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_p2_goal_insight_loop.py` 用于验证 P2 Goals / Reports / Insights 合同，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_p3_natural_growth_loop.py` 用于验证 P3 数据接入、精力、外部输入、提醒、Me 入口状态和调度契约，每次默认创建一个独立 smoke 用户，不会重置数据库。
@@ -241,7 +264,7 @@ git diff --check
 `scripts/smoke_daily_planner_fallback.py` 用于验证 Daily Planner provider 失败时 Today / Strategy 仍能走 Planning Engine fallback，不调用真实 provider。
 `scripts/generate_llm_acceptance_dry_run.py` 用于生成 synthetic provider smoke / fallback / compare / policy JSON，并产出一份 dry-run 验收草稿，帮助接真实 provider 前先跑通验收流程。
 `scripts/generate_llm_acceptance_record.py` 用于把真实 provider smoke、fallback smoke、planner eval compare 和 golden policy check 的 JSON 输出汇总成 Markdown 验收草稿，默认脱敏 provider response id。
-`scripts/verify_local.py` 用于编排本地验证阶梯，例如 `uv run python scripts/verify_local.py --all-smoke --planner-eval`。
+`scripts/verify_local.py` 用于编排本地验证阶梯，例如 `uv run python scripts/verify_local.py --smoke auth --all-smoke --planner-eval`。
 
 前端联调接口契约见：
 

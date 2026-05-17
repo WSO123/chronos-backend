@@ -37,7 +37,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--smoke",
         action="append",
-        choices=("p1", "p2", "p3", "ai-mainline", "llm-fallback"),
+        choices=("p1", "p2", "p3", "auth", "ai-mainline", "llm-fallback"),
         default=[],
         help="Run a smoke script after the base checks. Can be repeated.",
     )
@@ -75,7 +75,7 @@ def _build_steps(args: argparse.Namespace) -> list[VerificationStep]:
         ]
     )
 
-    selected_smoke = ["p1", "p2", "p3"] if args.all_smoke else args.smoke
+    selected_smoke = [*args.smoke, "p1", "p2", "p3"] if args.all_smoke else args.smoke
     for smoke in _unique_preserving_order(selected_smoke):
         steps.append(_smoke_step(smoke))
     if args.planner_eval_policy:
@@ -114,6 +114,7 @@ def _smoke_step(smoke: str) -> VerificationStep:
         "p1": "scripts/smoke_p1_execution_loop.py",
         "p2": "scripts/smoke_p2_goal_insight_loop.py",
         "p3": "scripts/smoke_p3_natural_growth_loop.py",
+        "auth": "scripts/smoke_auth_token_loop.py",
         "ai-mainline": "scripts/smoke_core_ai_mainline.py",
         "llm-fallback": "scripts/smoke_daily_planner_fallback.py",
     }
