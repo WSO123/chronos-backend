@@ -25,6 +25,7 @@
 
 *   [Docker](https://www.docker.com/) & Docker Compose
 *   [uv](https://docs.astral.sh/uv/) (Python 极速包管理器)
+*   Python 版本以 `.python-version` 为准，当前为 3.14
 
 ### 1. 启动基础设施
 

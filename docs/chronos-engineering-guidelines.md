@@ -18,6 +18,12 @@ Chronos 后端不是普通 CRUD 项目，而是每日执行系统。
 - 页面接口默认返回少而准的信息。
 - P1 优先跑通闭环，不追求功能铺满。
 
+### 1.1 运行时版本
+
+- Python 版本以仓库根目录 `.python-version` 为准。
+- `pyproject.toml` 的 `requires-python` 必须与 `.python-version` 保持兼容。
+- CI 必须读取 `.python-version`，避免本地和远端解释器版本漂移。
+
 ---
 
 ## 2. 目录结构规范
