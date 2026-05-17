@@ -172,11 +172,15 @@ class PlanningService:
         task_ids = self._task_ids_for_signal_preparation(today=today, limit=limit)
         generated_results: list[dict] = []
         existing_count = 0
+        stale_count = 0
 
         for task_id in task_ids:
-            if task_planning_signal_service.latest_signal(db, task_id=task_id, user_id=user_id) is not None:
+            freshness = task_planning_signal_service.latest_signal_freshness(db, task_id=task_id, user_id=user_id)
+            if freshness["signal"] is not None and freshness["is_fresh"]:
                 existing_count += 1
                 continue
+            if freshness["signal"] is not None:
+                stale_count += 1
             generated_results.append(
                 task_planning_signal_service.generate_signal(db, task_id=task_id, user_id=user_id)
             )
@@ -198,6 +202,7 @@ class PlanningService:
             "task_count": len(task_ids),
             "generated_count": len(generated_results),
             "existing_count": existing_count,
+            "stale_count": stale_count,
             "skipped_count": max(0, len(task_ids) - existing_count - len(generated_results)),
             "replanned": replanned,
             "planning_signal_ids": [
@@ -1378,7 +1383,12 @@ class PlanningService:
             ).all()
         )
         for signal in semantic_signals:
-            semantic_by_task_id.setdefault(signal.task_id, signal)
+            task = task_by_id.get(signal.task_id)
+            if task is None or signal.task_id in semantic_by_task_id:
+                continue
+            freshness = task_planning_signal_service.signal_freshness(db, task=task, signal=signal)
+            if freshness["is_fresh"]:
+                semantic_by_task_id[signal.task_id] = signal
 
         return {
             "dependency_depth_by_task_id": depth_by_task_id,

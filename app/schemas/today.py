@@ -204,6 +204,7 @@ class TodayPlanningSignalsPrepareResponse(BaseModel):
     task_count: int
     generated_count: int
     existing_count: int
+    stale_count: int = 0
     skipped_count: int
     replanned: bool
     planning_signal_ids: list[uuid.UUID] = Field(default_factory=list)

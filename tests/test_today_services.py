@@ -702,6 +702,43 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["factors"]["semantic_protected_count"], 1)
         self.assertEqual(strategy["task_rationales"][0]["dominant_factor"], "semantic_planning")
 
+    def test_planning_engine_ignores_stale_semantic_signal_after_task_edit(self):
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="High value stale signal goal",
+            value_level=ValueLevel.HIGH,
+        )
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="写完能推进目标的关键方案",
+            priority=5,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task_planning_signal_service.generate_signal(self.db, task_id=task.id, user_id=self.user.id)
+        task_service.update_task(
+            self.db,
+            task_id=task.id,
+            user_id=self.user.id,
+            updates={"title": "写完能推进目标的关键方案并补充验收标准"},
+        )
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        all_items = [
+            *today["sections"]["pinned_tasks"],
+            *today["sections"]["recommended_tasks"],
+            *today["sections"]["low_priority_tasks"],
+            *today["sections"]["rolled_over_tasks"],
+        ]
+        task_item = next(item for item in all_items if item["task_id"] == task.id)
+
+        self.assertFalse(task_item["score_breakdown"]["semantic_signal_applied"])
+        self.assertEqual(strategy["factors"]["semantic_signal_count"], 0)
+        self.assertEqual(strategy["factors"]["semantic_protected_count"], 0)
+
     def test_planning_engine_slices_large_semantic_task_into_minimum_viable_progress(self):
         goal = goal_service.create_goal(
             self.db,

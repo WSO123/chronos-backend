@@ -259,7 +259,7 @@ P2 新增字段：
 
 ### POST `/api/v1/today/planning-signals`
 
-为当前 Today 主序列准备缺失的 TaskPlanningSignal，并在生成新信号后触发一次 deterministic replan。
+为当前 Today 主序列准备缺失或过期的 TaskPlanningSignal，并在生成新信号后触发一次 deterministic replan。
 
 Query：
 
@@ -275,6 +275,7 @@ Response：
   "task_count": 2,
   "generated_count": 1,
   "existing_count": 1,
+  "stale_count": 0,
   "skipped_count": 0,
   "replanned": true,
   "planning_signal_ids": ["uuid"],
@@ -291,6 +292,7 @@ Response：
 
 - 这是受控的 AI 准备动作，不是 Today 首屏自动狂跑 provider。
 - 生成的是 TaskPlanningSignal；LLM 不直接改 Task / Goal / DailyPlan 排序。
+- `existing_count` 表示仍然新鲜的 signal；`stale_count` 表示任务、目标、步骤、依赖或执行进度变化后需要刷新的旧 signal。
 - 如果 `generated_count=0`，默认不 replan，避免无意义刷新。
 - 如果 `replanned=true`，前端直接使用 response 内的 `today` 刷新页面。
 

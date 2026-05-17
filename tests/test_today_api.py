@@ -155,6 +155,7 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(body["task_count"], 1)
         self.assertEqual(body["generated_count"], 1)
         self.assertEqual(body["existing_count"], 0)
+        self.assertEqual(body["stale_count"], 0)
         self.assertEqual(body["replanned"], True)
         self.assertEqual(body["today"]["plan_version"], 2)
         self.assertEqual(today_item["task_id"], task_response.json()["id"])
@@ -164,8 +165,53 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(second_response.status_code, 200)
         self.assertEqual(second_response.json()["generated_count"], 0)
         self.assertEqual(second_response.json()["existing_count"], 1)
+        self.assertEqual(second_response.json()["stale_count"], 0)
         self.assertEqual(second_response.json()["replanned"], False)
         self.assertEqual(second_response.json()["today"]["plan_version"], 2)
+
+    def test_prepare_today_planning_signals_refreshes_stale_signal_after_task_edit(self):
+        goal_response = self.client.post(
+            "/api/v1/goals",
+            json={"title": "Signal Refresh Goal", "value_level": "high"},
+            headers=self.headers,
+        )
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={
+                "title": "写一个今日推进方案",
+                "goal_id": goal_response.json()["id"],
+                "priority": 4,
+                "value_level": "medium",
+            },
+            headers=self.headers,
+        )
+        task_id = task_response.json()["id"]
+        first_response = self.client.post(
+            "/api/v1/today/planning-signals?plan_date=2026-05-16",
+            headers=self.headers,
+        )
+        update_response = self.client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"title": "写一个今日推进方案并补充验收标准"},
+            headers=self.headers,
+        )
+        second_response = self.client.post(
+            "/api/v1/today/planning-signals?plan_date=2026-05-16",
+            headers=self.headers,
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(first_response.json()["generated_count"], 1)
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        body = second_response.json()
+        self.assertEqual(body["task_count"], 1)
+        self.assertEqual(body["generated_count"], 1)
+        self.assertEqual(body["existing_count"], 0)
+        self.assertEqual(body["stale_count"], 1)
+        self.assertEqual(body["replanned"], True)
+        self.assertEqual(body["today"]["plan_version"], 3)
+        self.assertEqual(body["today"]["sections"]["pinned_tasks"][0]["title"], "写一个今日推进方案并补充验收标准")
 
     def test_replan_and_complete_today_item(self):
         self.client.post("/api/v1/tasks", json={"title": "First task"}, headers=self.headers)

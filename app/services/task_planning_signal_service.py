@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
+import hashlib
+import json
 from time import perf_counter
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.agents.task_semantic_planning import (
@@ -36,6 +38,26 @@ class TaskPlanningSignalService:
             .order_by(TaskPlanningSignal.created_at.desc(), TaskPlanningSignal.id.desc())
         )
         return db.scalars(stmt).first()
+
+    def latest_signal_freshness(self, db: Session, *, task_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+        task = self._get_user_task(db, task_id=task_id, user_id=user_id)
+        signal = self.latest_signal(db, task_id=task_id, user_id=user_id)
+        if signal is None:
+            return {"signal": None, "is_fresh": False, "reason": "missing"}
+        freshness = self.signal_freshness(db, task=task, signal=signal)
+        return {"signal": signal, **freshness}
+
+    def signal_freshness(self, db: Session, *, task: Task, signal: TaskPlanningSignal) -> dict:
+        stored_signature = (signal.raw_payload or {}).get("_input_signature")
+        current_signature = self._input_signature(db, task=task)
+        if stored_signature:
+            if stored_signature == current_signature:
+                return {"is_fresh": True, "reason": "signature_match"}
+            return {"is_fresh": False, "reason": "task_context_changed"}
+
+        if self._created_after_context_update(db, task=task, signal=signal):
+            return {"is_fresh": True, "reason": "legacy_timestamp_fresh"}
+        return {"is_fresh": False, "reason": "legacy_context_changed"}
 
     def generate_signal(self, db: Session, *, task_id: uuid.UUID, user_id: uuid.UUID) -> dict:
         task = self._get_user_task(db, task_id=task_id, user_id=user_id)
@@ -187,6 +209,8 @@ class TaskPlanningSignalService:
         source: str,
     ) -> TaskPlanningSignal:
         payload = output.model_dump()
+        payload["_input_signature"] = self._input_signature(db, task=task)
+        payload["_input_signature_version"] = "task-semantic-planning-input-v1"
         signal = TaskPlanningSignal(
             user_id=task.user_id,
             task_id=task.id,
@@ -233,11 +257,43 @@ class TaskPlanningSignalService:
             "value_level": task.value_level.value,
             "deadline": task.deadline.isoformat() if task.deadline else None,
             "status": task.status.value,
+            "progress": str(task.progress),
             "goal": self._goal_context(task),
             "step_count": len(task.steps),
             "incomplete_steps": [step.title for step in task.steps if not step.is_completed][:6],
             "dependency_counts": dependencies,
         }
+
+    def _input_signature(self, db: Session, *, task: Task) -> str:
+        payload = self._task_context(db, task=task)
+        encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _created_after_context_update(self, db: Session, *, task: Task, signal: TaskPlanningSignal) -> bool:
+        context_updated_at = self._context_updated_at(db, task=task)
+        return self._comparable_datetime(signal.created_at) >= self._comparable_datetime(context_updated_at)
+
+    def _context_updated_at(self, db: Session, *, task: Task) -> datetime:
+        candidates = [task.updated_at]
+        if task.goal is not None:
+            candidates.append(task.goal.updated_at)
+        candidates.extend(step.updated_at for step in task.steps)
+        dependency_edges = db.scalars(
+            select(TaskDependency).where(
+                TaskDependency.user_id == task.user_id,
+                or_(
+                    TaskDependency.dependent_task_id == task.id,
+                    TaskDependency.prerequisite_task_id == task.id,
+                ),
+            )
+        ).all()
+        candidates.extend(edge.updated_at for edge in dependency_edges)
+        return max(candidates, key=self._comparable_datetime)
+
+    def _comparable_datetime(self, value: datetime) -> datetime:
+        if value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
 
     def _goal_context(self, task: Task) -> dict | None:
         if task.goal is None:
