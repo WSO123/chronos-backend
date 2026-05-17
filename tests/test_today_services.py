@@ -11,7 +11,9 @@ from app.models.ai_job import AIJob
 from app.models.enums import AIJobStatus, AIJobType, DailyPlanItemStatus, EntityType, TaskStatus, ValueLevel
 from app.models.task import Task
 from app.services.energy_service import energy_service
+from app.services.goal_service import goal_service
 from app.services.planning_service import PlanningService, planning_service
+from app.services.task_planning_signal_service import task_planning_signal_service
 from app.services.task_service import task_service
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
@@ -632,6 +634,46 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["factors"]["daily_capacity_minutes"], 90)
         self.assertEqual(strategy["factors"]["energy_level"], "low")
         self.assertEqual(strategy["energy"]["applied_to_plan"], True)
+
+    def test_planning_engine_uses_semantic_signal_to_protect_goal_progress(self):
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="High value product goal",
+            value_level=ValueLevel.HIGH,
+        )
+        goal_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="写完能推进目标的关键方案",
+            priority=5,
+            value_level=ValueLevel.MEDIUM,
+        )
+        urgent_admin = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Reply to a small admin message",
+            estimated_duration_min=20,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task_planning_signal_service.generate_signal(self.db, task_id=goal_task.id, user_id=self.user.id)
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        first_item = today["sections"]["pinned_tasks"][0]
+        self.assertEqual(first_item["task_id"], goal_task.id)
+        self.assertEqual(today["sections"]["recommended_tasks"][0]["task_id"], urgent_admin.id)
+        self.assertTrue(first_item["score_breakdown"]["semantic_signal_applied"])
+        self.assertGreaterEqual(first_item["score_breakdown"]["semantic_total_score"], 28)
+        self.assertTrue(first_item["score_breakdown"]["semantic_minimum_viable_step"])
+        self.assertEqual(first_item["score_breakdown"]["user_estimated_duration_min"], None)
+        self.assertEqual(first_item["estimated_duration_min"], first_item["score_breakdown"]["semantic_estimated_duration_min"])
+        self.assertEqual(strategy["factors"]["semantic_signal_count"], 1)
+        self.assertEqual(strategy["factors"]["semantic_protected_count"], 1)
+        self.assertEqual(strategy["task_rationales"][0]["dominant_factor"], "semantic_planning")
 
     def test_today_planner_orders_prerequisites_before_dependent_tasks(self):
         prerequisite = task_service.create_task(

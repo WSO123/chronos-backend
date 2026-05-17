@@ -150,6 +150,7 @@ class EntityType(StrEnum):
     DAILY_PLAN = "daily_plan"
     FOCUS_SESSION = "focus_session"
     AI_JOB = "ai_job"
+    TASK_PLANNING_SIGNAL = "task_planning_signal"
     REPORT = "report"
     DATA_SOURCE = "data_source"
 
@@ -171,6 +172,7 @@ class AIJobType(StrEnum):
     DAILY_PLANNER = "daily_planner"
     STRATEGY_EXPLANATION = "strategy_explanation"
     TASK_BREAKDOWN = "task_breakdown"
+    TASK_SEMANTIC_PLANNING = "task_semantic_planning"
     DAILY_REPORT_GENERATOR = "daily_report_generator"
     INSIGHT_GENERATOR = "insight_generator"
 

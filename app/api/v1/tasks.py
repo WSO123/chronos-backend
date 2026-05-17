@@ -13,6 +13,7 @@ from app.schemas.tasks import (
     TaskDependencyCreate,
     TaskDependencyEdgeResponse,
     TaskDetailResponse,
+    TaskPlanningSignalGenerationResponse,
     TaskPriorityAdjust,
     TaskPriorityAdjustmentResponse,
     TaskResponse,
@@ -21,6 +22,7 @@ from app.schemas.tasks import (
     TaskUpdate,
 )
 from app.services.task_service import task_service
+from app.services.task_planning_signal_service import task_planning_signal_service
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -110,6 +112,15 @@ def breakdown_task(
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
     return task_service.breakdown_task(db, task_id=task_id, user_id=user_id)
+
+
+@router.post("/{task_id}/planning-signal", response_model=TaskPlanningSignalGenerationResponse)
+def generate_task_planning_signal(
+    task_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return task_planning_signal_service.generate_signal(db, task_id=task_id, user_id=user_id)
 
 
 @router.get("/{task_id}/dependencies", response_model=TaskDependenciesResponse)

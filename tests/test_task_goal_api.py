@@ -153,6 +153,40 @@ class TaskGoalAPITests(unittest.TestCase):
         self.assertTrue(body["actions"]["can_start_focus"])
         self.assertFalse(body["focus_state"]["is_currently_focusing_this_task"])
 
+    def test_generate_task_planning_signal_api_updates_task_detail_ai_info(self):
+        goal_response = self.client.post(
+            "/api/v1/goals",
+            json={"title": "Semantic Goal", "value_level": "high"},
+            headers=self.headers,
+        )
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={
+                "title": "写一个能推进目标的方案",
+                "goal_id": goal_response.json()["id"],
+                "priority": 4,
+                "value_level": "medium",
+            },
+            headers=self.headers,
+        )
+        task_id = task_response.json()["id"]
+
+        response = self.client.post(f"/api/v1/tasks/{task_id}/planning-signal", headers=self.headers)
+        detail_response = self.client.get(f"/api/v1/tasks/{task_id}", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["ai_job"]["job_type"], "task_semantic_planning")
+        self.assertEqual(body["ai_job"]["status"], "succeeded")
+        self.assertEqual(body["planning_signal"]["task_id"], task_id)
+        self.assertGreaterEqual(body["planning_signal"]["goal_alignment_score"], 0.8)
+        detail = detail_response.json()
+        self.assertEqual(detail["ai_info"]["planning_signal"]["id"], body["planning_signal"]["id"])
+        self.assertEqual(
+            detail["ai_info"]["recommended_duration_min"],
+            body["planning_signal"]["estimated_duration_min"],
+        )
+
     def test_get_goal_detail_returns_goal_progress_and_next_task(self):
         goal_response = self.client.post(
             "/api/v1/goals",

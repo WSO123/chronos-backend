@@ -83,11 +83,13 @@ app/
       capture.py
       planning.py
       breakdown.py
+      task_semantic_planning.py
       report.py
 
     prompts/
       capture_parser.md
       daily_planner.md
+      task_semantic_planning.md
       task_breakdown.md
       daily_report.md
 
@@ -181,6 +183,7 @@ AI_ENABLE_REAL_LLM=false
 - `AI_ENABLE_REAL_LLM=false`
 - Daily Planner 使用 mock provider 和 structured output shell。
 - Planning Engine v1 仍是最终排序和 fallback 核心。
+- Task Semantic Planning Agent 已提供任务语义信号，但不直接排序；Planning Engine 负责把它转成 `semantic_*` 分项。
 - 已提供 OpenAI-compatible provider adapter；只有 `AI_ENABLE_REAL_LLM=true` 时才会被 registry 选中。
 - 真实 provider 不能绕过业务层校验和用户确认边界。
 
@@ -362,7 +365,7 @@ class CaptureParserOutput(BaseModel):
 当前实现状态：
 
 - 已落地 Planning Engine v1，作为 deterministic planner core 和未来 LLM Daily Planner 的 fallback。
-- Planning Engine v1 已读取任务价值、Goal 价值、任务 / Goal deadline、优先级、估时、依赖、用户修正、行为反馈、当日容量和 Energy 信号。
+- Planning Engine v1 已读取任务价值、Goal 价值、任务 / Goal deadline、优先级、估时、依赖、用户修正、行为反馈、当日容量、Energy 信号和 TaskPlanningSignal 语义信号。
 - 已接入 Daily Planner Agent critique / suggestion：`PlanningService` 先生成 deterministic candidates，再调用 Agent 返回 structured review。
 - 默认 provider 是 `mock`，模型标识为 `structured-mock-v1`；`AI_ENABLE_REAL_LLM=false` 时不会调用外部模型。
 - 已接入 OpenAI-compatible provider adapter，可通过 `LLM_PROVIDER=openai` 或 `LLM_PROVIDER=openai-compatible` 显式启用；本地和 CI 默认关闭。
@@ -452,6 +455,7 @@ Planning Engine v1 已使用的信号：
 - user priority adjustment
 - daily capacity
 - EnergyDailyMetric
+- TaskPlanningSignal：任务类型、复杂度、认知负荷、语义估时、目标对齐、阻塞风险、最小可推进步骤
 
 失败 fallback：
 
@@ -460,7 +464,50 @@ Planning Engine v1 已使用的信号：
 - `AIJob.status = succeeded_with_fallback`
 - 用户仍然可以打开 Today。
 
-### 7.3 Strategy Explanation
+### 7.3 Task Semantic Planning
+
+目的：
+
+```text
+把单个 Task 转成 Planning Engine 可读取的语义规划信号。
+```
+
+输入：
+
+- Task title / description
+- Task estimated_duration_min / priority / value_level / deadline
+- 关联 Goal
+- 已有 TaskStep
+- 轻量 dependency counts
+
+输出：
+
+- TaskPlanningSignal
+- AIJob trace
+
+规则：
+
+- 不创建 Task / Goal。
+- 不改变 Task priority、value_level、deadline、status。
+- 不直接修改 Today 排序。
+- 输出只作为 Planning Engine 的一个结构化输入，由确定性评分转成 `semantic_*` score breakdown。
+
+当前实现状态：
+
+- 已接入 `TaskSemanticPlanningAgent`，使用 prompt registry 中的 `p2-task-semantic-planning-agent-v1`。
+- `POST /tasks/{task_id}/planning-signal` 创建 `AIJob(job_type=task_semantic_planning)`，记录 provider、model、prompt version、prompt checksum、latency、usage 和 fallback 信息。
+- Agent 输出落库为 `TaskPlanningSignal`，包含 `task_type`、`complexity`、`cognitive_load`、`energy_fit`、`blocking_risk`、`estimated_duration_min`、`goal_alignment_score`、`semantic_priority_score`、`minimum_viable_step`。
+- Task Detail 在 `ai_info.planning_signal` 返回最新信号；推荐时长会优先使用语义估时，但用户显式填写的任务估时仍是 Planning Engine 的优先来源。
+- Planning Engine 会读取最新 TaskPlanningSignal，并在 `DailyPlanItem.score_breakdown` 写入 `semantic_signal_applied`、`semantic_total_score`、`goal_alignment_signal_score`、`semantic_priority_signal_score`、`semantic_minimum_viable_step` 等分项。
+- 高 goal alignment 且阻塞风险高的任务可以进入 protected section，但仍由 Planning Engine 决定，不由 LLM 直接排序。
+
+失败 fallback：
+
+- 使用规则生成 TaskPlanningSignal。
+- `AIJob.status = succeeded_with_fallback`
+- fallback 信号仍可被 Planning Engine 读取，但会保留 `source=rule` 和 fallback metadata。
+
+### 7.4 Strategy Explanation
 
 目的：
 
@@ -496,7 +543,7 @@ Planning Engine v1 已使用的信号：
 - `StrategyDetail.source.ai_job_id` 继续指向 Daily Planner；`source.explanation_ai_job_id` 指向 Strategy Explanation。
 - Agent 失败或输出不合法时，回退规则解释，`AIJob.status=succeeded_with_fallback`。
 
-### 7.4 Task Breakdown
+### 7.5 Task Breakdown
 
 目的：
 
@@ -554,7 +601,7 @@ class TaskBreakdownOutput(BaseModel):
 - `metadata.fallback_reason` 记录失败原因。
 - 用户仍可手动添加步骤。
 
-### 7.5 Daily Report Generator
+### 7.6 Daily Report Generator
 
 目的：
 
@@ -608,7 +655,7 @@ class DailyReportOutput(BaseModel):
 - AI summary 和 suggestions 使用默认模板。
 - `AIJob.status = succeeded_with_fallback`
 
-### 7.6 Insight Detail
+### 7.7 Insight Detail
 
 目的：
 
@@ -708,6 +755,7 @@ Chronos 的核心闭环不能依赖 LLM 成功。
 | --- | --- |
 | Capture Parser | 原始输入进入 Inbox，类型 unknown，job 标记为 `succeeded_with_fallback` |
 | Daily Planner | 使用 Planning Engine v1 生成 DailyPlan，job 标记为 `succeeded_with_fallback` |
+| Task Semantic Planning | 使用规则语义信号，job 标记为 `succeeded_with_fallback` |
 | Strategy Explanation | 使用规则解释，Strategy Detail 仍可打开，job 标记为 `succeeded_with_fallback` |
 | Task Breakdown | 任务无已有步骤时生成规则步骤；已有步骤时不覆盖，job 标记为 `succeeded_with_fallback` |
 | Daily Report Generator | 使用统计模板生成基础报告，job 标记为 `succeeded_with_fallback` |
@@ -768,6 +816,7 @@ LLM 可以：
 
 - 生成候选解析结果。
 - 给出任务拆解建议。
+- 生成任务语义规划信号。
 - 生成策略摘要。
 - 生成推荐理由。
 - 生成日报建议。
@@ -866,6 +915,7 @@ Daily Planner v1 额外记录：
 | --- | --- | --- | --- |
 | Capture Parser | CaptureInput | AIParseResult / InboxItem | 是 |
 | Daily Planner | Task / Goal / ActivityEvent / Planning Engine candidates | DailyPlan / DailyPlanItem / StrategySnapshot / AIJob trace | 用户可 replan / 调整 |
+| Task Semantic Planning | Task / Goal / TaskStep / dependency counts | TaskPlanningSignal / AIJob trace | 不直接改业务状态 |
 | Strategy Explanation | StrategySnapshot / DailyPlanItem.score_breakdown | Strategy Detail explanation / AIJob trace | 不需要确认，只读解释 |
 | Task Breakdown | Task | TaskStep candidates | 用户可编辑 |
 | Daily Report Generator | ActivityEvent / FocusSession / DailyPlan | DailyReport | 不强制确认 |

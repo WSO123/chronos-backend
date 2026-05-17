@@ -21,6 +21,7 @@ P2 的原则仍然是：增强目标和洞察，但不让 Today 变成复杂驾�
 | --- | --- | --- |
 | Today Insights Preview | `GET /api/v1/today` -> `insights_preview` | Ready |
 | Strategy Detail | `GET /api/v1/today/strategy` | Ready |
+| Task Semantic Planning Signal | `POST /api/v1/tasks/{task_id}/planning-signal` | Ready |
 | Task Priority Adjustment | `PATCH /api/v1/tasks/{task_id}/priority` | Ready |
 | Task Dependencies | `GET/POST/DELETE /api/v1/tasks/{task_id}/dependencies` | Ready |
 | Goals Home | `GET /api/v1/goals/home` | Ready |
@@ -59,7 +60,7 @@ P2 新增字段：
 - 默认只展示 1 条风险或剩余时间提示。
 - 不在 Today 首屏展开完整解释。
 - 用户需要解释排序时进入 Strategy Detail。
-- Today 排序由 Planning Engine v1 生成，已读取任务价值、优先级、截止时间、依赖、用户优先级修正、行为反馈和可用容量信号；前端仍只按分区和 `sort_order` 渲染，不需要自己重排。
+- Today 排序由 Planning Engine v1 生成，已读取任务价值、优先级、截止时间、依赖、用户优先级修正、行为反馈、可用容量和任务语义规划信号；前端仍只按分区和 `sort_order` 渲染，不需要自己重排。
 - `score_breakdown` 可用于调试或 Strategy Detail，不建议在 Today 首屏展开。
 
 ### GET `/api/v1/today/strategy`
@@ -114,6 +115,8 @@ P2 新增字段：
   "capacity_status": "within_capacity",
   "dependency_protected_count": 1,
   "user_adjusted_count": 1,
+  "semantic_signal_count": 1,
+  "semantic_protected_count": 1,
   "energy_level": "unknown",
   "energy_applied": false,
   "planner_agent_latency_ms": 12,
@@ -127,6 +130,8 @@ P2 新增字段：
 
 - `dependency_protected_count` 表示被提前保护的前置任务数量。
 - `user_adjusted_count` 表示当前计划读取到用户优先级修正事件的任务数量。
+- `semantic_signal_count` 表示当前计划读取到 TaskPlanningSignal 的任务数量。
+- `semantic_protected_count` 表示因为语义信号对目标推进价值较高而被保护的任务数量。
 - `daily_capacity_minutes` 是 Planning Engine 的当日容量参考，不是严格日历时间块。
 - `selected_estimated_minutes` 是今天主执行序列的估时总量。
 - `rolled_over_estimated_minutes` 是被滚动到未来、保留可见但不计入主执行序列的估时。
@@ -206,6 +211,11 @@ P2 新增字段：
     "user_preference_score": 10,
     "postponement_penalty": 0,
     "priority_score": 16,
+    "semantic_signal_applied": true,
+    "semantic_total_score": 38,
+    "goal_alignment_signal_score": 13,
+    "semantic_priority_signal_score": 10,
+    "semantic_minimum_viable_step": "先完成一个可验证的小结果",
     "daily_capacity_minutes": 150,
     "selected_for_today": true
   },
@@ -227,10 +237,89 @@ P2 新增字段：
 
 - `score_breakdown` 是解释数据，不要在 Today 首屏展示成复杂驾驶舱。
 - Strategy Detail 优先展示 `dominant_reason` 和 `score_signals`，不要让前端自行解释原始权重。
+- `semantic_*` 字段来自 TaskPlanningSignal，只表示 Planning Engine 读取到语义信号；它不是 LLM 直接改排序。
 - `selected_for_today=false` 且 `rollover_reason=capacity` 表示任务被系统滚动到未来，不代表任务被用户手动延后；此时 `item_status` 仍可为 `planned`，前端应以 `section=rolled_over` 判断展示位置。
 - 若 `capacity_status=overloaded`，Today 可在 Insights Preview 展示一条轻量风险提示，但不要展示完整容量面板。
 
 ## 4. Task Detail
+
+### POST `/api/v1/tasks/{task_id}/planning-signal`
+
+生成或刷新当前 Task 的语义规划信号。
+
+Request：无 body。
+
+Response：
+
+```json
+{
+  "ai_job": {
+    "id": "uuid",
+    "job_type": "task_semantic_planning",
+    "status": "succeeded",
+    "result_entity_type": "task_planning_signal",
+    "result_entity_id": "uuid",
+    "provider": "mock",
+    "model": "structured-mock-v1",
+    "prompt_version": "p2-task-semantic-planning-agent-v1",
+    "job_metadata": {}
+  },
+  "planning_signal": {
+    "id": "uuid",
+    "task_id": "uuid",
+    "ai_job_id": "uuid",
+    "source": "ai",
+    "task_type": "writing",
+    "complexity": "high",
+    "cognitive_load": "high",
+    "energy_fit": "high_energy",
+    "blocking_risk": "high",
+    "estimated_duration_min": 60,
+    "duration_confidence": 0.56,
+    "goal_alignment_score": 0.9,
+    "semantic_priority_score": 0.62,
+    "breakdown_recommended": true,
+    "minimum_viable_step": "先完成一个可验证的小结果",
+    "semantic_summary": "该任务与高价值目标关联较强，复杂度为 high，应该保护一个最小推进动作。",
+    "confidence": 0.66,
+    "created_at": "2026-05-17T09:00:00Z"
+  }
+}
+```
+
+前端约束：
+
+- 这个接口适合作为 Task Detail 的“刷新 AI Info”动作，或者在任务刚确认后由后端工作流触发。
+- 不要把所有 planning signal 字段都摊开成信息仓库；优先展示推荐时长、最小推进动作、语义摘要。
+- 生成 signal 不会直接修改 Task、Goal 或 Today 当前版本；下一次 Today 生成 / replan 时由 Planning Engine 读取。
+
+### GET `/api/v1/tasks/{task_id}`
+
+Task Detail 的 `ai_info` 会附带最新语义信号：
+
+```json
+{
+  "ai_info": {
+    "recommended_duration_min": 60,
+    "priority": 4,
+    "value_level": "medium",
+    "execution_suggestion": "先推进：先完成一个可验证的小结果",
+    "planning_signal": {
+      "id": "uuid",
+      "task_type": "writing",
+      "complexity": "high",
+      "goal_alignment_score": 0.9,
+      "minimum_viable_step": "先完成一个可验证的小结果"
+    }
+  }
+}
+```
+
+前端约束：
+
+- `planning_signal` 可能为 `null`。
+- 如果存在，推荐优先展示 `minimum_viable_step` 和 `semantic_summary`，不要展示完整评分细节。
+- `recommended_duration_min` 会优先使用用户显式填写的任务估时；没有用户估时时，才使用 planning signal 的语义估时。
 
 ### PATCH `/api/v1/tasks/{task_id}/priority`
 

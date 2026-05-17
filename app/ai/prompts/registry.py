@@ -87,5 +87,10 @@ prompt_registry = PromptRegistry(
             version="p2-task-breakdown-agent-v1",
             resource_path="task_breakdown/p2-task-breakdown-agent-v1.md",
         ),
+        "task_semantic_planning": PromptSpec(
+            key="task_semantic_planning",
+            version="p2-task-semantic-planning-agent-v1",
+            resource_path="task_semantic_planning/p2-task-semantic-planning-agent-v1.md",
+        ),
     }
 )

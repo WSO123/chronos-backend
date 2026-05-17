@@ -38,6 +38,7 @@ from app.models.enums import (
 from app.models.mixins import utc_now
 from app.models.task_dependency import TaskDependency
 from app.models.task import Task
+from app.models.task_planning_signal import TaskPlanningSignal
 from app.models.user import User, UserSettings
 from app.services.activity_event_service import activity_event_service
 from app.services.ai_job_service import ai_job_service
@@ -537,6 +538,7 @@ class PlanningService:
                 task,
                 plan_date=plan_date,
                 unlocking_task_ids=signals["unlocking_task_ids"],
+                semantic_by_task_id=signals["semantic_by_task_id"],
             )
             scored_tasks.append(
                 PlannedTask(
@@ -548,9 +550,10 @@ class PlanningService:
                         unlocking_task_ids=signals["unlocking_task_ids"],
                         blocked_task_ids=signals["blocked_task_ids"],
                         adjusted_task_ids=signals["adjusted_task_ids"],
+                        semantic_by_task_id=signals["semantic_by_task_id"],
                         score_breakdown=score_breakdown,
                     ),
-                    estimated_duration_min=task.estimated_duration_min or 25,
+                    estimated_duration_min=int(score_breakdown["estimated_duration_min"]),
                     score=int(score_breakdown["total_score"]),
                     score_breakdown=score_breakdown,
                     dependency_depth=signals["dependency_depth_by_task_id"].get(task.id, 0),
@@ -811,7 +814,8 @@ class PlanningService:
         return db.scalars(stmt).first()
 
     def _score_breakdown_for(self, task: Task, *, context: PlanningContext, signals: dict) -> dict:
-        estimated_minutes = task.estimated_duration_min or 25
+        semantic_signal = signals["semantic_by_task_id"].get(task.id)
+        estimated_minutes = self._estimated_minutes_for(task, semantic_signal=semantic_signal)
         behavior = signals["behavior_by_task_id"].get(
             task.id,
             {"completed": 0, "postponed": 0, "interrupted": 0},
@@ -841,6 +845,11 @@ class PlanningService:
             user_preference_score += max(energy_fit_score, 0) // 2
         postponement_penalty = -12 if task.status == TaskStatus.POSTPONED else 0
         priority_score = max(0, 6 - task.priority) * 4
+        semantic_scores = self._semantic_signal_scores(
+            task=task,
+            semantic_signal=semantic_signal,
+            context=context,
+        )
         total_score = (
             value_score
             + goal_value_score
@@ -853,10 +862,12 @@ class PlanningService:
             + user_preference_score
             + postponement_penalty
             + priority_score
+            + semantic_scores["semantic_total_score"]
         )
         total_score = int(total_score)
         return {
             "score_version": "planning-engine-v1",
+            "semantic_planning_version": "task-semantic-signals-v1",
             "total_score": total_score,
             "score_band": self._score_band(total_score),
             "value_score": int(value_score),
@@ -870,12 +881,109 @@ class PlanningService:
             "user_preference_score": int(user_preference_score),
             "postponement_penalty": int(postponement_penalty),
             "priority_score": int(priority_score),
+            **semantic_scores,
             "estimated_duration_min": int(estimated_minutes),
+            "user_estimated_duration_min": task.estimated_duration_min,
             "daily_capacity_minutes": int(context.daily_capacity_minutes),
             "energy_level": context.energy_level,
             "energy_applied": context.energy_has_data,
             "behavior": behavior,
         }
+
+    def _estimated_minutes_for(self, task: Task, *, semantic_signal: TaskPlanningSignal | None) -> int:
+        if task.estimated_duration_min:
+            return task.estimated_duration_min
+        if semantic_signal is not None and semantic_signal.estimated_duration_min:
+            return semantic_signal.estimated_duration_min
+        return 25
+
+    def _semantic_signal_scores(
+        self,
+        *,
+        task: Task,
+        semantic_signal: TaskPlanningSignal | None,
+        context: PlanningContext,
+    ) -> dict:
+        if semantic_signal is None:
+            return {
+                "semantic_signal_applied": False,
+                "semantic_signal_id": None,
+                "semantic_task_type": None,
+                "semantic_complexity": None,
+                "semantic_cognitive_load": None,
+                "semantic_energy_fit": None,
+                "semantic_blocking_risk": None,
+                "semantic_estimated_duration_min": None,
+                "semantic_minimum_viable_step": None,
+                "goal_alignment_signal_score": 0,
+                "semantic_priority_signal_score": 0,
+                "semantic_complexity_score": 0,
+                "semantic_energy_fit_score": 0,
+                "blocking_risk_score": 0,
+                "semantic_total_score": 0,
+            }
+
+        goal_alignment_signal_score = int(round(semantic_signal.goal_alignment_score * 14))
+        semantic_priority_signal_score = int(round(semantic_signal.semantic_priority_score * 18))
+        blocking_risk_score = {"low": 0, "medium": 4, "high": 10}.get(semantic_signal.blocking_risk, 0)
+        semantic_complexity_score = self._semantic_complexity_score(task=task, semantic_signal=semantic_signal)
+        semantic_energy_fit_score = self._semantic_energy_fit_score(
+            semantic_signal=semantic_signal,
+            context=context,
+        )
+        semantic_total_score = (
+            goal_alignment_signal_score
+            + semantic_priority_signal_score
+            + semantic_complexity_score
+            + semantic_energy_fit_score
+            + blocking_risk_score
+        )
+        return {
+            "semantic_signal_applied": True,
+            "semantic_signal_id": str(semantic_signal.id),
+            "semantic_task_type": semantic_signal.task_type,
+            "semantic_complexity": semantic_signal.complexity,
+            "semantic_cognitive_load": semantic_signal.cognitive_load,
+            "semantic_energy_fit": semantic_signal.energy_fit,
+            "semantic_blocking_risk": semantic_signal.blocking_risk,
+            "semantic_estimated_duration_min": semantic_signal.estimated_duration_min,
+            "semantic_minimum_viable_step": semantic_signal.minimum_viable_step,
+            "goal_alignment_signal_score": goal_alignment_signal_score,
+            "semantic_priority_signal_score": semantic_priority_signal_score,
+            "semantic_complexity_score": semantic_complexity_score,
+            "semantic_energy_fit_score": semantic_energy_fit_score,
+            "blocking_risk_score": blocking_risk_score,
+            "semantic_total_score": semantic_total_score,
+        }
+
+    def _semantic_complexity_score(self, *, task: Task, semantic_signal: TaskPlanningSignal) -> int:
+        if semantic_signal.complexity == "high":
+            if task.value_level == ValueLevel.HIGH or semantic_signal.goal_alignment_score >= 0.75:
+                return 6
+            return -3
+        if semantic_signal.complexity == "low":
+            return 2
+        return 0
+
+    def _semantic_energy_fit_score(
+        self,
+        *,
+        semantic_signal: TaskPlanningSignal,
+        context: PlanningContext,
+    ) -> int:
+        if not context.energy_has_data:
+            return 0
+        if context.energy_level == "low":
+            if semantic_signal.energy_fit == "low_energy" or semantic_signal.cognitive_load == "low":
+                return 8
+            if semantic_signal.energy_fit == "high_energy" or semantic_signal.cognitive_load == "high":
+                return -10
+            return 2
+        if context.energy_level == "high":
+            if semantic_signal.energy_fit == "high_energy" or semantic_signal.cognitive_load == "high":
+                return 8
+            return 3
+        return 2
 
     def _score_band(self, total_score: int) -> str:
         if total_score >= 70:
@@ -1014,6 +1122,7 @@ class PlanningService:
                 "blocked_task_ids": set(),
                 "adjusted_task_ids": set(),
                 "behavior_by_task_id": {},
+                "semantic_by_task_id": {},
             }
 
         task_ids = set(task_by_id)
@@ -1097,12 +1206,27 @@ class PlanningService:
             elif event.event_type == "FOCUS_SESSION_INTERRUPTED":
                 behavior["interrupted"] += 1
 
+        semantic_by_task_id: dict[uuid.UUID, TaskPlanningSignal] = {}
+        semantic_signals = list(
+            db.scalars(
+                select(TaskPlanningSignal)
+                .where(
+                    TaskPlanningSignal.user_id == user_id,
+                    TaskPlanningSignal.task_id.in_(task_ids),
+                )
+                .order_by(TaskPlanningSignal.created_at.desc(), TaskPlanningSignal.id.desc())
+            ).all()
+        )
+        for signal in semantic_signals:
+            semantic_by_task_id.setdefault(signal.task_id, signal)
+
         return {
             "dependency_depth_by_task_id": depth_by_task_id,
             "unlocking_task_ids": unlocking_task_ids,
             "blocked_task_ids": blocked_task_ids,
             "adjusted_task_ids": adjusted_task_ids,
             "behavior_by_task_id": behavior_by_task_id,
+            "semantic_by_task_id": semantic_by_task_id,
         }
 
     def _completed_carryover_tasks(self, db: Session, *, plan: DailyPlan) -> list[PlannedTask]:
@@ -1134,10 +1258,26 @@ class PlanningService:
         *,
         plan_date: date,
         unlocking_task_ids: set[uuid.UUID],
+        semantic_by_task_id: dict[uuid.UUID, TaskPlanningSignal],
     ) -> DailyPlanItemSection:
+        semantic_signal = semantic_by_task_id.get(task.id)
         if task.status == TaskStatus.POSTPONED:
             return DailyPlanItemSection.ROLLED_OVER
         if task.id in unlocking_task_ids:
+            return DailyPlanItemSection.PINNED
+        if (
+            semantic_signal is not None
+            and (
+                (
+                    semantic_signal.semantic_priority_score >= 0.82
+                    and semantic_signal.goal_alignment_score >= 0.75
+                )
+                or (
+                    semantic_signal.goal_alignment_score >= 0.85
+                    and semantic_signal.blocking_risk == "high"
+                )
+            )
+        ):
             return DailyPlanItemSection.PINNED
         if task.deadline is not None and task.deadline <= plan_date:
             return DailyPlanItemSection.PINNED
@@ -1159,8 +1299,10 @@ class PlanningService:
         unlocking_task_ids: set[uuid.UUID],
         blocked_task_ids: set[uuid.UUID],
         adjusted_task_ids: set[uuid.UUID],
+        semantic_by_task_id: dict[uuid.UUID, TaskPlanningSignal],
         score_breakdown: dict,
     ) -> str:
+        semantic_signal = semantic_by_task_id.get(task.id)
         if task.status == TaskStatus.POSTPONED:
             return "Postponed item kept visible without pushing it back into the main sequence."
         if task.deadline is not None and task.deadline < plan_date:
@@ -1177,6 +1319,12 @@ class PlanningService:
             return "Dependent task kept after its prerequisite in today's sequence."
         if task.id in adjusted_task_ids:
             return "Adjusted by you, so the planner keeps that preference visible."
+        if (
+            semantic_signal is not None
+            and score_breakdown.get("semantic_signal_applied")
+            and score_breakdown.get("semantic_total_score", 0) >= 28
+        ):
+            return "AI 语义信号判断它能有效推进目标，因此今天保护一个最小可执行动作。"
         if task.value_level == ValueLevel.HIGH:
             return "High-value task protected from being crowded out by lighter work."
         if task.goal is not None and task.goal.value_level == ValueLevel.HIGH:
@@ -1218,6 +1366,12 @@ class PlanningService:
         rolled_over_minutes = sum(planned.estimated_duration_min for planned in rolled_over_tasks)
         dependency_protected_count = len([planned for planned in active_tasks if planned.unlocks_task])
         user_adjusted_count = len([planned for planned in active_tasks if planned.priority_adjusted])
+        semantic_signal_count = len(
+            [planned for planned in active_tasks if planned.score_breakdown.get("semantic_signal_applied")]
+        )
+        semantic_protected_count = len(
+            [planned for planned in active_tasks if planned.score_breakdown.get("semantic_total_score", 0) >= 28]
+        )
         first_breakdown = planned_tasks[0].score_breakdown if planned_tasks else {}
         daily_capacity_minutes = int(first_breakdown.get("daily_capacity_minutes") or 0)
         energy_level = str(first_breakdown.get("energy_level") or "unknown")
@@ -1244,6 +1398,8 @@ class PlanningService:
                     "capacity_status": "within_capacity",
                     "dependency_protected_count": 0,
                     "user_adjusted_count": 0,
+                    "semantic_signal_count": 0,
+                    "semantic_protected_count": 0,
                     "energy_level": energy_level,
                     "energy_applied": energy_applied,
                 },
@@ -1276,6 +1432,8 @@ class PlanningService:
                 "capacity_status": capacity_status,
                 "dependency_protected_count": dependency_protected_count,
                 "user_adjusted_count": user_adjusted_count,
+                "semantic_signal_count": semantic_signal_count,
+                "semantic_protected_count": semantic_protected_count,
                 "energy_level": energy_level,
                 "energy_applied": energy_applied,
                 "average_score": round(
@@ -1454,6 +1612,16 @@ class PlanningService:
                     "score": factors["user_adjusted_count"],
                 }
             )
+        if factors["semantic_signal_count"]:
+            signals.append(
+                {
+                    "key": "semantic_planning_signal",
+                    "title": "语义信号已读取",
+                    "message": f"{factors['semantic_signal_count']} 个任务带有语义规划信号，排序会参考目标对齐、复杂度和最小推进动作。",
+                    "signal": "info",
+                    "score": factors["semantic_signal_count"],
+                }
+            )
         if factors["energy_applied"]:
             signals.append(
                 {
@@ -1556,6 +1724,8 @@ class PlanningService:
             "capacity_status": capacity_status,
             "dependency_protected_count": int(score_factors.get("dependency_protected_count", 0) or 0),
             "user_adjusted_count": int(score_factors.get("user_adjusted_count", 0) or 0),
+            "semantic_signal_count": int(score_factors.get("semantic_signal_count", 0) or 0),
+            "semantic_protected_count": int(score_factors.get("semantic_protected_count", 0) or 0),
             "energy_level": str(score_factors.get("energy_level") or "unknown"),
             "energy_applied": bool(score_factors.get("energy_applied") or False),
             "planner_agent_latency_ms": score_factors.get("planner_agent_latency_ms"),
@@ -1582,6 +1752,8 @@ class PlanningService:
             explanation.append(f"{factors['dependency_protected_count']} 个前置任务被提前，用来保护任务依赖顺序。")
         if factors["user_adjusted_count"]:
             explanation.append(f"{factors['user_adjusted_count']} 个任务读取了你的优先级修正，让 AI 判断保持可校正。")
+        if factors["semantic_signal_count"]:
+            explanation.append(f"{factors['semantic_signal_count']} 个任务读取了语义规划信号，用来理解目标对齐、复杂度和最小推进动作。")
         if strategy.mode == PlanningPreference.LIGHT:
             explanation.append("今天保持轻量，让第一个动作更容易开始。")
         elif strategy.mode == PlanningPreference.SPRINT:
@@ -1874,6 +2046,22 @@ class PlanningService:
                     "message": "你的优先级或策略偏好已经进入本次排序。",
                     "signal": "positive",
                     "score": user_preference_score,
+                }
+            )
+
+        semantic_total_score = int(score_breakdown.get("semantic_total_score") or 0)
+        if score_breakdown.get("semantic_signal_applied") and semantic_total_score > 0:
+            minimum_step = score_breakdown.get("semantic_minimum_viable_step")
+            message = "语义信号认为它和目标推进、复杂度或阻塞风险相关，因此会影响今日排序。"
+            if minimum_step:
+                message = f"语义信号建议先推进最小动作：{minimum_step}"
+            signals.append(
+                {
+                    "key": "semantic_planning",
+                    "title": "语义规划信号",
+                    "message": message,
+                    "signal": "info" if semantic_total_score < 28 else "positive",
+                    "score": semantic_total_score,
                 }
             )
 

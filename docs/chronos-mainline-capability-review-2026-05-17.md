@@ -20,6 +20,7 @@ Capture -> Inbox -> Today -> Task Detail -> Focus -> Report
 
 - Inbox 确认 Task 后，若当天已有 active Today plan，会进入滚动编排。
 - Today 由 Planning Engine v1 生成确定性计划快照，并保留可解释 score breakdown。
+- Planning Engine 已开始读取 TaskPlanningSignal，把 LLM / 规则的语义理解转成可解释 `semantic_*` 分项，而不是让 LLM 直接排序。
 - Task Detail 到 Focus 的 Today 绑定已自动兜底，减少前端漏传导致的状态分叉。
 - Focus 完成 / 中断 / 延后会进入 Today / Task / Report 汇总口径。
 - Daily Report 在 GET 时会检查关键执行指标，避免返回旧复盘。
@@ -51,7 +52,7 @@ Capture -> Inbox -> Today -> Task Detail -> Focus -> Report
 | Capture 文本输入 | L3 | 支持文本 Capture，并通过 Parser / fallback 进入 Inbox | P3 语音 / 图片先不扩展 |
 | Inbox 确认 Task / Goal | L3 | Task 确认可返回 `today_impact`，重复 confirm 保持幂等 | Goal confirm 后与 Goal Detail 的体验还可继续细化 |
 | Inbox -> Today 滚动纳入 | L3 | active Today 存在时通过 `system_refresh` 纳入新任务；无 plan 时不隐式创建 | 需要 smoke 场景长期覆盖 |
-| Planning Engine / Today 编排 | L3 | 确定性排序是 source of truth，读取价值、deadline、估时、依赖、用户修正、行为、容量和 Energy 信号 | 后续继续补边界场景和回归基线，不让 LLM 接管排序 |
+| Planning Engine / Today 编排 | L3 | 确定性排序是 source of truth，读取价值、deadline、估时、依赖、用户修正、行为、容量、Energy 和 TaskPlanningSignal 语义信号 | 后续继续补边界场景和回归基线，不让 LLM 接管排序 |
 | Today 快速操作 | L2-L3 | 完成 / 延后等动作已影响 plan item 和执行事件 | 可继续补完整主线 smoke，覆盖更多 action 组合 |
 | Task Detail 承接层 | L3 | 聚合 Goal、AI info、Today context、Focus state 和 actions | 避免继续堆成信息仓库 |
 | Task Detail -> Focus | L3 | 未传 `daily_plan_item_id` 时后端会自动绑定当前 Today 中同任务 item | 任务不在 Today 时仍允许 Focus，但要保持 report 口径清晰 |
@@ -72,6 +73,7 @@ P2 只保留和执行主线强相关的部分：Goals、依赖、洞察、解释
 | Task Dependency | L3 | 依赖新增 / 删除会在涉及当前 Today 时触发 `system_refresh` | 依赖是执行顺序信号，不做甘特图替代品 |
 | Priority / Value Adjustment | L3 | 用户调整当前 Today 任务会触发 `manual_adjust` revision，并返回 `today_impact` | 不做复杂手动排序系统 |
 | Strategy Detail | L3 | 解释 Planning Engine 结果、依赖保护、用户修正、容量状态和 agent review | 不进入 Today 首屏 |
+| Task Semantic Planning Signal | L2-L3 | 能把任务语义、目标对齐、复杂度、语义估时和最小推进动作写入可追踪信号，并被 Today 评分读取 | 后续需要补自动刷新策略和 Focus 反馈校准 |
 | Insights / Weekly / Monthly | L2 | 作为复盘与趋势入口可用 | 不能替代 Today 的每日执行决策 |
 
 ---
@@ -83,6 +85,7 @@ P2 只保留和执行主线强相关的部分：Goals、依赖、洞察、解释
 | Agent | 当前等级 | 允许做什么 | 禁止做什么 |
 | --- | --- | --- | --- |
 | Capture Parser Agent | L3 | 解析输入，生成 `AIParseResult` / `InboxItem` | 不绕过 Inbox 直接创建 Task / Goal |
+| Task Semantic Planning Agent | L2-L3 | 生成 TaskPlanningSignal，供 Planning Engine 解释和评分 | 不直接改 Task / Goal / DailyPlan，不绕过确定性排序 |
 | Task Breakdown Agent | L3 | 生成可编辑步骤建议 | 不覆盖用户已有 steps |
 | Strategy Explanation Agent | L3 | 基于 `score_breakdown` 生成自然解释 | 不改变排序和 DailyPlan 状态 |
 | Daily Planner Agent | L2-L3 | 对 Planning Engine 结果做 critique / suggestion | 不接管排序 source of truth |
@@ -126,7 +129,7 @@ LLM 接入的主线原则：
 
 2. Planning Engine 边界场景
 
-   继续补容量、依赖、用户修正、Goal urgency/value、postpone 行为的固定场景评估，保证核心算法可回归。
+   继续补容量、依赖、用户修正、Goal urgency/value、postpone 行为和 semantic planning signal 的固定场景评估，保证核心算法可回归。
 
 3. Goal / Today / Report 的跨页面一致性
 
@@ -135,6 +138,10 @@ LLM 接入的主线原则：
 4. Strategy Detail 解释收敛
 
    保持 2-4 条轻量解释，不把原始 score breakdown 暴露成复杂驾驶舱。
+
+5. 语义信号刷新与学习闭环
+
+   当 Task / Goal / dependency 变化、或 Focus 实际时长和语义估时偏差较大时，决定是否刷新 TaskPlanningSignal，并把执行反馈用于下一轮估时校准。
 
 ### 后续再做
 

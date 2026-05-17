@@ -4,7 +4,16 @@ from zoneinfo import ZoneInfo
 
 from app.ai.providers.base import LLMProviderError
 from app.models.activity_event import ActivityEvent
-from app.models.enums import AIJobStatus, DataSourceType, GoalHomeFilter, GoalStatus, TaskSource, TaskStatus, ValueLevel
+from app.models.enums import (
+    AIJobStatus,
+    AIJobType,
+    DataSourceType,
+    GoalHomeFilter,
+    GoalStatus,
+    TaskSource,
+    TaskStatus,
+    ValueLevel,
+)
 from app.services.data_source_service import data_source_service
 from app.services.errors import InvalidStateError
 from app.services.external_capture_import_service import external_capture_import_service
@@ -12,6 +21,7 @@ from app.services.focus_service import focus_service
 from app.services.goal_service import goal_service
 from app.services.inbox_service import inbox_service
 from app.services.planning_service import planning_service
+from app.services.task_planning_signal_service import TaskPlanningSignalService, task_planning_signal_service
 from app.services.task_service import TaskService, task_service
 from tests.db import TestingSessionLocal, reset_database
 from tests.factories import create_user
@@ -24,6 +34,15 @@ class FailingTaskBreakdownAgent:
     def run(self, **kwargs):
         del kwargs
         raise LLMProviderError("provider unavailable")
+
+
+class FailingTaskSemanticPlanningAgent:
+    prompt_version = "test-task-semantic-planning"
+    prompt_checksum = "3" * 64
+
+    def run(self, **kwargs):
+        del kwargs
+        raise LLMProviderError("semantic provider unavailable")
 
 
 class TaskGoalServiceTests(unittest.TestCase):
@@ -148,6 +167,66 @@ class TaskGoalServiceTests(unittest.TestCase):
         self.assertTrue(detail["actions"]["can_start_focus"])
         self.assertFalse(detail["focus_state"]["is_currently_focusing_this_task"])
         self.assertIsNone(detail["source_context"])
+
+    def test_generate_task_planning_signal_creates_ai_job_and_task_detail_ai_info(self):
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Launch MVP",
+            value_level=ValueLevel.HIGH,
+        )
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="写完高价值目标方案",
+            priority=4,
+            value_level=ValueLevel.MEDIUM,
+        )
+
+        result = task_planning_signal_service.generate_signal(self.db, task_id=task.id, user_id=self.user.id)
+        detail = task_service.get_task_detail(self.db, task_id=task.id, user_id=self.user.id)
+        events = task_service.list_task_events(self.db, task_id=task.id, user_id=self.user.id)
+
+        self.assertEqual(result["ai_job"]["job_type"], AIJobType.TASK_SEMANTIC_PLANNING)
+        self.assertEqual(result["ai_job"]["status"], AIJobStatus.SUCCEEDED)
+        self.assertTrue(result["ai_job"]["job_metadata"]["output_applied"])
+        self.assertEqual(result["ai_job"]["provider"], "mock")
+        self.assertEqual(result["ai_job"]["prompt_version"], "p2-task-semantic-planning-agent-v1")
+        self.assertEqual(result["planning_signal"]["task_id"], task.id)
+        self.assertEqual(result["planning_signal"]["source"], "ai")
+        self.assertGreaterEqual(result["planning_signal"]["goal_alignment_score"], 0.8)
+        self.assertTrue(result["planning_signal"]["minimum_viable_step"])
+        self.assertEqual(
+            detail["ai_info"]["recommended_duration_min"],
+            result["planning_signal"]["estimated_duration_min"],
+        )
+        self.assertEqual(detail["ai_info"]["planning_signal"]["id"], result["planning_signal"]["id"])
+        self.assertTrue(detail["ai_info"]["execution_suggestion"].startswith("先推进："))
+        self.assertIn("TASK_PLANNING_SIGNAL_GENERATED", [event.event_type for event in events])
+
+    def test_generate_task_planning_signal_falls_back_to_rule_signal(self):
+        service = TaskPlanningSignalService(agent=FailingTaskSemanticPlanningAgent())
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Fallback semantic planning",
+            estimated_duration_min=50,
+        )
+
+        result = service.generate_signal(self.db, task_id=task.id, user_id=self.user.id)
+        detail = task_service.get_task_detail(self.db, task_id=task.id, user_id=self.user.id)
+
+        self.assertEqual(result["ai_job"]["status"], AIJobStatus.SUCCEEDED_WITH_FALLBACK)
+        self.assertEqual(result["ai_job"]["job_metadata"]["failure_type"], "provider_error")
+        self.assertEqual(
+            result["ai_job"]["job_metadata"]["fallback_reason"],
+            "task_semantic_planning_agent_failed",
+        )
+        self.assertFalse(result["ai_job"]["job_metadata"]["output_applied"])
+        self.assertEqual(result["planning_signal"]["source"], "rule")
+        self.assertEqual(result["planning_signal"]["estimated_duration_min"], 50)
+        self.assertEqual(detail["ai_info"]["recommended_duration_min"], 50)
 
     def test_task_detail_returns_light_source_context_for_external_task(self):
         connection = data_source_service.connect_source(

@@ -107,6 +107,8 @@ class StrategyDetailFactorsResponse(BaseModel):
     capacity_status: str
     dependency_protected_count: int
     user_adjusted_count: int
+    semantic_signal_count: int = 0
+    semantic_protected_count: int = 0
     energy_level: str
     energy_applied: bool
     planner_agent_latency_ms: int | None = None

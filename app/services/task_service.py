@@ -38,6 +38,7 @@ from app.models.mixins import utc_now
 from app.services.activity_event_service import activity_event_service
 from app.services.ai_job_service import ai_job_service
 from app.services.errors import InvalidStateError, NotFoundError, ValidationDomainError
+from app.services.task_planning_signal_service import task_planning_signal_service
 
 
 class TaskService:
@@ -108,6 +109,17 @@ class TaskService:
         active_focus = self._active_focus_session(db, user_id=user_id)
         today_item = self._today_plan_item(db, task=task)
         steps = sorted(task.steps, key=lambda step: (step.sort_order, step.created_at))
+        planning_signal = task_planning_signal_service.latest_signal(db, task_id=task.id, user_id=user_id)
+        planning_signal_summary = task_planning_signal_service.signal_summary(planning_signal)
+        recommended_duration_min = (
+            task.estimated_duration_min
+            or (
+                planning_signal.estimated_duration_min
+                if planning_signal is not None and planning_signal.estimated_duration_min is not None
+                else None
+            )
+            or 25
+        )
         return {
             "id": task.id,
             "created_at": task.created_at,
@@ -128,10 +140,11 @@ class TaskService:
             "source_context": self._source_context(db, task=task),
             "goal": self._goal_summary(db, task=task),
             "ai_info": {
-                "recommended_duration_min": task.estimated_duration_min or 25,
+                "recommended_duration_min": recommended_duration_min,
                 "priority": task.priority,
                 "value_level": task.value_level,
-                "execution_suggestion": self._execution_suggestion(task),
+                "execution_suggestion": self._execution_suggestion(task, planning_signal=planning_signal),
+                "planning_signal": planning_signal_summary,
             },
             "progress_info": {
                 "progress": task.progress,
@@ -1046,9 +1059,11 @@ class TaskService:
         )
         return db.scalars(stmt).first()
 
-    def _execution_suggestion(self, task: Task) -> str:
+    def _execution_suggestion(self, task: Task, *, planning_signal=None) -> str:
         if task.status == TaskStatus.COMPLETED:
             return "This task is already complete."
+        if planning_signal is not None and planning_signal.minimum_viable_step:
+            return f"先推进：{planning_signal.minimum_viable_step}"
         incomplete_steps = [step for step in task.steps if not step.is_completed]
         if incomplete_steps:
             next_step = sorted(incomplete_steps, key=lambda step: (step.sort_order, step.created_at))[0]

@@ -120,11 +120,33 @@ class TaskDetailGoalResponse(BaseModel):
     value_level: ValueLevel
 
 
+class TaskPlanningSignalResponse(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    ai_job_id: uuid.UUID | None
+    source: str
+    task_type: str
+    complexity: str
+    cognitive_load: str
+    energy_fit: str
+    blocking_risk: str
+    estimated_duration_min: int | None
+    duration_confidence: float
+    goal_alignment_score: float
+    semantic_priority_score: float
+    breakdown_recommended: bool
+    minimum_viable_step: str | None
+    semantic_summary: str
+    confidence: float
+    created_at: datetime
+
+
 class TaskDetailAIInfoResponse(BaseModel):
     recommended_duration_min: int
     priority: int
     value_level: ValueLevel
     execution_suggestion: str
+    planning_signal: TaskPlanningSignalResponse | None = None
 
 
 class TaskDetailProgressResponse(BaseModel):
@@ -226,6 +248,11 @@ class TaskBreakdownAIJobResponse(BaseModel):
 class TaskBreakdownResponse(BaseModel):
     ai_job: TaskBreakdownAIJobResponse
     created_steps: list[TaskStepResponse] = Field(default_factory=list)
+
+
+class TaskPlanningSignalGenerationResponse(BaseModel):
+    ai_job: TaskBreakdownAIJobResponse
+    planning_signal: TaskPlanningSignalResponse
 
 
 class ActivityEventResponse(ORMModel):

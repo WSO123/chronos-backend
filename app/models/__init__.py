@@ -14,6 +14,7 @@ from app.models.reminder import Reminder
 from app.models.reminder_delivery import ReminderDeliveryAttempt
 from app.models.task import Task
 from app.models.task_dependency import TaskDependency
+from app.models.task_planning_signal import TaskPlanningSignal
 from app.models.task_step import TaskStep
 from app.models.user import AuthRefreshToken, User, UserSettings
 
@@ -39,6 +40,7 @@ __all__ = [
     "StrategySnapshot",
     "Task",
     "TaskDependency",
+    "TaskPlanningSignal",
     "TaskStep",
     "User",
     "UserSettings",
