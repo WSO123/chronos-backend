@@ -155,7 +155,9 @@ DailyPlanItem {
 
 - `total_score`
 - `value_score`
+- `goal_value_score`
 - `urgency_score`
+- `goal_urgency_score`
 - `dependency_score`
 - `duration_fit_score`
 - `energy_fit_score`

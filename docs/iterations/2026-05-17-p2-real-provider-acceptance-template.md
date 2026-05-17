@@ -298,6 +298,6 @@ git diff --check
 
 ## 13. 后续迭代建议
 
-1. 增加多 Goal 竞争 / 超期目标恢复的 planner eval 场景。
+1. 已在后续迭代补充多 Goal 竞争 / 超期目标恢复的 planner eval 场景。
 2. 增加验收记录生成脚本，从 smoke JSON 和 compare JSON 自动生成 Markdown 草稿。
 3. 将真实 provider 验收记录纳入发布 checklist。

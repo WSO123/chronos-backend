@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, timedelta
 import json
 from pathlib import Path
 import sys
@@ -18,6 +18,7 @@ from app.models.activity_event import ActivityEvent
 from app.models.ai_job import AIJob
 from app.models.enums import DailyPlanItemStatus, EntityType, TaskStatus, ValueLevel
 from app.services.energy_service import energy_service
+from app.services.goal_service import goal_service
 from app.services.planning_service import planning_service
 from app.services.task_service import task_service
 from tests.db import TestingSessionLocal, reset_database
@@ -25,7 +26,7 @@ from tests.factories import create_user
 
 
 PLAN_DATE = date(2026, 5, 17)
-EVALUATOR_VERSION = "p2-planning-engine-eval-v2"
+EVALUATOR_VERSION = "p2-planning-engine-eval-v3"
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,8 @@ def run_evaluation(*, run_id: str | None = None) -> dict:
         _scenario_dependency_chain_protection,
         _scenario_user_priority_adjustment_protection,
         _scenario_behavior_feedback_penalizes_interruptions,
+        _scenario_multi_goal_competition_protects_high_value_goal,
+        _scenario_overdue_goal_recovery_promotes_next_task,
     ]
     results = [scenario() for scenario in scenarios]
     return {
@@ -400,6 +403,153 @@ def _scenario_behavior_feedback_penalizes_interruptions() -> ScenarioResult:
         db.close()
 
 
+def _scenario_multi_goal_competition_protects_high_value_goal() -> ScenarioResult:
+    db = _fresh_db()
+    try:
+        user = create_user(db, name="Planner Eval Multi Goal")
+        high_value_goal = goal_service.create_goal(
+            db,
+            user_id=user.id,
+            title="Ship portfolio launch",
+            deadline=PLAN_DATE + timedelta(days=14),
+            value_level=ValueLevel.HIGH,
+        )
+        low_value_goal = goal_service.create_goal(
+            db,
+            user_id=user.id,
+            title="Tidy low-value backlog",
+            deadline=PLAN_DATE + timedelta(days=14),
+            value_level=ValueLevel.LOW,
+        )
+        protected_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            goal_id=high_value_goal.id,
+            title="Advance high-value goal",
+            estimated_duration_min=90,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        urgent_low_goal_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            goal_id=low_value_goal.id,
+            title="Urgent low-goal follow-up",
+            estimated_duration_min=60,
+            priority=2,
+            value_level=ValueLevel.MEDIUM,
+        )
+        optional_low_goal_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            goal_id=low_value_goal.id,
+            title="Optional low-goal cleanup",
+            estimated_duration_min=60,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+
+        today = planning_service.get_today(db, user_id=user.id, plan_date=PLAN_DATE)
+        strategy = planning_service.get_strategy_detail(db, user_id=user.id, plan_date=PLAN_DATE)
+        pinned = today["sections"]["pinned_tasks"]
+        rolled = today["sections"]["rolled_over_tasks"]
+        protected_item = _find_item(today, protected_task.id)
+        urgent_low_item = _find_item(today, urgent_low_goal_task.id)
+        failures = _check_all(
+            ("high-value goal task is first pinned task", bool(pinned) and pinned[0]["task_id"] == protected_task.id),
+            (
+                "high-value goal task receives goal value boost",
+                bool(protected_item) and protected_item["score_breakdown"].get("goal_value_score", 0) > 0,
+            ),
+            (
+                "high-value goal task outranks urgent low-goal work",
+                bool(protected_item)
+                and bool(urgent_low_item)
+                and protected_item["score_breakdown"]["total_score"] > urgent_low_item["score_breakdown"]["total_score"],
+            ),
+            (
+                "recommendation explains high-value goal protection",
+                bool(protected_item) and "High-value goal" in protected_item["recommendation_reason"],
+            ),
+            ("optional low-goal work rolls over", bool(rolled) and rolled[0]["task_id"] == optional_low_goal_task.id),
+            ("main sequence still respects capacity", strategy["factors"]["selected_estimated_minutes"] == 150),
+        )
+        return ScenarioResult(
+            name="multi_goal_competition_protects_high_value_goal",
+            passed=not failures,
+            details=_details(db=db, today=today, strategy=strategy),
+            failures=failures,
+        )
+    finally:
+        db.close()
+
+
+def _scenario_overdue_goal_recovery_promotes_next_task() -> ScenarioResult:
+    db = _fresh_db()
+    try:
+        user = create_user(db, name="Planner Eval Overdue Goal")
+        overdue_goal = goal_service.create_goal(
+            db,
+            user_id=user.id,
+            title="Recover overdue launch goal",
+            deadline=PLAN_DATE - timedelta(days=2),
+            value_level=ValueLevel.MEDIUM,
+        )
+        recovery_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            goal_id=overdue_goal.id,
+            title="Recover overdue goal next step",
+            estimated_duration_min=45,
+            priority=4,
+            value_level=ValueLevel.LOW,
+        )
+        regular_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Regular priority work",
+            estimated_duration_min=45,
+            priority=2,
+            value_level=ValueLevel.MEDIUM,
+        )
+
+        today = planning_service.get_today(db, user_id=user.id, plan_date=PLAN_DATE)
+        strategy = planning_service.get_strategy_detail(db, user_id=user.id, plan_date=PLAN_DATE)
+        pinned = today["sections"]["pinned_tasks"]
+        recovery_item = _find_item(today, recovery_task.id)
+        regular_item = _find_item(today, regular_task.id)
+        failures = _check_all(
+            ("overdue goal next step is first pinned task", bool(pinned) and pinned[0]["task_id"] == recovery_task.id),
+            (
+                "overdue goal next step has no task deadline",
+                bool(recovery_item) and recovery_item["deadline"] is None,
+            ),
+            (
+                "overdue goal urgency score is applied",
+                bool(recovery_item) and recovery_item["score_breakdown"].get("goal_urgency_score", 0) > 0,
+            ),
+            (
+                "overdue goal recovery outranks regular priority work",
+                bool(recovery_item)
+                and bool(regular_item)
+                and recovery_item["score_breakdown"]["total_score"] > regular_item["score_breakdown"]["total_score"],
+            ),
+            (
+                "recommendation explains overdue goal recovery",
+                bool(recovery_item) and "Goal is overdue" in recovery_item["recommendation_reason"],
+            ),
+            ("plan stays within capacity", strategy["factors"]["capacity_status"] == "within_capacity"),
+        )
+        return ScenarioResult(
+            name="overdue_goal_recovery_promotes_next_task",
+            passed=not failures,
+            details=_details(db=db, today=today, strategy=strategy),
+            failures=failures,
+        )
+    finally:
+        db.close()
+
+
 def _fresh_db():
     reset_database()
     return TestingSessionLocal()
@@ -435,12 +585,21 @@ def _all_items(today: dict) -> list[dict]:
     )
 
 
+def _find_item(today: dict, task_id) -> dict | None:
+    for item in _all_items(today):
+        if item["task_id"] == task_id:
+            return item
+    return None
+
+
 def _item_signals(items: list[dict]) -> list[dict]:
     return [
         {
             "title": item["title"],
             "section": item["section"].value,
             "total_score": item["score_breakdown"].get("total_score"),
+            "goal_value_score": item["score_breakdown"].get("goal_value_score"),
+            "goal_urgency_score": item["score_breakdown"].get("goal_urgency_score"),
             "behavior_feedback_score": item["score_breakdown"].get("behavior_feedback_score"),
             "dependency_score": item["score_breakdown"].get("dependency_score"),
             "user_preference_score": item["score_breakdown"].get("user_preference_score"),

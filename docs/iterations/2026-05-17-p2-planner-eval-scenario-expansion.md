@@ -297,7 +297,7 @@ git diff --check
 
 ### 已知问题
 
-- 7 个 scenarios 仍不是完整真实用户任务分布，后续需要加入多 Goal 竞争和超期目标恢复。
+- 7 个 scenarios 仍不是完整真实用户任务分布；多 Goal 竞争和超期目标恢复已在后续 v3 evaluator 迭代补充。
 
 ---
 
@@ -305,4 +305,4 @@ git diff --check
 
 1. 已在后续迭代补充 JSONL 对比脚本，读取多次评估并输出 provider / prompt 差异摘要。
 2. 增加真实 provider 手动验收记录模板，记录 model、usage、prompt checksum 和结论。
-3. 增加多 Goal 竞争 / 超期目标恢复的 planner eval 场景。
+3. 已在后续迭代补充多 Goal 竞争 / 超期目标恢复的 planner eval 场景。

@@ -38,6 +38,8 @@ class PlannerEvalCompareTests(unittest.TestCase):
                             "title": "Stable task",
                             "section": "recommended",
                             "total_score": 38,
+                            "goal_value_score": 0,
+                            "goal_urgency_score": 0,
                             "behavior_feedback_score": 0,
                             "dependency_score": 0,
                             "user_preference_score": 0,
@@ -46,6 +48,8 @@ class PlannerEvalCompareTests(unittest.TestCase):
                             "title": "Frequently interrupted task",
                             "section": "recommended",
                             "total_score": 42,
+                            "goal_value_score": 0,
+                            "goal_urgency_score": 0,
                             "behavior_feedback_score": 4,
                             "dependency_score": 0,
                             "user_preference_score": 0,
@@ -120,6 +124,49 @@ class PlannerEvalCompareTests(unittest.TestCase):
         self.assertEqual(result["status"], "changed")
         diff = result["scenario_diffs"][0]
         self.assertIn("planner_agent_prompt_checksum", {change["field"] for change in diff["field_changes"]})
+
+    def test_compare_detects_goal_signal_changes(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            baseline_path = Path(tmp_dir) / "baseline.jsonl"
+            candidate_path = Path(tmp_dir) / "candidate.jsonl"
+            _write_jsonl(baseline_path, _records(run_id="baseline"))
+            _write_jsonl(
+                candidate_path,
+                _records(
+                    run_id="candidate",
+                    item_signals=[
+                        {
+                            "title": "Stable task",
+                            "section": "recommended",
+                            "total_score": 50,
+                            "goal_value_score": 12,
+                            "goal_urgency_score": 0,
+                            "behavior_feedback_score": 0,
+                            "dependency_score": 0,
+                            "user_preference_score": 0,
+                        },
+                        {
+                            "title": "Frequently interrupted task",
+                            "section": "recommended",
+                            "total_score": 30,
+                            "goal_value_score": 0,
+                            "goal_urgency_score": 0,
+                            "behavior_feedback_score": -8,
+                            "dependency_score": 0,
+                            "user_preference_score": 0,
+                        },
+                    ],
+                ),
+            )
+
+            result = compare_eval_runs(load_eval_run(baseline_path), load_eval_run(candidate_path))
+
+        self.assertEqual(result["status"], "changed")
+        diff = result["scenario_diffs"][0]
+        self.assertIn(
+            ("Stable task", "goal_value_score"),
+            {(change["title"], change["field"]) for change in diff["item_signal_changes"]},
+        )
 
     def test_cli_fail_on_regression_exits_nonzero(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -229,6 +276,8 @@ def _default_item_signals() -> list[dict]:
             "title": "Stable task",
             "section": "recommended",
             "total_score": 38,
+            "goal_value_score": 0,
+            "goal_urgency_score": 0,
             "behavior_feedback_score": 0,
             "dependency_score": 0,
             "user_preference_score": 0,
@@ -237,6 +286,8 @@ def _default_item_signals() -> list[dict]:
             "title": "Frequently interrupted task",
             "section": "recommended",
             "total_score": 30,
+            "goal_value_score": 0,
+            "goal_urgency_score": 0,
             "behavior_feedback_score": -8,
             "dependency_score": 0,
             "user_preference_score": 0,

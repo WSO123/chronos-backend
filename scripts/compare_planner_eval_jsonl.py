@@ -29,6 +29,8 @@ DETAIL_FIELDS = [
 ITEM_SIGNAL_FIELDS = [
     "section",
     "total_score",
+    "goal_value_score",
+    "goal_urgency_score",
     "behavior_feedback_score",
     "dependency_score",
     "user_preference_score",

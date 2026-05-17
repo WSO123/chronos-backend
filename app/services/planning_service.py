@@ -319,9 +319,13 @@ class PlanningService:
         return revision
 
     def _planned_tasks(self, db: Session, *, user_id: uuid.UUID, plan_date: date) -> list[PlannedTask]:
-        stmt = select(Task).where(
-            Task.user_id == user_id,
-            Task.status.in_([TaskStatus.ACTIVE, TaskStatus.POSTPONED]),
+        stmt = (
+            select(Task)
+            .options(selectinload(Task.goal))
+            .where(
+                Task.user_id == user_id,
+                Task.status.in_([TaskStatus.ACTIVE, TaskStatus.POSTPONED]),
+            )
         )
         tasks = list(db.scalars(stmt).all())
         context = self._planning_context(db, user_id=user_id, plan_date=plan_date)
@@ -584,7 +588,9 @@ class PlanningService:
             {"completed": 0, "postponed": 0, "interrupted": 0},
         )
         value_score = {ValueLevel.HIGH: 30, ValueLevel.MEDIUM: 18, ValueLevel.LOW: 8}[task.value_level]
+        goal_value_score = self._goal_value_score(task)
         urgency_score = self._urgency_score(task=task, plan_date=context.plan_date)
+        goal_urgency_score = self._goal_urgency_score(task=task, plan_date=context.plan_date)
         dependency_score = 0
         if task.id in signals["unlocking_task_ids"]:
             dependency_score += 18
@@ -608,7 +614,9 @@ class PlanningService:
         priority_score = max(0, 6 - task.priority) * 4
         total_score = (
             value_score
+            + goal_value_score
             + urgency_score
+            + goal_urgency_score
             + dependency_score
             + duration_fit_score
             + energy_fit_score
@@ -620,7 +628,9 @@ class PlanningService:
         return {
             "total_score": int(total_score),
             "value_score": int(value_score),
+            "goal_value_score": int(goal_value_score),
             "urgency_score": int(urgency_score),
+            "goal_urgency_score": int(goal_urgency_score),
             "dependency_score": int(dependency_score),
             "duration_fit_score": int(duration_fit_score),
             "energy_fit_score": int(energy_fit_score),
@@ -647,6 +657,25 @@ class PlanningService:
             return 16
         if days_until_deadline <= 7:
             return 8
+        return 0
+
+    def _goal_value_score(self, task: Task) -> int:
+        if task.goal is None:
+            return 0
+        return {ValueLevel.HIGH: 12, ValueLevel.MEDIUM: 4, ValueLevel.LOW: 0}[task.goal.value_level]
+
+    def _goal_urgency_score(self, *, task: Task, plan_date: date) -> int:
+        if task.goal is None or task.goal.deadline is None:
+            return 0
+        days_until_deadline = (task.goal.deadline - plan_date).days
+        if days_until_deadline < 0:
+            return 18
+        if days_until_deadline == 0:
+            return 14
+        if days_until_deadline <= 3:
+            return 8
+        if days_until_deadline <= 7:
+            return 4
         return 0
 
     def _duration_fit_score(self, estimated_minutes: int, *, capacity: int) -> int:
@@ -873,6 +902,10 @@ class PlanningService:
             return DailyPlanItemSection.PINNED
         if task.deadline is not None and task.deadline <= plan_date:
             return DailyPlanItemSection.PINNED
+        if task.goal is not None and task.goal.deadline is not None and task.goal.deadline <= plan_date:
+            return DailyPlanItemSection.PINNED
+        if task.goal is not None and task.goal.value_level == ValueLevel.HIGH and task.priority <= 3:
+            return DailyPlanItemSection.PINNED
         if task.value_level == ValueLevel.HIGH or task.priority <= 2:
             return DailyPlanItemSection.PINNED
         if task.priority >= 4 and task.value_level != ValueLevel.HIGH:
@@ -895,6 +928,10 @@ class PlanningService:
             return "Overdue task protected at the top of today's sequence."
         if task.deadline == plan_date:
             return "Due today, so it is protected in the priority section."
+        if task.goal is not None and task.goal.deadline is not None and task.goal.deadline < plan_date:
+            return "Goal is overdue, so this next task is pulled back into today's protected sequence."
+        if task.goal is not None and task.goal.deadline == plan_date:
+            return "Goal is due today, so this task is protected before lighter work."
         if task.id in unlocking_task_ids:
             return "Prerequisite task placed early because it unlocks another planned task."
         if task.id in blocked_task_ids:
@@ -903,6 +940,8 @@ class PlanningService:
             return "Adjusted by you, so the planner keeps that preference visible."
         if task.value_level == ValueLevel.HIGH:
             return "High-value task protected from being crowded out by lighter work."
+        if task.goal is not None and task.goal.value_level == ValueLevel.HIGH:
+            return "High-value goal protected so its next action is not crowded out by lighter work."
         if task.priority <= 2:
             return "High-priority task placed early for a clearer start."
         if task.priority >= 4:

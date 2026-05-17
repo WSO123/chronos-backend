@@ -573,6 +573,8 @@ uv run python scripts/smoke_p2_goal_insight_loop.py
 uv run python scripts/evaluate_planning_engine.py
 ```
 
+该评估当前覆盖容量滚动、受保护任务超载、Energy 适配、依赖链、用户修正、行为反馈、多 Goal 竞争和超期 Goal 恢复。
+
 需要沉淀 provider / prompt 对比记录时，追加 JSONL 输出：
 
 ```bash

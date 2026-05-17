@@ -93,7 +93,7 @@ Today -> Strategy Detail -> Offline Eval -> Compare
 | JSONL run loader | 从 JSONL 中按 `run_id` 还原 summary 和 scenarios | Must | 默认最新 run |
 | Scenario comparison | 对比 missing / added / passed 变化 | Must | 识别 regression |
 | Detail diff | 对比排序、容量、risk、provider、prompt version / checksum、fallback 等核心字段 | Must | 用于排障 |
-| Item signal diff | 对比 `section`、`total_score`、behavior / dependency / preference score | Must | 定位评分信号变化 |
+| Item signal diff | 对比 `section`、`total_score`、goal value / goal urgency / behavior / dependency / preference score | Must | 定位评分信号变化 |
 | CLI gate | `--fail-on-regression` 时 regression 返回 exit code 1 | Should | 默认不阻塞 |
 
 ### 用户故事
@@ -300,13 +300,13 @@ git diff --check
 
 ### 已知问题
 
-- compare 只判断结构化 scenario 结果，不覆盖真实用户任务分布。
-- 多 Goal 竞争 / 超期目标恢复场景仍待补充。
+- compare 只判断结构化 scenario 结果，不覆盖完整真实用户任务分布。
+- 多 Goal 竞争 / 超期目标恢复场景已在后续 v3 evaluator 迭代补充，但仍需要更多真实分布样本。
 
 ---
 
 ## 13. 后续迭代建议
 
 1. 已在后续迭代补充真实 provider 手动验收记录模板，记录 model、usage、prompt checksum、JSONL compare 结果和结论。
-2. 增加多 Goal 竞争 / 超期目标恢复的 planner eval 场景。
+2. 已在后续迭代补充多 Goal 竞争 / 超期目标恢复的 planner eval 场景。
 3. 将 compare 输出接入后续手动发布 checklist。
