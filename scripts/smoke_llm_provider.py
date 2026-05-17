@@ -21,10 +21,19 @@ from app.core.config import settings
 EXPECTED_TASK_IDS = ["manual-smoke-task-1", "manual-smoke-task-2"]
 
 
+class SmokeValidationError(RuntimeError):
+    def __init__(self, message: str, *, payload: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.payload = payload
+
+
 def main() -> None:
     args = _parse_args()
     try:
         result = run_smoke(allow_real_llm=args.allow_real_llm)
+    except SmokeValidationError as exc:
+        print(json.dumps(exc.payload, ensure_ascii=False, indent=2, default=str), flush=True)
+        raise SystemExit(1) from exc
     except Exception as exc:  # noqa: BLE001 - smoke scripts should print a compact failure payload.
         print(json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False, indent=2), flush=True)
         raise SystemExit(1) from exc
@@ -83,10 +92,8 @@ def run_smoke(*, allow_real_llm: bool) -> dict[str, Any]:
     )
     latency_ms = max(0, int((perf_counter() - started) * 1000))
     output_task_ids = [item.task_id for item in result.output.items]
-    if output_task_ids != EXPECTED_TASK_IDS:
-        raise RuntimeError(f"LLM provider returned unexpected task ids: {output_task_ids}")
-
-    return {
+    task_id_summary = task_id_preservation_summary(expected=EXPECTED_TASK_IDS, actual=output_task_ids)
+    payload = {
         "status": "ok",
         "provider": result.provider,
         "model": result.model,
@@ -98,6 +105,27 @@ def run_smoke(*, allow_real_llm: bool) -> dict[str, Any]:
         "item_count": len(result.output.items),
         "usage": result.usage,
         "provider_response_id": result.response_id,
+        **task_id_summary,
+    }
+    if not task_id_summary["task_ids_preserved"]:
+        raise SmokeValidationError(
+            "LLM provider returned unexpected task ids.",
+            payload={**payload, "status": "failed", "error": "LLM provider returned unexpected task ids."},
+        )
+    return payload
+
+
+def task_id_preservation_summary(*, expected: list[str], actual: list[str]) -> dict[str, Any]:
+    missing_task_ids = [task_id for task_id in expected if task_id not in actual]
+    unexpected_task_ids = [task_id for task_id in actual if task_id not in expected]
+    return {
+        "expected_task_ids": expected,
+        "output_task_ids": actual,
+        "task_ids_preserved": actual == expected,
+        "task_id_set_preserved": set(actual) == set(expected),
+        "task_count_preserved": len(actual) == len(expected),
+        "missing_task_ids": missing_task_ids,
+        "unexpected_task_ids": unexpected_task_ids,
     }
 
 

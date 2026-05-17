@@ -610,6 +610,7 @@ uv run python scripts/generate_llm_acceptance_record.py \
 ```
 
 生成结果仍必须人工 review；脚本默认隐藏 provider response id，不应把 API key、真实用户输入或 provider 原始响应写入验收记录。
+真实 provider smoke 输出中应包含 `expected_task_ids`、`output_task_ids`、`task_ids_preserved`、`task_id_set_preserved`、`task_count_preserved`、`missing_task_ids` 和 `unexpected_task_ids`，用于证明 provider 没有改写、删除或新增任务。
 
 涉及 Daily Planner Agent shell 或 LLM provider 时，额外执行：
 

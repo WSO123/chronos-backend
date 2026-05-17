@@ -211,7 +211,7 @@ AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_ALLOWED_M
 docs/llm-provider-acceptance/TEMPLATE.md
 ```
 
-每次真实 provider 验收都应记录 provider、model、prompt version、prompt checksum、usage、latency、provider response id、planner eval JSONL compare 结果和最终结论。记录中不能包含 API key、真实用户输入或 provider 原始敏感响应。
+每次真实 provider 验收都应记录 provider、model、prompt version、prompt checksum、usage、latency、provider response id 摘要、task id preservation 明细、planner eval JSONL compare 结果、golden policy check 结果和最终结论。记录中不能包含 API key、真实用户输入或 provider 原始敏感响应。
 
 真实 provider 保护边界：
 

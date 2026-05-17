@@ -25,6 +25,7 @@ YYYY-MM-DD-<provider>-<model>-<purpose>.md
 - commit hash 和测试日期。
 - `scripts/smoke_llm_provider.py` 的输出摘要。
 - prompt version 和 prompt checksum。
+- task id preservation 明细：`expected_task_ids`、`output_task_ids`、`task_ids_preserved`、`task_id_set_preserved`。
 - usage / latency / response id 摘要。
 - planner eval JSONL compare 结果。
 - safety checklist 和最终结论。
@@ -33,7 +34,7 @@ YYYY-MM-DD-<provider>-<model>-<purpose>.md
 
 - 不要提交 API key、完整请求头、完整 provider 原始响应、用户隐私输入或生产数据。
 - `LLM_API_KEY` 只能以 `<redacted>` 记录。
-- `provider_response_id` 可记录完整值；如果 provider 认为该值敏感，则只记录前后缀。
+- `provider_response_id` 默认由生成脚本脱敏为 `<redacted-present>`；如需完整值，只能在确认 provider 规则允许后人工补充安全摘要。
 - 真实 provider 验收只能使用 synthetic / demo 输入，不能使用真实用户数据。
 - 真实 provider 调用失败不能阻塞核心闭环，必须确认 fallback 仍可用。
 
@@ -80,4 +81,4 @@ uv run python scripts/generate_llm_acceptance_record.py \
   --output docs/llm-provider-acceptance/YYYY-MM-DD-openai-gpt-4-1-mini-daily-planner-smoke.md
 ```
 
-脚本只生成草稿，不调用真实 provider，不代表免 review。生成后仍需人工核对 task ids、fallback 和 changed 原因。
+脚本只生成草稿，不调用真实 provider，不代表免 review。生成后仍需人工核对 fallback 和 changed 原因；task id preservation 会优先使用 smoke JSON 中的结构化字段。

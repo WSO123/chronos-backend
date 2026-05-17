@@ -120,8 +120,11 @@ def generate_acceptance_markdown(
             _checkbox(smoke.get("status") == "ok", "LLM smoke 成功返回结构化结果。"),
             _checkbox(compare.get("status") != "regressed", "`compare_planner_eval_jsonl.py` 没有 regression。"),
             _checkbox(policy.get("status") != "regressed", "`check_planner_eval_policy.py` 没有 regression。"),
-            "- [ ] task ids 未被 provider 改写。需要人工核对 smoke 输入 / 输出。",
-            "- [ ] task 集合未被 provider 增删。需要人工核对 smoke 输入 / 输出。",
+            _checkbox(smoke.get("task_ids_preserved") is True, "task ids 未被 provider 改写且顺序保持一致。"),
+            _checkbox(
+                smoke.get("task_id_set_preserved") is True and smoke.get("task_count_preserved") is True,
+                "task 集合未被 provider 增删。",
+            ),
             "- [ ] 失败时 Today 仍可走 Planning Engine fallback。需要人工或测试记录确认。",
             "- [x] 没有在本草稿中写入 API key、真实用户输入或 provider 原始敏感响应。",
             "",
@@ -210,6 +213,7 @@ def generate_acceptance_markdown(
             _checkbox(_matches(smoke.get("model"), resolved_model), "Model 与本次验收目标一致。"),
             _checkbox(bool(prompt_version) and prompt_version != "<prompt_version>", "Prompt version 已记录。"),
             _checkbox(bool(prompt_checksum) and prompt_checksum != "<prompt_checksum>", "Prompt checksum 已记录。"),
+            _checkbox(smoke.get("task_ids_preserved") is True, "task ids 未变化。"),
             _checkbox(compare.get("status") != "regressed", "`compare_planner_eval_jsonl.py` 没有 regression。"),
             _checkbox(policy.get("status") != "regressed", "`check_planner_eval_policy.py` 没有 regression。"),
             "- [ ] Fallback 仍可用。需要人工或自动化记录补充。",
@@ -274,6 +278,10 @@ def _infer_conclusion(*, smoke: dict[str, Any], compare: dict[str, Any], policy:
         return "Blocked", "Smoke was skipped, so this record is not enough to accept a real provider."
     if smoke_status != "ok":
         return "Rejected", f"Smoke status is {smoke_status or 'unknown'}."
+    if smoke.get("task_ids_preserved") is False:
+        return "Rejected", "Smoke reported task id preservation failure."
+    if smoke.get("task_id_set_preserved") is False or smoke.get("task_count_preserved") is False:
+        return "Rejected", "Smoke reported task set preservation failure."
     if compare_status == "regressed" or _number(compare.get("regression_count")) > 0:
         return "Rejected", "Planner compare reported a regression."
     if policy_status == "regressed" or _number(policy.get("regression_count")) > 0:
@@ -305,6 +313,13 @@ def _smoke_table(smoke: dict[str, Any]) -> str:
         ("Latency ms", smoke.get("latency_ms")),
         ("Confidence", smoke.get("confidence")),
         ("Item count", smoke.get("item_count")),
+        ("Expected task ids", smoke.get("expected_task_ids")),
+        ("Output task ids", smoke.get("output_task_ids")),
+        ("Task ids preserved", smoke.get("task_ids_preserved")),
+        ("Task id set preserved", smoke.get("task_id_set_preserved")),
+        ("Task count preserved", smoke.get("task_count_preserved")),
+        ("Missing task ids", smoke.get("missing_task_ids")),
+        ("Unexpected task ids", smoke.get("unexpected_task_ids")),
         ("Input tokens", usage.get("input_tokens")),
         ("Output tokens", usage.get("output_tokens")),
         ("Total tokens", usage.get("total_tokens")),
@@ -397,6 +412,13 @@ def _smoke_summary_fields() -> list[str]:
         "mode",
         "confidence",
         "item_count",
+        "expected_task_ids",
+        "output_task_ids",
+        "task_ids_preserved",
+        "task_id_set_preserved",
+        "task_count_preserved",
+        "missing_task_ids",
+        "unexpected_task_ids",
         "usage",
         "provider_response_id",
         "reason",

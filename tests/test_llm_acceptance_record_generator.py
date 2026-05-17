@@ -28,6 +28,9 @@ class LLMProviderAcceptanceRecordGeneratorTests(unittest.TestCase):
         self.assertIn("<redacted-present>", markdown)
         self.assertNotIn("resp_secret_123", markdown)
         self.assertIn("scripts/check_planner_eval_policy.py", markdown)
+        self.assertIn("| Task ids preserved | True |", markdown)
+        self.assertIn("- [x] task ids 未被 provider 改写且顺序保持一致。", markdown)
+        self.assertIn("- [x] task 集合未被 provider 增删。", markdown)
 
     def test_generate_acceptance_record_marks_changed_as_notes(self):
         markdown = generate_acceptance_markdown(
@@ -64,6 +67,29 @@ class LLMProviderAcceptanceRecordGeneratorTests(unittest.TestCase):
 
         self.assertIn("> 状态：Blocked", markdown)
         self.assertIn("- [x] Blocked", markdown)
+
+    def test_generate_acceptance_record_surfaces_task_id_mismatch(self):
+        smoke = {
+            **_smoke(status="ok"),
+            "task_ids_preserved": False,
+            "task_id_set_preserved": False,
+            "task_count_preserved": True,
+            "missing_task_ids": ["manual-smoke-task-1"],
+            "unexpected_task_ids": ["other-task"],
+        }
+
+        markdown = generate_acceptance_markdown(
+            smoke=smoke,
+            compare=_compare(status="ok"),
+            policy=_policy(status="ok"),
+            record_date="2026-05-17",
+        )
+
+        self.assertIn("> 状态：Rejected", markdown)
+        self.assertIn("| Task ids preserved | False |", markdown)
+        self.assertIn("| Missing task ids | [\"manual-smoke-task-1\"] |", markdown)
+        self.assertIn("| Unexpected task ids | [\"other-task\"] |", markdown)
+        self.assertIn("- [ ] task ids 未被 provider 改写且顺序保持一致。", markdown)
 
     def test_load_json_payload_extracts_json_from_command_output(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -131,6 +157,13 @@ def _smoke(*, status: str, provider_response_id: str | None = "resp_123") -> dic
         "mode": "normal",
         "confidence": 0.8,
         "item_count": 2,
+        "expected_task_ids": ["manual-smoke-task-1", "manual-smoke-task-2"],
+        "output_task_ids": ["manual-smoke-task-1", "manual-smoke-task-2"],
+        "task_ids_preserved": True,
+        "task_id_set_preserved": True,
+        "task_count_preserved": True,
+        "missing_task_ids": [],
+        "unexpected_task_ids": [],
         "usage": {
             "input_tokens": 100,
             "output_tokens": 50,

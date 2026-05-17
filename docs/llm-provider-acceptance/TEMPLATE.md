@@ -141,6 +141,19 @@ uv run python scripts/smoke_llm_provider.py --allow-real-llm
   "mode": "<mode>",
   "confidence": 0.0,
   "item_count": 2,
+  "expected_task_ids": [
+    "manual-smoke-task-1",
+    "manual-smoke-task-2"
+  ],
+  "output_task_ids": [
+    "manual-smoke-task-1",
+    "manual-smoke-task-2"
+  ],
+  "task_ids_preserved": true,
+  "task_id_set_preserved": true,
+  "task_count_preserved": true,
+  "missing_task_ids": [],
+  "unexpected_task_ids": [],
   "usage": {
     "input_tokens": null,
     "output_tokens": null,
@@ -199,6 +212,13 @@ uv run python scripts/check_planner_eval_policy.py /tmp/chronos-planner-candidat
 | Latency ms |  |
 | Confidence |  |
 | Item count |  |
+| Expected task ids |  |
+| Output task ids |  |
+| Task ids preserved |  |
+| Task id set preserved |  |
+| Task count preserved |  |
+| Missing task ids |  |
+| Unexpected task ids |  |
 | Input tokens |  |
 | Output tokens |  |
 | Total tokens |  |
@@ -234,6 +254,7 @@ uv run python scripts/check_planner_eval_policy.py /tmp/chronos-planner-candidat
 - [ ] Provider / model 与本次验收目标一致。
 - [ ] Prompt version / checksum 与预期一致。
 - [ ] task ids 未变化。
+- [ ] task 集合未增删。
 - [ ] `compare_planner_eval_jsonl.py` 没有 regression。
 - [ ] `check_planner_eval_policy.py` 没有 regression；如为 changed，已记录原因和结论。
 - [ ] Fallback 仍可用。

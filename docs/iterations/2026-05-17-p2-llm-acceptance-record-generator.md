@@ -303,12 +303,12 @@ git diff --check
 
 ### 已知问题
 
-- 自动生成的 task ids / fallback 检查仍是人工 checkbox，后续可以让 smoke 输出更多可验证字段。
+- fallback 检查仍是人工 checkbox，后续可以让 smoke 或服务层输出更多可验证字段。
 
 ---
 
 ## 13. 后续迭代建议
 
-1. 为真实 provider smoke 输出增加 task id preservation 明细，减少验收记录中的人工核对项。
+1. 已在后续迭代补充真实 provider smoke 的 task id preservation 明细，减少验收记录中的人工核对项。
 2. 为 Today Strategy Detail 增加更清晰的 goal-aware explanation 文案，但仍不进入 Today 首屏。
 3. 增加 planner eval 数值阈值 policy，例如 selected minutes、over capacity 和关键 score signal 的允许范围。

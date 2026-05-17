@@ -73,6 +73,36 @@ class LLMProviderSmokeScriptTests(unittest.TestCase):
             settings.LLM_ALLOWED_MODELS = original["LLM_ALLOWED_MODELS"]
             settings.LLM_MAX_OUTPUT_TOKENS = original["LLM_MAX_OUTPUT_TOKENS"]
 
+    def test_task_id_preservation_summary_accepts_exact_match(self):
+        summary = smoke_llm_provider.task_id_preservation_summary(
+            expected=["task-1", "task-2"],
+            actual=["task-1", "task-2"],
+        )
+
+        self.assertTrue(summary["task_ids_preserved"])
+        self.assertTrue(summary["task_id_set_preserved"])
+        self.assertTrue(summary["task_count_preserved"])
+        self.assertEqual(summary["missing_task_ids"], [])
+        self.assertEqual(summary["unexpected_task_ids"], [])
+
+    def test_task_id_preservation_summary_reports_reorder_and_membership_changes(self):
+        reordered = smoke_llm_provider.task_id_preservation_summary(
+            expected=["task-1", "task-2"],
+            actual=["task-2", "task-1"],
+        )
+        changed = smoke_llm_provider.task_id_preservation_summary(
+            expected=["task-1", "task-2"],
+            actual=["task-2", "task-3"],
+        )
+
+        self.assertFalse(reordered["task_ids_preserved"])
+        self.assertTrue(reordered["task_id_set_preserved"])
+        self.assertTrue(reordered["task_count_preserved"])
+        self.assertFalse(changed["task_ids_preserved"])
+        self.assertFalse(changed["task_id_set_preserved"])
+        self.assertEqual(changed["missing_task_ids"], ["task-1"])
+        self.assertEqual(changed["unexpected_task_ids"], ["task-3"])
+
 
 if __name__ == "__main__":
     unittest.main()
