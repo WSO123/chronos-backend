@@ -292,7 +292,7 @@ uv run python scripts/verify_local.py --smoke llm-fallback
 
 ### 后续建议
 
-- 下一轮可补充真实 provider acceptance 示例草稿的 dry-run 文档，展示四份 JSON 如何串成一份最终验收记录。
+- 已在后续 [P2 LLM Acceptance Dry Run](./2026-05-17-p2-llm-acceptance-dry-run.md) 中补充真实 provider acceptance dry-run 文档和生成脚本，展示四份 JSON 如何串成一份最终验收记录。
 
 ---
 

@@ -96,7 +96,7 @@ def generate_acceptance_markdown(
             "",
             "### 本次改动",
             "",
-            "- 自动汇总真实 provider smoke / planner eval compare / golden policy check。",
+            "- 自动汇总 provider smoke / fallback smoke / planner eval compare / golden policy check。",
             "- 默认隐藏 provider response id，避免验收记录泄露可追踪原始标识。",
             "- 本草稿仍需人工 review 后再标记为最终 Accepted / Rejected。",
             "",
@@ -322,7 +322,7 @@ def _infer_conclusion(
         return "Rejected", "Planner golden policy check reported a regression."
     if compare_status == "changed" or policy_status == "changed":
         return "Accepted with Notes", "Smoke passed and no regression was found, but compare / policy changes need review notes."
-    return "Accepted", "Smoke, planner compare and golden policy check all passed without regression."
+    return "Accepted", "Smoke, fallback, planner compare and golden policy check all passed without regression."
 
 
 def _decision_checkboxes(conclusion: str) -> str:

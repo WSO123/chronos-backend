@@ -134,6 +134,7 @@ uv run python scripts/evaluate_planning_engine.py --jsonl-output /tmp/chronos-pl
 uv run python scripts/compare_planner_eval_jsonl.py /tmp/chronos-planner-eval-baseline.jsonl /tmp/chronos-planner-eval-candidate.jsonl
 uv run python scripts/check_planner_eval_policy.py /tmp/chronos-planner-eval.jsonl
 uv run python scripts/smoke_daily_planner_fallback.py
+uv run python scripts/generate_llm_acceptance_dry_run.py --date 2026-05-17
 uv run python scripts/generate_llm_acceptance_record.py --smoke-json /tmp/chronos-llm-smoke.json --fallback-json /tmp/chronos-llm-fallback.json --compare-json /tmp/chronos-planner-compare.json --policy-json /tmp/chronos-planner-policy.json --output docs/llm-provider-acceptance/YYYY-MM-DD-provider-model-purpose.md
 ```
 
@@ -219,6 +220,7 @@ git diff --check
 `scripts/compare_planner_eval_jsonl.py` 用于比较两份 Planning Engine eval JSONL，输出 scenario 通过状态、排序、容量和 `item_signals` 差异；默认只报告结果，`--fail-on-regression` 可作为显式手动 gate。
 `scripts/check_planner_eval_policy.py` 用于把一次 Planning Engine eval JSONL 与 [planner eval golden baseline](./docs/planner-eval-baselines/README.md) 对齐，识别缺失场景、失败场景、字段丢失和 baseline 变更。
 `scripts/smoke_daily_planner_fallback.py` 用于验证 Daily Planner provider 失败时 Today / Strategy 仍能走 Planning Engine fallback，不调用真实 provider。
+`scripts/generate_llm_acceptance_dry_run.py` 用于生成 synthetic provider smoke / fallback / compare / policy JSON，并产出一份 dry-run 验收草稿，帮助接真实 provider 前先跑通验收流程。
 `scripts/generate_llm_acceptance_record.py` 用于把真实 provider smoke、fallback smoke、planner eval compare 和 golden policy check 的 JSON 输出汇总成 Markdown 验收草稿，默认脱敏 provider response id。
 `scripts/verify_local.py` 用于编排本地验证阶梯，例如 `uv run python scripts/verify_local.py --all-smoke --planner-eval`。
 

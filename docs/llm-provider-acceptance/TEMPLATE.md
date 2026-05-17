@@ -88,6 +88,14 @@
 
 ## 4. 执行命令
 
+### Dry-run 预演
+
+```bash
+uv run python scripts/generate_llm_acceptance_dry_run.py --date YYYY-MM-DD
+```
+
+该命令只生成 synthetic JSON 和 dry-run Markdown，不调用真实 provider，不代表本次 provider 已被接受。
+
 ### 生成验收草稿
 
 ```bash

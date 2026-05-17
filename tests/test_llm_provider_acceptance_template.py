@@ -20,6 +20,7 @@ class LLMProviderAcceptanceTemplateTests(unittest.TestCase):
             "scripts/compare_planner_eval_jsonl.py",
             "scripts/check_planner_eval_policy.py",
             "scripts/generate_llm_acceptance_record.py",
+            "scripts/generate_llm_acceptance_dry_run.py",
             "--fallback-json",
             "Input tokens",
             "Output tokens",
@@ -49,6 +50,18 @@ class LLMProviderAcceptanceTemplateTests(unittest.TestCase):
         self.assertIn("LLM_API_KEY", readme)
         self.assertIn("<redacted>", readme)
         self.assertIn("真实 provider 验收只能使用 synthetic / demo 输入", readme)
+        self.assertIn("DRY_RUN.md", readme)
+        self.assertIn("generate_llm_acceptance_dry_run.py", readme)
+
+    def test_dry_run_document_explains_four_json_flow(self):
+        dry_run = Path("docs/llm-provider-acceptance/DRY_RUN.md").read_text(encoding="utf-8")
+
+        self.assertIn("provider smoke JSON", dry_run)
+        self.assertIn("fallback smoke JSON", dry_run)
+        self.assertIn("planner compare JSON", dry_run)
+        self.assertIn("golden policy JSON", dry_run)
+        self.assertIn("generate_llm_acceptance_dry_run.py", dry_run)
+        self.assertIn("dry-run 不证明真实 provider 可用", dry_run)
 
 
 if __name__ == "__main__":

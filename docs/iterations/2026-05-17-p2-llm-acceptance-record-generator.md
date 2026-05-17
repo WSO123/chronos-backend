@@ -155,6 +155,7 @@ smoke JSON + compare JSON + policy JSON
 ```bash
 uv run python scripts/generate_llm_acceptance_record.py \
   --smoke-json /tmp/chronos-llm-smoke.json \
+  --fallback-json /tmp/chronos-llm-fallback.json \
   --compare-json /tmp/chronos-planner-compare.json \
   --policy-json /tmp/chronos-planner-policy.json \
   --provider openai \
@@ -165,9 +166,9 @@ uv run python scripts/generate_llm_acceptance_record.py \
 
 ### 状态推断
 
-- `Blocked`：smoke 是 `skipped`，不足以验收真实 provider。
-- `Rejected`：smoke 非 `ok`，或 compare / policy 出现 regression。
-- `Accepted with Notes`：smoke ok 且无 regression，但 compare / policy 为 changed。
+- `Blocked`：smoke 是 `skipped`，或缺少 fallback JSON，不足以验收真实 provider。
+- `Rejected`：smoke 非 `ok`，fallback smoke 失败，或 compare / policy 出现 regression。
+- `Accepted with Notes`：smoke / fallback ok 且无 regression，但 compare / policy 为 changed。
 - `Accepted`：smoke ok、compare ok、policy ok。
 
 ---

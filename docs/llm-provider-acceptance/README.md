@@ -6,8 +6,9 @@
 
 ## 使用方式
 
-1. 优先使用 `scripts/generate_llm_acceptance_record.py` 从 provider smoke / fallback smoke / compare / policy JSON 输出生成草稿；必要时从 [TEMPLATE.md](./TEMPLATE.md) 手动复制一份记录。
-2. 文件命名建议：
+1. 第一次接真实 provider 前，先按 [DRY_RUN.md](./DRY_RUN.md) 跑通 synthetic dry-run。
+2. 优先使用 `scripts/generate_llm_acceptance_record.py` 从 provider smoke / fallback smoke / compare / policy JSON 输出生成草稿；必要时从 [TEMPLATE.md](./TEMPLATE.md) 手动复制一份记录。
+3. 文件命名建议：
 
 ```text
 YYYY-MM-DD-<provider>-<model>-<purpose>.md
@@ -78,6 +79,8 @@ uv run python scripts/check_planner_eval_policy.py /tmp/chronos-planner-candidat
 生成验收草稿：
 
 ```bash
+uv run python scripts/generate_llm_acceptance_dry_run.py --date 2026-05-17
+
 uv run python scripts/generate_llm_acceptance_record.py \
   --smoke-json /tmp/chronos-llm-smoke.json \
   --fallback-json /tmp/chronos-llm-fallback.json \

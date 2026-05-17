@@ -599,11 +599,18 @@ uv run python scripts/verify_local.py --planner-eval-policy
 
 Planner eval policy 只作为手动 / 发布前 gate：`regressed` 必须修复或显式更新 evaluator 预期，`changed` 必须记录原因和结论，默认不纳入基础 CI。
 
-需要把真实 provider smoke、planner compare 和 policy check 汇总为验收记录草稿时，使用：
+第一次接真实 provider 前，先跑 synthetic dry-run，确认四份 JSON 到验收草稿的流程没有断：
+
+```bash
+uv run python scripts/generate_llm_acceptance_dry_run.py --date 2026-05-17
+```
+
+需要把真实 provider smoke、fallback smoke、planner compare 和 policy check 汇总为验收记录草稿时，使用：
 
 ```bash
 uv run python scripts/generate_llm_acceptance_record.py \
   --smoke-json /tmp/chronos-llm-smoke.json \
+  --fallback-json /tmp/chronos-llm-fallback.json \
   --compare-json /tmp/chronos-planner-compare.json \
   --policy-json /tmp/chronos-planner-policy.json \
   --output docs/llm-provider-acceptance/YYYY-MM-DD-provider-model-purpose.md
