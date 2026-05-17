@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from app.ai.providers.base import LLMProvider
 from app.ai.providers.registry import llm_provider_registry
+from app.ai.prompts.registry import PromptRegistry, prompt_registry
 from app.ai.schemas.planning import DailyPlannerOutput
 
 
@@ -13,10 +14,22 @@ class DailyPlannerAgentResult:
     provider: str
     model: str
     prompt_version: str
+    prompt_checksum: str
 
 
 class DailyPlannerAgent:
-    prompt_version = "p2-daily-planner-agent-v1"
+    prompt_key = "daily_planner"
+
+    def __init__(self, *, prompts: PromptRegistry | None = None) -> None:
+        self.prompts = prompts or prompt_registry
+
+    @property
+    def prompt_version(self) -> str:
+        return self.prompts.get(self.prompt_key).version
+
+    @property
+    def prompt_checksum(self) -> str:
+        return self.prompts.get(self.prompt_key).checksum
 
     def run(
         self,
@@ -27,14 +40,20 @@ class DailyPlannerAgent:
         provider: LLMProvider | None = None,
     ) -> DailyPlannerAgentResult:
         resolved_provider = provider or llm_provider_registry.current_provider()
+        prompt_template = self.prompts.get(self.prompt_key)
         output = resolved_provider.generate_structured(
-            prompt=self._prompt(),
+            prompt=prompt_template.content,
             schema=DailyPlannerOutput,
             temperature=0.2,
             metadata={
                 "plan_context": plan_context,
                 "candidates": candidates,
                 "strategy_seed": strategy_seed,
+                "prompt": {
+                    "key": prompt_template.key,
+                    "version": prompt_template.version,
+                    "checksum": prompt_template.checksum,
+                },
                 "mock_output": self._mock_output(candidates=candidates, strategy_seed=strategy_seed),
             },
         )
@@ -42,7 +61,8 @@ class DailyPlannerAgent:
             output=output,
             provider=resolved_provider.provider_name,
             model=resolved_provider.model_name,
-            prompt_version=self.prompt_version,
+            prompt_version=prompt_template.version,
+            prompt_checksum=prompt_template.checksum,
         )
 
     def _mock_output(self, *, candidates: list[dict], strategy_seed: dict) -> dict:
@@ -61,12 +81,6 @@ class DailyPlannerAgent:
             ],
             "confidence": 0.72,
         }
-
-    def _prompt(self) -> str:
-        return (
-            "You are Chronos Daily Planner. Return structured planning suggestions only. "
-            "Do not create tasks, delete data, bypass user confirmation, or ignore capacity and dependency constraints."
-        )
 
 
 daily_planner_agent = DailyPlannerAgent()

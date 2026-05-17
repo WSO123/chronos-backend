@@ -133,6 +133,8 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(planner_job.provider, "mock")
         self.assertEqual(planner_job.result_entity_id, strategy["daily_plan_id"])
         self.assertEqual(planner_job.job_metadata["output_applied"], True)
+        self.assertEqual(planner_job.prompt_version, "p2-daily-planner-agent-v1")
+        self.assertEqual(len(planner_job.job_metadata["prompt_checksum"]), 64)
 
     def test_daily_planner_agent_failure_falls_back_to_planning_engine(self):
         class FailingPlannerAgent:

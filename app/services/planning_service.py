@@ -377,6 +377,7 @@ class PlanningService:
                 "plan_revision_id": str(revision.id),
                 "candidate_count": len(planned_tasks),
                 "planner_core": "planning-engine-v1",
+                "prompt_checksum": getattr(self.planner_agent, "prompt_checksum", None),
             },
             commit=False,
         )
@@ -412,6 +413,7 @@ class PlanningService:
                 "output_applied": True,
                 "confidence": agent_result.output.confidence,
                 "item_count": len(agent_result.output.items),
+                "prompt_checksum": agent_result.prompt_checksum,
             }
         except Exception as exc:  # noqa: BLE001 - fallback is the product boundary here.
             fallback_reason = (
@@ -436,6 +438,7 @@ class PlanningService:
             "planner_agent_provider": job.provider,
             "planner_agent_model": job.model,
             "planner_agent_prompt_version": job.prompt_version,
+            "planner_agent_prompt_checksum": job.job_metadata.get("prompt_checksum"),
             "planner_agent_output_applied": job.job_metadata.get("output_applied", False),
         }
         return {"planned_tasks": planned_tasks, "strategy_payload": strategy_payload, "ai_job": job}

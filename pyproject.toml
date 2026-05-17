@@ -26,3 +26,6 @@ dependencies = [
     "tiktoken>=0.12.0",
     "uvicorn[standard]>=0.40.0",
 ]
+
+[tool.setuptools.package-data]
+"app.ai.prompts" = ["**/*.md"]

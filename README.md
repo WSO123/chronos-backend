@@ -140,7 +140,7 @@ uv run celery -A app.core.celery.celery_app worker --loglevel=info
 chronos-backend/
 ├── app/
 │   ├── api/                # 接口层：处理 HTTP 请求，不做复杂逻辑
-│   ├── ai/                 # AI Agent / provider / structured output schema
+│   ├── ai/                 # AI Agent / prompt registry / provider / structured output schema
 │   ├── core/               # 核心层：全局配置、数据库连接、Celery 配置
 │   ├── models/             # 数据模型 (SQLAlchemy)
 │   ├── schemas/            # API 输入输出结构
@@ -214,9 +214,10 @@ uv add pandas
 ### 创建新的 AI Agent
 
 1.  在 `app/ai/schemas/` 定义 structured output schema。
-2.  在 `app/ai/agents/` 定义普通 Agent function；只有多步骤、有状态、需要循环反思时再升级为 LangGraph。
-3.  在 service 层调用 Agent 并校验输出，禁止 Agent 直接写业务表。
-4.  需要异步执行时，再在 `app/workers/tasks.py` 注册 Celery Task，并通过 API 触发。
+2.  在 `app/ai/prompts/` 增加版本化 prompt，并注册到 prompt registry。
+3.  在 `app/ai/agents/` 定义普通 Agent function；只有多步骤、有状态、需要循环反思时再升级为 LangGraph。
+4.  在 service 层调用 Agent 并校验输出，禁止 Agent 直接写业务表。
+5.  需要异步执行时，再在 `app/workers/tasks.py` 注册 Celery Task，并通过 API 触发。
 
 ##  注意事项
 

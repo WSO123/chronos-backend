@@ -311,6 +311,7 @@ class CaptureParseOutput(BaseModel):
 - 已接入 Daily Planner Agent shell：`PlanningService` 先生成 deterministic candidates，再调用 Agent 返回 structured output。
 - 默认 provider 是 `mock`，模型标识为 `structured-mock-v1`；`AI_ENABLE_REAL_LLM=false` 时不会调用外部模型。
 - 每次 plan revision 都记录一条 `AIJob(job_type=daily_planner)`，Strategy Detail `source.ai_job_id` 可追踪调用结果。
+- Daily Planner prompt 已迁移到 `app/ai/prompts/daily_planner/p2-daily-planner-agent-v1.md`，通过 prompt registry 加载，并在 `AIJob.job_metadata.prompt_checksum` 里记录 checksum。
 - v1 只允许 Agent 更新策略摘要和推荐理由；业务层校验禁止 Agent 改变任务集合、排序和 section。
 - Agent 失败或输出不合法时，`AIJob.status=succeeded_with_fallback`，继续使用 Planning Engine v1 输出。
 - 每个 `DailyPlanItem` 会保存 `score_breakdown`，Strategy Detail 可以解释排序，Today 首屏不展开完整评分。
@@ -591,10 +592,15 @@ Prompt 应该版本化，避免散落在代码里。
 
 ```text
 app/ai/prompts/
-  capture_parser.md
-  daily_planner.md
-  task_breakdown.md
-  daily_report.md
+  registry.py
+  capture_parser/
+    p1-capture-parser-v1.md
+  daily_planner/
+    p2-daily-planner-agent-v1.md
+  task_breakdown/
+    p1-task-breakdown-v1.md
+  daily_report/
+    p1-daily-report-v1.md
 ```
 
 每个 Prompt 应包含：
@@ -604,6 +610,13 @@ app/ai/prompts/
 - 输出 schema 说明
 - 产品语气要求
 - 禁止事项
+
+Prompt registry 要求：
+
+- Agent 通过 prompt key 获取 prompt，不直接读取硬编码字符串。
+- Prompt version 必须进入 `AIJob.prompt_version`。
+- Prompt checksum 必须进入 `AIJob.job_metadata`，用于回溯某次 AI 输出对应的具体 prompt 内容。
+- 修改 prompt 内容时应新增或显式更新版本号，并同步迭代文档和评估结果。
 
 Prompt 输出语气必须符合：
 

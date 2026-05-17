@@ -1519,6 +1519,7 @@ StrategyDetailResponse {
 
 - 当前使用 Planning Engine v1 生成 deterministic candidates，读取价值、优先级、deadline、估时、依赖、用户修正、行为反馈、容量和 Energy 信号。
 - Daily Planner Agent shell 只返回 structured output；默认 provider 为 mock，不调用真实 LLM。
+- Daily Planner prompt 由 prompt registry 加载，当前版本为 `p2-daily-planner-agent-v1`，checksum 记录到 `AIJob.job_metadata`。
 - `PlanningService` 必须校验 Agent 输出。v1 不允许 Agent 改变任务集合、`sort_order` 或 `section`。
 - Agent 失败或输出不合法时，使用 Planning Engine v1 fallback，`AIJob.status=succeeded_with_fallback`。
 - 后续再增加真实 provider、长期行为学习和更复杂的多轮 replanning。
@@ -1584,13 +1585,16 @@ app/
   ai/
     agents/
       daily_planner.py
+    prompts/
+      registry.py
+      daily_planner/
+        p2-daily-planner-agent-v1.md
     providers/
       base.py
       mock.py
       registry.py
     schemas/
       planning.py
-    prompts/
 
   models/
     user.py

@@ -48,12 +48,15 @@ app/
   ai/
     agents/
       daily_planner.py
+    prompts/
+      registry.py
+      daily_planner/
+        p2-daily-planner-agent-v1.md
     providers/
       base.py
       mock.py
       registry.py
     schemas/
-    prompts/
 
   core/
     config.py
@@ -459,7 +462,15 @@ Prompt 放在：
 app/ai/prompts/
 ```
 
-不要散落在 service 或 worker 中。
+不要散落在 service、worker 或 agent 代码字符串中。
+
+要求：
+
+- Agent 通过 prompt registry 按 key 获取 prompt。
+- Prompt 文件必须包含目标、输入说明、输出 schema、产品语气和禁止事项。
+- Prompt version 必须进入 `AIJob.prompt_version`。
+- Prompt checksum 必须进入 `AIJob.job_metadata`。
+- 修改 prompt 时必须同步迭代文档和相关测试。
 
 ---
 
