@@ -237,6 +237,60 @@ class PlanningService:
             "impacted_task_ids": [task_id for task_id in sorted(impacted_task_ids, key=str)],
         }
 
+    def refresh_current_today_for_priority_adjustment(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        task_id: uuid.UUID,
+    ) -> dict:
+        plan_date = self._resolve_plan_date(db, user_id=user_id, plan_date=None)
+        plan = self._get_active_plan(db, user_id=user_id, plan_date=plan_date)
+        if plan is None:
+            return self._no_active_today_impact(plan_date=plan_date)
+
+        current_item = self._current_item_for_task(db, plan=plan, task_id=task_id)
+        if current_item is None:
+            return self._today_impact_response(
+                plan=plan,
+                item=None,
+                plan_date=plan_date,
+                replanned=False,
+                reason="not_in_today_plan",
+            )
+
+        previous_version = plan.current_version
+        self._create_revision(
+            db,
+            plan=plan,
+            trigger=PlanRevisionTrigger.MANUAL_ADJUST,
+            reason="Task priority adjusted",
+        )
+        activity_event_service.add_event(
+            db,
+            user_id=user_id,
+            entity_type=EntityType.DAILY_PLAN,
+            entity_id=plan.id,
+            event_type="DAILY_PLAN_MANUAL_ADJUSTED",
+            actor_type=ActorType.USER,
+            related_task_id=task_id,
+            related_daily_plan_id=plan.id,
+            payload={
+                "source": "task_priority_adjustment",
+                "task_id": str(task_id),
+                "previous_version": previous_version,
+                "version": plan.current_version,
+            },
+        )
+        current_item = self._current_item_for_task(db, plan=plan, task_id=task_id)
+        return self._today_impact_response(
+            plan=plan,
+            item=current_item,
+            plan_date=plan_date,
+            replanned=True,
+            reason="manual_priority_adjustment",
+        )
+
     def include_confirmed_task_from_inbox(
         self,
         db: Session,

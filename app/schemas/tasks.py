@@ -89,6 +89,19 @@ class TaskResponse(TimestampedResponse):
     steps: list[TaskStepResponse] = Field(default_factory=list)
 
 
+class TaskTodayImpactResponse(BaseModel):
+    plan_date: date
+    plan_exists: bool
+    replanned: bool
+    daily_plan_id: uuid.UUID | None = None
+    plan_version: int | None = None
+    daily_plan_item_id: uuid.UUID | None = None
+    task_in_today: bool
+    section: DailyPlanItemSection | None = None
+    item_status: DailyPlanItemStatus | None = None
+    reason: str
+
+
 class TaskPriorityAdjustmentResponse(BaseModel):
     task: TaskResponse
     previous_priority: int
@@ -97,6 +110,7 @@ class TaskPriorityAdjustmentResponse(BaseModel):
     current_value_level: ValueLevel
     changed_fields: list[str] = Field(default_factory=list)
     reason: str | None
+    today_impact: TaskTodayImpactResponse | None = None
 
 
 class TaskDetailGoalResponse(BaseModel):

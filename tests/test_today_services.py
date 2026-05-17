@@ -751,6 +751,45 @@ class TodayServiceTests(unittest.TestCase):
         self.assertIn("Adjusted by you", today["sections"]["pinned_tasks"][0]["recommendation_reason"])
         self.assertEqual(strategy["factors"]["user_adjusted_count"], 1)
 
+    def test_priority_adjustment_after_today_exists_refreshes_current_plan(self):
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Promote after plan exists",
+            estimated_duration_min=35,
+            priority=5,
+            value_level=ValueLevel.LOW,
+        )
+        initial_today = planning_service.get_today(self.db, user_id=self.user.id)
+
+        result = task_service.adjust_task_priority(
+            self.db,
+            task_id=task.id,
+            user_id=self.user.id,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+            reason="This became the most important work",
+        )
+        refreshed_today = planning_service.get_today(self.db, user_id=self.user.id)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id)
+        refresh_events = (
+            self.db.query(ActivityEvent)
+            .filter(
+                ActivityEvent.user_id == self.user.id,
+                ActivityEvent.event_type == "DAILY_PLAN_MANUAL_ADJUSTED",
+            )
+            .all()
+        )
+
+        self.assertEqual(result["today_impact"]["replanned"], True)
+        self.assertEqual(result["today_impact"]["reason"], "manual_priority_adjustment")
+        self.assertEqual(refreshed_today["plan_version"], initial_today["plan_version"] + 1)
+        self.assertEqual(refreshed_today["sections"]["pinned_tasks"][0]["task_id"], task.id)
+        self.assertIn("Adjusted by you", refreshed_today["sections"]["pinned_tasks"][0]["recommendation_reason"])
+        self.assertEqual(strategy["factors"]["user_adjusted_count"], 1)
+        self.assertEqual(len(refresh_events), 1)
+        self.assertEqual(refresh_events[0].payload["source"], "task_priority_adjustment")
+
     def test_replan_creates_new_revision_and_keeps_same_plan(self):
         task_service.create_task(self.db, user_id=self.user.id, title="First task")
         today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)

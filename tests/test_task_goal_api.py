@@ -102,6 +102,8 @@ class TaskGoalAPITests(unittest.TestCase):
         self.assertEqual(body["changed_fields"], ["priority", "value_level"])
         self.assertEqual(body["task"]["priority"], 1)
         self.assertEqual(body["task"]["value_level"], "high")
+        self.assertEqual(body["today_impact"]["plan_exists"], False)
+        self.assertEqual(body["today_impact"]["reason"], "no_active_today_plan")
         self.assertIn("TASK_PRIORITY_ADJUSTED", {event["event_type"] for event in events_response.json()})
 
     def test_adjust_task_priority_requires_priority_or_value_level(self):

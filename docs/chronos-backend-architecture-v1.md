@@ -374,6 +374,7 @@ Today 不是任务列表，而是每日执行入口。
 - P2 起 Today planner 升级为 Planning Engine v1：读取任务价值、优先级、deadline、估时、依赖、用户优先级修正、行为反馈、当日容量和 Energy 信号。
 - Planning Engine v1 会为每个 DailyPlanItem 保存 `score_breakdown`，但 Today 首屏只显示分区、顺序和简短推荐理由；完整评分只进入 Strategy Detail。
 - 新增 / 删除任务依赖时，如果相关任务已经位于当前 active Today plan 中，系统生成 `system_refresh` revision，让 Today 排序和 Strategy Detail 解释立即对齐最新依赖。
+- 用户手动调整任务 `priority` / `value_level` 时，如果该任务已经位于当前 active Today plan 中，系统生成 `manual_adjust` revision，让用户修正即时进入 Today 排序和 Strategy Detail 解释。
 - 超出当日容量的非保护任务进入 `rolled_over`，保留可见但不挤占主执行序列。
 - 系统容量滚动只改变 `DailyPlanItem.section=rolled_over`，不把 Task 本体改成 postponed；用户手动延后仍通过 Task / item status 表达。
 - 当受保护任务总时长超过容量时，Strategy Detail 返回 `capacity_status=overloaded` 和 `over_capacity_minutes`；Today 只给一条轻量风险提示，不展示容量驾驶舱。

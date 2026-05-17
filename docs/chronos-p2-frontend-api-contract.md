@@ -249,7 +249,8 @@ P2 新增字段：
 - `priority` 和 `value_level` 至少传一个。
 - `priority` 范围为 `1-5`，数字越小越优先。
 - 写入 `TASK_PRIORITY_ADJUSTED`。
-- 不自动触发 Today replan；下一次打开 Today 已有计划时不会静默改版，用户主动 replan 或新计划生成时会读取该信号。
+- 如果该任务已经位于当前 active Today plan，后端会触发 `manual_adjust` 生成新的 Today version，并在响应中返回 `today_impact`。
+- 如果当前没有 active Today plan，或该任务不在当前 Today，响应仍会说明 `today_impact`，后续生成 / 刷新 Today 时再读取该信号。
 
 ### Task Dependencies
 

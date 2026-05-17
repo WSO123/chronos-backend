@@ -239,8 +239,12 @@ class TaskService:
                     "reason": reason,
                 },
             )
+            db.flush()
+            today_impact = self._refresh_today_after_priority_adjustment(db, user_id=user_id, task_id=task.id)
             db.commit()
             db.refresh(task)
+        else:
+            today_impact = None
 
         return {
             "task": self.get_task(db, task_id=task.id, user_id=user_id),
@@ -250,6 +254,7 @@ class TaskService:
             "current_value_level": task.value_level,
             "changed_fields": changed_fields,
             "reason": reason,
+            "today_impact": today_impact,
         }
 
     def complete_task(
@@ -710,6 +715,21 @@ class TaskService:
             db,
             user_id=user_id,
             task_ids=task_ids,
+        )
+
+    def _refresh_today_after_priority_adjustment(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        task_id: uuid.UUID,
+    ) -> dict:
+        from app.services.planning_service import planning_service
+
+        return planning_service.refresh_current_today_for_priority_adjustment(
+            db,
+            user_id=user_id,
+            task_id=task_id,
         )
 
     def _get_user_task(self, db: Session, *, task_id: uuid.UUID, user_id: uuid.UUID) -> Task:
