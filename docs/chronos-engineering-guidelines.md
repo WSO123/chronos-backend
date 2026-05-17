@@ -539,6 +539,18 @@ uv run python scripts/smoke_p1_execution_loop.py
 uv run python scripts/smoke_p2_goal_insight_loop.py
 ```
 
+涉及 Planning Engine 排序、容量、Energy 适配、Strategy factors 或评分权重时，额外执行：
+
+```bash
+uv run python scripts/evaluate_planning_engine.py
+```
+
+或通过统一验证入口追加：
+
+```bash
+uv run python scripts/verify_local.py --planner-eval
+```
+
 涉及 P3 数据接入、精力、外部输入、提醒、Me 入口状态、调度 worker 或 notification 时，额外执行：
 
 ```bash

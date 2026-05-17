@@ -375,6 +375,7 @@ Today 不是任务列表，而是每日执行入口。
 - Planning Engine v1 会为每个 DailyPlanItem 保存 `score_breakdown`，但 Today 首屏只显示分区、顺序和简短推荐理由；完整评分只进入 Strategy Detail。
 - 超出当日容量的非保护任务进入 `rolled_over`，保留可见但不挤占主执行序列。
 - 系统容量滚动只改变 `DailyPlanItem.section=rolled_over`，不把 Task 本体改成 postponed；用户手动延后仍通过 Task / item status 表达。
+- 当受保护任务总时长超过容量时，Strategy Detail 返回 `capacity_status=overloaded` 和 `over_capacity_minutes`；Today 只给一条轻量风险提示，不展示容量驾驶舱。
 
 核心对象：
 

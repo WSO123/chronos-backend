@@ -46,6 +46,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run P1, P2, and P3 smoke scripts after the base checks.",
     )
+    parser.add_argument(
+        "--planner-eval",
+        action="store_true",
+        help="Run deterministic Planning Engine evaluation scenarios.",
+    )
     return parser.parse_args()
 
 
@@ -68,6 +73,13 @@ def _build_steps(args: argparse.Namespace) -> list[VerificationStep]:
     selected_smoke = ["p1", "p2", "p3"] if args.all_smoke else args.smoke
     for smoke in _unique_preserving_order(selected_smoke):
         steps.append(_smoke_step(smoke))
+    if args.planner_eval:
+        steps.append(
+            VerificationStep(
+                "Planning Engine evaluation",
+                [sys.executable, "scripts/evaluate_planning_engine.py"],
+            )
+        )
     return steps
 
 

@@ -305,6 +305,7 @@ class CaptureParseOutput(BaseModel):
 - Planning Engine v1 已读取任务价值、优先级、deadline、估时、依赖、用户修正、行为反馈、当日容量和 Energy 信号。
 - 每个 `DailyPlanItem` 会保存 `score_breakdown`，Strategy Detail 可以解释排序，Today 首屏不展开完整评分。
 - 超出容量的非保护任务进入 `section=rolled_over`；系统容量滚动不把 Task 本体改为 postponed。
+- 已提供 `scripts/evaluate_planning_engine.py` 固定场景评估，覆盖容量滚动、受保护任务超载、低精力保护和高精力深度任务适配；后续 LLM Daily Planner 必须通过这些基线或显式更新评估预期。
 
 输入：
 
@@ -359,6 +360,7 @@ P1 不建议完全依赖 LLM 排序。
 - Planning Engine v1 负责确定性基础顺序、容量筛选、`score_breakdown` 和 fallback。
 - LLM 后续只增强策略摘要、推荐理由、异常场景判断和可解释性，不直接写业务表。
 - Service 负责校验 LLM 输出是否违反依赖、容量和用户修正边界。
+- Planner 相关改动应优先更新固定评估场景，避免“接口通过但排序退化”。
 
 Planning Engine v1 已使用的信号：
 

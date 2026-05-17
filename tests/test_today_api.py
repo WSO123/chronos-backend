@@ -67,6 +67,8 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(body["factors"]["task_count"], 1)
         self.assertEqual(body["factors"]["dependency_protected_count"], 0)
         self.assertEqual(body["factors"]["user_adjusted_count"], 0)
+        self.assertEqual(body["factors"]["capacity_status"], "within_capacity")
+        self.assertEqual(body["factors"]["over_capacity_minutes"], 0)
         self.assertEqual(body["task_rationales"][0]["title"], "Private strategy task")
         self.assertNotIn("Other strategy task", {item["title"] for item in body["task_rationales"]})
         self.assertTrue(body["explanation"])

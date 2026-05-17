@@ -89,6 +89,8 @@ P2 新增字段：
   "daily_capacity_minutes": 150,
   "selected_estimated_minutes": 95,
   "rolled_over_estimated_minutes": 0,
+  "over_capacity_minutes": 0,
+  "capacity_status": "within_capacity",
   "dependency_protected_count": 1,
   "user_adjusted_count": 1,
   "energy_level": "unknown",
@@ -105,6 +107,8 @@ P2 新增字段：
 - `daily_capacity_minutes` 是 Planning Engine 的当日容量参考，不是严格日历时间块。
 - `selected_estimated_minutes` 是今天主执行序列的估时总量。
 - `rolled_over_estimated_minutes` 是被滚动到未来、保留可见但不计入主执行序列的估时。
+- `over_capacity_minutes` 表示主执行序列超出当日容量参考的分钟数；只有受保护任务总量过重时才会大于 0。
+- `capacity_status` 当前为 `within_capacity` 或 `overloaded`，只用于 Strategy Detail 解释。
 - `energy_applied=true` 表示同日 Energy 数据已经作为排序和容量保护因子进入 Planning Engine；高精力不会自动增加工作量。
 - 这些字段用于 Strategy Detail 的信任解释，不建议放到 Today 首屏。
 
@@ -136,6 +140,7 @@ P2 新增字段：
 - `score_breakdown` 是解释数据，不要在 Today 首屏展示成复杂驾驶舱。
 - Strategy Detail 可以按需展示 2-3 个最关键因子。
 - `selected_for_today=false` 且 `rollover_reason=capacity` 表示任务被系统滚动到未来，不代表任务被用户手动延后；此时 `item_status` 仍可为 `planned`，前端应以 `section=rolled_over` 判断展示位置。
+- 若 `capacity_status=overloaded`，Today 可在 Insights Preview 展示一条轻量风险提示，但不要展示完整容量面板。
 
 ## 4. Task Detail
 

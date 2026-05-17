@@ -113,6 +113,8 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["factors"]["total_estimated_minutes"], 65)
         self.assertEqual(strategy["factors"]["daily_capacity_minutes"], 150)
         self.assertEqual(strategy["factors"]["selected_estimated_minutes"], 65)
+        self.assertEqual(strategy["factors"]["over_capacity_minutes"], 0)
+        self.assertEqual(strategy["factors"]["capacity_status"], "within_capacity")
         self.assertEqual(strategy["factors"]["energy_applied"], False)
         self.assertEqual(len(strategy["task_rationales"]), 2)
         self.assertEqual(strategy["task_rationales"][0]["title"], "Protect strategy task")
@@ -156,6 +158,31 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["factors"]["daily_capacity_minutes"], 150)
         self.assertEqual(strategy["factors"]["selected_estimated_minutes"], 150)
         self.assertEqual(strategy["factors"]["rolled_over_estimated_minutes"], 120)
+        self.assertEqual(strategy["factors"]["over_capacity_minutes"], 0)
+        self.assertEqual(strategy["factors"]["capacity_status"], "within_capacity")
+
+    def test_planning_engine_warns_when_protected_work_exceeds_capacity(self):
+        for index in range(3):
+            task_service.create_task(
+                self.db,
+                user_id=self.user.id,
+                title=f"Protected overload task {index}",
+                estimated_duration_min=70,
+                priority=1,
+                value_level=ValueLevel.HIGH,
+            )
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        self.assertEqual(today["progress"]["total_count"], 3)
+        self.assertFalse(today["sections"]["rolled_over_tasks"])
+        self.assertEqual(today["insights_preview"]["risk_alerts"][0]["key"], "main_sequence_over_capacity")
+        self.assertEqual(strategy["factors"]["daily_capacity_minutes"], 150)
+        self.assertEqual(strategy["factors"]["selected_estimated_minutes"], 210)
+        self.assertEqual(strategy["factors"]["over_capacity_minutes"], 60)
+        self.assertEqual(strategy["factors"]["capacity_status"], "overloaded")
+        self.assertIn("超过容量", strategy["explanation"][1])
 
     def test_planning_engine_keeps_user_postponed_tasks_out_of_main_sequence(self):
         task = task_service.create_task(

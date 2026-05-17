@@ -87,10 +87,17 @@ uv run python scripts/smoke_p2_goal_insight_loop.py
 uv run python scripts/smoke_p3_natural_growth_loop.py
 ```
 
+跑一遍 Planning Engine 固定场景评估：
+
+```bash
+uv run python scripts/evaluate_planning_engine.py
+```
+
 也可以用统一验证入口跑基础检查和指定 smoke：
 
 ```bash
 uv run python scripts/verify_local.py --smoke p3
+uv run python scripts/verify_local.py --planner-eval
 ```
 
 这些 smoke 会通过 API 跑通：
@@ -151,6 +158,7 @@ uv run python scripts/dev_seed_demo.py
 uv run python scripts/smoke_p1_execution_loop.py
 uv run python scripts/smoke_p2_goal_insight_loop.py
 uv run python scripts/smoke_p3_natural_growth_loop.py
+uv run python scripts/evaluate_planning_engine.py
 uv run python -m unittest discover -s tests
 uv run python -m compileall app tests scripts
 git diff --check
@@ -160,7 +168,8 @@ git diff --check
 `scripts/smoke_p1_execution_loop.py` 用于开发后快速防回归，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_p2_goal_insight_loop.py` 用于验证 P2 Goals / Reports / Insights 合同，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_p3_natural_growth_loop.py` 用于验证 P3 数据接入、精力、外部输入、提醒、Me 入口状态和调度契约，每次默认创建一个独立 smoke 用户，不会重置数据库。
-`scripts/verify_local.py` 用于编排本地验证阶梯，例如 `uv run python scripts/verify_local.py --all-smoke`。
+`scripts/evaluate_planning_engine.py` 用于验证 Planning Engine 的固定场景排序、容量和 Energy 行为，使用测试数据库，不污染开发数据库。
+`scripts/verify_local.py` 用于编排本地验证阶梯，例如 `uv run python scripts/verify_local.py --all-smoke --planner-eval`。
 
 前端联调接口契约见：
 

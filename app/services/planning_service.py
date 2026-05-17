@@ -733,6 +733,11 @@ class PlanningService:
         daily_capacity_minutes = int(first_breakdown.get("daily_capacity_minutes") or 0)
         energy_level = str(first_breakdown.get("energy_level") or "unknown")
         energy_applied = bool(first_breakdown.get("energy_applied") or False)
+        over_capacity_minutes = self._over_capacity_minutes(
+            selected_minutes=total_minutes,
+            daily_capacity_minutes=daily_capacity_minutes,
+        )
+        capacity_status = "overloaded" if over_capacity_minutes else "within_capacity"
 
         if not active_tasks:
             return {
@@ -746,6 +751,8 @@ class PlanningService:
                     "daily_capacity_minutes": daily_capacity_minutes,
                     "selected_estimated_minutes": 0,
                     "rolled_over_estimated_minutes": rolled_over_minutes,
+                    "over_capacity_minutes": 0,
+                    "capacity_status": "within_capacity",
                     "dependency_protected_count": 0,
                     "user_adjusted_count": 0,
                     "energy_level": energy_level,
@@ -776,6 +783,8 @@ class PlanningService:
                 "daily_capacity_minutes": daily_capacity_minutes,
                 "selected_estimated_minutes": total_minutes,
                 "rolled_over_estimated_minutes": rolled_over_minutes,
+                "over_capacity_minutes": over_capacity_minutes,
+                "capacity_status": capacity_status,
                 "dependency_protected_count": dependency_protected_count,
                 "user_adjusted_count": user_adjusted_count,
                 "energy_level": energy_level,
@@ -872,6 +881,24 @@ class PlanningService:
 
     def _strategy_factors(self, *, plan: DailyPlan, items: list[DailyPlanItem], score_factors: dict) -> dict:
         counted_items = [item for item in items if item.section != DailyPlanItemSection.ROLLED_OVER]
+        daily_capacity_minutes = int(score_factors.get("daily_capacity_minutes", 0) or 0)
+        selected_estimated_minutes = int(
+            score_factors.get("selected_estimated_minutes", plan.total_estimated_minutes) or 0
+        )
+        over_capacity_minutes = int(
+            score_factors.get(
+                "over_capacity_minutes",
+                self._over_capacity_minutes(
+                    selected_minutes=selected_estimated_minutes,
+                    daily_capacity_minutes=daily_capacity_minutes,
+                ),
+            )
+            or 0
+        )
+        capacity_status = str(
+            score_factors.get("capacity_status")
+            or ("overloaded" if over_capacity_minutes else "within_capacity")
+        )
         return {
             "task_count": int(score_factors.get("task_count", len(counted_items)) or 0),
             "high_value_task_count": len(
@@ -892,11 +919,11 @@ class PlanningService:
             ),
             "rolled_over_count": len([item for item in items if item.section == DailyPlanItemSection.ROLLED_OVER]),
             "total_estimated_minutes": int(score_factors.get("total_minutes", plan.total_estimated_minutes) or 0),
-            "daily_capacity_minutes": int(score_factors.get("daily_capacity_minutes", 0) or 0),
-            "selected_estimated_minutes": int(
-                score_factors.get("selected_estimated_minutes", plan.total_estimated_minutes) or 0
-            ),
+            "daily_capacity_minutes": daily_capacity_minutes,
+            "selected_estimated_minutes": selected_estimated_minutes,
             "rolled_over_estimated_minutes": int(score_factors.get("rolled_over_estimated_minutes", 0) or 0),
+            "over_capacity_minutes": over_capacity_minutes,
+            "capacity_status": capacity_status,
             "dependency_protected_count": int(score_factors.get("dependency_protected_count", 0) or 0),
             "user_adjusted_count": int(score_factors.get("user_adjusted_count", 0) or 0),
             "energy_level": str(score_factors.get("energy_level") or "unknown"),
@@ -907,6 +934,10 @@ class PlanningService:
 
     def _strategy_explanation(self, *, strategy: StrategySnapshot, factors: dict) -> list[str]:
         explanation = [strategy.primary_reason]
+        if factors["over_capacity_minutes"]:
+            explanation.append(
+                f"今天受保护任务已超过容量约 {factors['over_capacity_minutes']} 分钟，先完成一个高价值任务再决定是否拉回滚动任务。"
+            )
         if factors["pinned_count"]:
             explanation.append(f"{factors['pinned_count']} 个任务被保护在前面，因为它们更重要或更紧急。")
         if factors["rolled_over_count"]:
@@ -926,6 +957,11 @@ class PlanningService:
         else:
             explanation.append("今天会平衡价值、截止时间和任务大小，不把 Today 变成复杂驾驶舱。")
         return explanation[:4]
+
+    def _over_capacity_minutes(self, *, selected_minutes: int, daily_capacity_minutes: int) -> int:
+        if daily_capacity_minutes <= 0:
+            return 0
+        return max(selected_minutes - daily_capacity_minutes, 0)
 
     def _sections_for(self, items: list[DailyPlanItem]) -> dict:
         sections = {
@@ -1010,7 +1046,32 @@ class PlanningService:
                         "task_id": task.id,
                     }
                 )
+        capacity_alert = self._today_capacity_alert(items=items)
+        if capacity_alert is not None:
+            alerts.append(capacity_alert)
         return alerts[:3]
+
+    def _today_capacity_alert(self, *, items: list[DailyPlanItem]) -> dict | None:
+        if not items:
+            return None
+        daily_capacity_minutes = int((items[0].score_breakdown or {}).get("daily_capacity_minutes") or 0)
+        selected_minutes = sum(item.estimated_duration_min or item.task.estimated_duration_min or 25 for item in items)
+        over_capacity_minutes = self._over_capacity_minutes(
+            selected_minutes=selected_minutes,
+            daily_capacity_minutes=daily_capacity_minutes,
+        )
+        if not over_capacity_minutes:
+            return None
+        return {
+            "key": "main_sequence_over_capacity",
+            "title": "Main sequence is heavy",
+            "message": (
+                f"Protected work is about {over_capacity_minutes} minutes over today's capacity. "
+                "Finish one high-value task before pulling more work in."
+            ),
+            "signal": "risk",
+            "task_id": None,
+        }
 
     def _remaining_time_suggestion(self, *, remaining_minutes: int) -> dict:
         if remaining_minutes == 0:

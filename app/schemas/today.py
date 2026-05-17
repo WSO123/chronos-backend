@@ -103,6 +103,8 @@ class StrategyDetailFactorsResponse(BaseModel):
     daily_capacity_minutes: int
     selected_estimated_minutes: int
     rolled_over_estimated_minutes: int
+    over_capacity_minutes: int
+    capacity_status: str
     dependency_protected_count: int
     user_adjusted_count: int
     energy_level: str
