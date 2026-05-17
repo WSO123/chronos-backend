@@ -145,6 +145,61 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(planner_job.job_metadata["usage"]["total_tokens"], None)
         self.assertEqual(planner_job.job_metadata["usage"]["cost_usd"], None)
 
+    def test_daily_planner_agent_usage_is_recorded_on_ai_job_metadata(self):
+        class UsagePlannerAgent:
+            prompt_version = "test-usage-planner"
+            prompt_checksum = "a" * 64
+
+            def run(self, **kwargs):
+                candidates = kwargs["candidates"]
+                strategy_seed = kwargs["strategy_seed"]
+                return SimpleNamespace(
+                    output=DailyPlannerOutput(
+                        mode=strategy_seed["mode"],
+                        strategy_summary=strategy_seed["summary"],
+                        primary_reason=strategy_seed["primary_reason"],
+                        items=[
+                            {
+                                "task_id": candidate["task_id"],
+                                "section": candidate["section"],
+                                "sort_order": candidate["sort_order"],
+                                "recommendation_reason": candidate["recommendation_reason"],
+                            }
+                            for candidate in candidates
+                        ],
+                        confidence=0.91,
+                    ),
+                    provider="openai",
+                    model="gpt-test",
+                    prompt_version="test-usage-planner",
+                    prompt_checksum="b" * 64,
+                    usage={"input_tokens": 111, "output_tokens": 22, "total_tokens": 133, "cost_usd": None},
+                    response_id="resp-planner-usage",
+                )
+
+        service = PlanningService(planner_agent=UsagePlannerAgent())
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Usage observed task",
+            estimated_duration_min=30,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+        )
+
+        strategy = service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        planner_job = self.db.get(AIJob, uuid.UUID(strategy["source"]["ai_job_id"]))
+        self.assertEqual(planner_job.status, AIJobStatus.SUCCEEDED)
+        self.assertEqual(planner_job.provider, "openai")
+        self.assertEqual(planner_job.model, "gpt-test")
+        self.assertEqual(planner_job.job_metadata["provider_response_id"], "resp-planner-usage")
+        self.assertEqual(planner_job.job_metadata["usage"]["input_tokens"], 111)
+        self.assertEqual(planner_job.job_metadata["usage"]["output_tokens"], 22)
+        self.assertEqual(planner_job.job_metadata["usage"]["total_tokens"], 133)
+        self.assertEqual(planner_job.job_metadata["usage"]["cost_usd"], None)
+        self.assertNotIn("planner_agent_total_tokens", strategy["factors"])
+
     def test_daily_planner_agent_failure_falls_back_to_planning_engine(self):
         class FailingPlannerAgent:
             prompt_version = "test-failing-planner"

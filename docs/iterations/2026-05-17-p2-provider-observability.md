@@ -182,7 +182,7 @@ Fallback：
 ## 6. 验收标准
 
 - [x] 成功调用记录 `AIJob.latency_ms`。
-- [x] 成功调用记录 `provider_latency_ms`、`provider_observability_version` 和 usage 占位。
+- [x] 成功调用记录 `provider_latency_ms`、`provider_observability_version` 和稳定 usage 空结构。
 - [x] Agent runtime error fallback 记录 `failure_type=agent_error`。
 - [x] invalid output fallback 记录 `failure_type=invalid_output`。
 - [x] provider fallback 记录 `failure_type=provider_error`。
@@ -214,5 +214,5 @@ git diff --check
 ## 9. 后续迭代建议
 
 1. 增加真实 provider 手动 smoke 脚本，只在显式 env 下发请求。
-2. 接入 Responses usage 字段，填充 token 统计。
+2. 接入 Responses usage 字段，填充 token 统计。已由 [P2 Provider Usage Metadata](./2026-05-17-p2-provider-usage-metadata.md) 承接。
 3. 增加 planner agent 离线评估结果表或 JSONL 输出，用于对比不同 provider / prompt。

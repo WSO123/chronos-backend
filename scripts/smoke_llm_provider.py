@@ -94,6 +94,8 @@ def run_smoke(*, allow_real_llm: bool) -> dict[str, Any]:
         "mode": result.output.mode,
         "confidence": result.output.confidence,
         "item_count": len(result.output.items),
+        "usage": result.usage,
+        "provider_response_id": result.response_id,
     }
 
 

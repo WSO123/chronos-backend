@@ -524,7 +524,7 @@ AI 测试默认用 mock provider。
 - Agent 失败 fallback
 - Agent 输出不合法 fallback
 - `AIJob(job_type=daily_planner)` 可通过 Strategy Detail source 追踪
-- `AIJob.latency_ms` / `job_metadata.provider_latency_ms` / `job_metadata.usage` 结构稳定
+- `AIJob.latency_ms` / `job_metadata.provider_latency_ms` / `job_metadata.provider_response_id` / `job_metadata.usage` 结构稳定
 - Planning Engine evaluation 不退化
 
 ### 8.4 Migration 测试

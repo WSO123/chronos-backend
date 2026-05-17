@@ -6,7 +6,7 @@ from typing import Any
 from openai import OpenAI, OpenAIError
 from pydantic import ValidationError
 
-from app.ai.providers.base import LLMProviderError, T
+from app.ai.providers.base import LLMProviderError, LLMStructuredGeneration, T, empty_llm_usage
 from app.core.config import settings
 
 
@@ -33,7 +33,7 @@ class OpenAICompatibleProvider:
         schema: type[T],
         temperature: float = 0.2,
         metadata: dict | None = None,
-    ) -> T:
+    ) -> LLMStructuredGeneration[T]:
         try:
             response = self._client_instance().responses.parse(
                 model=self.model_name,
@@ -46,8 +46,15 @@ class OpenAICompatibleProvider:
             if parsed is None:
                 raise LLMProviderError("OpenAI provider returned no parsed output")
             if isinstance(parsed, schema):
-                return parsed
-            return schema.model_validate(parsed)
+                output = parsed
+            else:
+                output = schema.model_validate(parsed)
+            return LLMStructuredGeneration(
+                output=output,
+                usage=self._usage_from_response(response),
+                response_id=self._response_id(response),
+                raw_metadata={"provider_mode": self.provider_name},
+            )
         except LLMProviderError:
             raise
         except (OpenAIError, ValidationError, ValueError, TypeError) as exc:
@@ -82,6 +89,48 @@ class OpenAICompatibleProvider:
             "Respect the system prompt and the schema exactly.\n\n"
             f"{json.dumps(public_metadata, ensure_ascii=False, default=str)}"
         )
+
+    def _usage_from_response(self, response: Any) -> dict[str, Any]:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return empty_llm_usage()
+
+        input_tokens = self._usage_int(usage, "input_tokens", "prompt_tokens")
+        output_tokens = self._usage_int(usage, "output_tokens", "completion_tokens")
+        total_tokens = self._usage_int(usage, "total_tokens")
+        if total_tokens is None and input_tokens is not None and output_tokens is not None:
+            total_tokens = input_tokens + output_tokens
+
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "cost_usd": None,
+        }
+
+    def _usage_int(self, usage: Any, *keys: str) -> int | None:
+        for key in keys:
+            value = self._value_from_object(usage, key)
+            if value is None:
+                continue
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _response_id(self, response: Any) -> str | None:
+        value = self._value_from_object(response, "id")
+        return str(value) if value else None
+
+    def _value_from_object(self, obj: Any, key: str) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(key)
+        if hasattr(obj, "model_dump"):
+            dumped = obj.model_dump()
+            if isinstance(dumped, dict) and key in dumped:
+                return dumped[key]
+        return getattr(obj, key, None)
 
 
 openai_provider = OpenAICompatibleProvider()

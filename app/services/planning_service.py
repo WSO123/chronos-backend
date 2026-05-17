@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.agents.daily_planner import DailyPlannerAgent, daily_planner_agent
-from app.ai.providers.base import LLMProviderError
+from app.ai.providers.base import LLMProviderError, empty_llm_usage
 from app.ai.providers.registry import llm_provider_registry
 from app.ai.schemas.planning import DailyPlannerOutput
 from app.models.activity_event import ActivityEvent
@@ -420,6 +420,8 @@ class PlanningService:
                 "confidence": agent_result.output.confidence,
                 "item_count": len(agent_result.output.items),
                 "prompt_checksum": agent_result.prompt_checksum,
+                "provider_response_id": getattr(agent_result, "response_id", None),
+                "usage": getattr(agent_result, "usage", empty_llm_usage()),
             }
         except Exception as exc:  # noqa: BLE001 - fallback is the product boundary here.
             job.status = AIJobStatus.SUCCEEDED_WITH_FALLBACK
@@ -439,12 +441,7 @@ class PlanningService:
             **job.job_metadata,
             "provider_latency_ms": job.latency_ms,
             "provider_observability_version": "v1",
-            "usage": {
-                "input_tokens": None,
-                "output_tokens": None,
-                "total_tokens": None,
-                "cost_usd": None,
-            },
+            "usage": self._planner_usage_metadata(job.job_metadata.get("usage")),
         }
         strategy_payload["score_factors"] = {
             **strategy_payload["score_factors"],
@@ -459,6 +456,11 @@ class PlanningService:
             "planner_agent_output_applied": job.job_metadata.get("output_applied", False),
         }
         return {"planned_tasks": planned_tasks, "strategy_payload": strategy_payload, "ai_job": job}
+
+    def _planner_usage_metadata(self, usage: object) -> dict:
+        if not isinstance(usage, dict):
+            return empty_llm_usage()
+        return {**empty_llm_usage(), **usage}
 
     def _planner_fallback_reason(self, exc: Exception) -> str:
         if isinstance(exc, ValueError):

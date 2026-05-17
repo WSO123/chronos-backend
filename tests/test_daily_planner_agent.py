@@ -1,6 +1,7 @@
 import unittest
 
 from app.ai.agents.daily_planner import DailyPlannerAgent
+from app.ai.providers.base import LLMStructuredGeneration
 from app.ai.prompts import prompt_registry
 from app.ai.prompts.registry import PromptRegistryError
 from app.ai.schemas.planning import DailyPlannerOutput
@@ -18,7 +19,11 @@ class RecordingProvider:
         del temperature
         self.prompt = prompt
         self.metadata = metadata or {}
-        return schema.model_validate(self.metadata["mock_output"])
+        return LLMStructuredGeneration(
+            output=schema.model_validate(self.metadata["mock_output"]),
+            usage={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15, "cost_usd": None},
+            response_id="recording-response",
+        )
 
 
 class DailyPlannerAgentTests(unittest.TestCase):
@@ -51,6 +56,8 @@ class DailyPlannerAgentTests(unittest.TestCase):
         self.assertEqual(result.model, "structured-mock-v1")
         self.assertEqual(result.prompt_version, "p2-daily-planner-agent-v1")
         self.assertEqual(len(result.prompt_checksum), 64)
+        self.assertEqual(result.usage["total_tokens"], None)
+        self.assertEqual(result.response_id, None)
         self.assertEqual(result.output.items[0].task_id, "task-1")
         self.assertEqual(result.output.strategy_summary, "Keep a steady order.")
 
@@ -88,6 +95,8 @@ class DailyPlannerAgentTests(unittest.TestCase):
         self.assertEqual(provider.metadata["prompt"]["checksum"], template.checksum)
         self.assertEqual(result.prompt_version, template.version)
         self.assertEqual(result.prompt_checksum, template.checksum)
+        self.assertEqual(result.usage["total_tokens"], 15)
+        self.assertEqual(result.response_id, "recording-response")
 
     def test_prompt_registry_rejects_unknown_key(self):
         with self.assertRaises(PromptRegistryError):

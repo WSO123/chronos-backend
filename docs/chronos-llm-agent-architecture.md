@@ -109,10 +109,18 @@ app/
 推荐抽象：
 
 ```python
-from typing import Protocol, TypeVar
+from dataclasses import dataclass
+from typing import Any, Generic, Protocol, TypeVar
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
+
+@dataclass(frozen=True)
+class LLMStructuredGeneration(Generic[T]):
+    output: T
+    usage: dict[str, Any]
+    response_id: str | None = None
+    raw_metadata: dict[str, Any] | None = None
 
 class LLMProvider(Protocol):
     def generate_structured(
@@ -122,7 +130,7 @@ class LLMProvider(Protocol):
         schema: type[T],
         temperature: float = 0.2,
         metadata: dict | None = None,
-    ) -> T:
+    ) -> LLMStructuredGeneration[T]:
         ...
 ```
 
@@ -130,7 +138,7 @@ Provider 职责：
 
 - 调用具体模型。
 - 尽量使用模型原生 structured output / JSON mode。
-- 返回 Pydantic schema 实例。
+- 返回 Pydantic schema 实例和轻量运行观测信息。
 - 抛出统一异常。
 
 不属于 Provider 的职责：
@@ -332,7 +340,7 @@ class CaptureParseOutput(BaseModel):
 - 已接入 OpenAI-compatible provider adapter，可通过 `LLM_PROVIDER=openai` 或 `LLM_PROVIDER=openai-compatible` 显式启用；本地和 CI 默认关闭。
 - 每次 plan revision 都记录一条 `AIJob(job_type=daily_planner)`，Strategy Detail `source.ai_job_id` 可追踪调用结果。
 - Daily Planner prompt 已迁移到 `app/ai/prompts/daily_planner/p2-daily-planner-agent-v1.md`，通过 prompt registry 加载，并在 `AIJob.job_metadata.prompt_checksum` 里记录 checksum。
-- Daily Planner provider 调用记录 `latency_ms`、`provider_latency_ms`、`failure_type` 和 usage 占位，便于后续真实 LLM 排障和成本统计。
+- Daily Planner provider 调用记录 `latency_ms`、`provider_latency_ms`、`failure_type`、`provider_response_id` 和 `usage`；真实 provider 返回 usage 时会写入 token 统计，mock / fallback 保持空结构。
 - v1 只允许 Agent 更新策略摘要和推荐理由；业务层校验禁止 Agent 改变任务集合、排序和 section。
 - Agent 失败或输出不合法时，`AIJob.status=succeeded_with_fallback`，继续使用 Planning Engine v1 输出。
 - 每个 `DailyPlanItem` 会保存 `score_breakdown`，Strategy Detail 可以解释排序，Today 首屏不展开完整评分。
@@ -671,6 +679,7 @@ Daily Planner v1 额外记录：
 - `job_metadata.provider_observability_version`
 - `job_metadata.failure_type`
 - `job_metadata.fallback_root_error_type`
+- `job_metadata.provider_response_id`
 - `job_metadata.usage.input_tokens`
 - `job_metadata.usage.output_tokens`
 - `job_metadata.usage.total_tokens`
@@ -678,8 +687,8 @@ Daily Planner v1 额外记录：
 
 可选后续扩展：
 
-- token usage
-- cost
+- cost estimation
+- provider-level request / rate-limit metadata
 - model raw output archive
 - schema validation error details
 

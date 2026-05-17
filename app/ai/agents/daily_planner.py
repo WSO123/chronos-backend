@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from app.ai.providers.base import LLMProvider
 from app.ai.providers.registry import llm_provider_registry
@@ -15,6 +16,8 @@ class DailyPlannerAgentResult:
     model: str
     prompt_version: str
     prompt_checksum: str
+    usage: dict[str, Any]
+    response_id: str | None = None
 
 
 class DailyPlannerAgent:
@@ -41,7 +44,7 @@ class DailyPlannerAgent:
     ) -> DailyPlannerAgentResult:
         resolved_provider = provider or llm_provider_registry.current_provider()
         prompt_template = self.prompts.get(self.prompt_key)
-        output = resolved_provider.generate_structured(
+        generation = resolved_provider.generate_structured(
             prompt=prompt_template.content,
             schema=DailyPlannerOutput,
             temperature=0.2,
@@ -58,11 +61,13 @@ class DailyPlannerAgent:
             },
         )
         return DailyPlannerAgentResult(
-            output=output,
+            output=generation.output,
             provider=resolved_provider.provider_name,
             model=resolved_provider.model_name,
             prompt_version=prompt_template.version,
             prompt_checksum=prompt_template.checksum,
+            usage=generation.usage,
+            response_id=generation.response_id,
         )
 
     def _mock_output(self, *, candidates: list[dict], strategy_seed: dict) -> dict:

@@ -92,7 +92,7 @@ P2 新增字段：
 - `model_name` / `prompt_version` 指向最终落库的 Planning Engine strategy snapshot。
 - `ai_job_id` 指向 Daily Planner Agent shell 的调用记录，可通过 `GET /api/v1/ai-jobs/{id}` 查看 provider、model、status、fallback 和 metadata。
 - `AIJob.job_metadata.prompt_checksum` 可用于确认本次 planner agent 使用的具体 prompt 内容版本；前端一般不需要展示。
-- `AIJob.latency_ms`、`job_metadata.failure_type`、`job_metadata.provider_latency_ms` 和 `job_metadata.usage` 只用于 Strategy Detail 深层解释、调试或后台观测，不建议进入 Today 首屏。
+- `AIJob.latency_ms`、`job_metadata.failure_type`、`job_metadata.provider_latency_ms`、`job_metadata.provider_response_id` 和 `job_metadata.usage` 只用于 Strategy Detail 深层解释、调试或后台观测，不建议进入 Today 首屏；真实 provider 返回 usage 时这里可能包含 token 统计。
 - Strategy Detail 可以把 `ai_job_id` 用于调试或深层解释；Today 首屏不展示这个字段。
 
 `factors` 当前包含：

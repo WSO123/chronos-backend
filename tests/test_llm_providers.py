@@ -9,21 +9,28 @@ from app.core.config import settings
 
 
 class FakeResponses:
-    def __init__(self, parsed=None, error=None):
+    def __init__(self, parsed=None, error=None, usage=None, response_id="resp-test"):
         self.parsed = parsed
         self.error = error
+        self.usage = usage
+        self.response_id = response_id
         self.kwargs = None
 
     def parse(self, **kwargs):
         self.kwargs = kwargs
         if self.error:
             raise self.error
-        return SimpleNamespace(output_parsed=self.parsed)
+        return SimpleNamespace(output_parsed=self.parsed, usage=self.usage, id=self.response_id)
 
 
 class FakeOpenAIClient:
-    def __init__(self, *, parsed=None, error=None):
-        self.responses = FakeResponses(parsed=parsed, error=error)
+    def __init__(self, *, parsed=None, error=None, usage=None, response_id="resp-test"):
+        self.responses = FakeResponses(
+            parsed=parsed,
+            error=error,
+            usage=usage,
+            response_id=response_id,
+        )
 
 
 class OpenAICompatibleProviderTests(unittest.TestCase):
@@ -49,7 +56,9 @@ class OpenAICompatibleProviderTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(result, parsed)
+        self.assertEqual(result.output, parsed)
+        self.assertEqual(result.usage["total_tokens"], None)
+        self.assertEqual(result.response_id, "resp-test")
         self.assertEqual(client.responses.kwargs["model"], "gpt-test")
         self.assertEqual(client.responses.kwargs["instructions"], "Planner prompt")
         self.assertEqual(client.responses.kwargs["text_format"], DailyPlannerOutput)
@@ -57,6 +66,30 @@ class OpenAICompatibleProviderTests(unittest.TestCase):
         self.assertIn("plan_context", client.responses.kwargs["input"])
         self.assertNotIn("mock_output", client.responses.kwargs["input"])
         self.assertNotIn("not-sent", client.responses.kwargs["input"])
+
+    def test_generate_structured_extracts_usage_from_response(self):
+        parsed = DailyPlannerOutput(
+            mode="normal",
+            strategy_summary="Keep a steady order.",
+            primary_reason="The sequence balances value and capacity.",
+            items=[],
+            confidence=0.8,
+        )
+        client = FakeOpenAIClient(
+            parsed=parsed,
+            usage=SimpleNamespace(input_tokens=123, output_tokens=45, total_tokens=168),
+            response_id="resp-usage",
+        )
+        provider = OpenAICompatibleProvider(client=client, model_name="gpt-test")
+
+        result = provider.generate_structured(prompt="Planner prompt", schema=DailyPlannerOutput)
+
+        self.assertEqual(result.output, parsed)
+        self.assertEqual(result.usage["input_tokens"], 123)
+        self.assertEqual(result.usage["output_tokens"], 45)
+        self.assertEqual(result.usage["total_tokens"], 168)
+        self.assertEqual(result.usage["cost_usd"], None)
+        self.assertEqual(result.response_id, "resp-usage")
 
     def test_generate_structured_rejects_missing_parsed_output(self):
         provider = OpenAICompatibleProvider(client=FakeOpenAIClient(parsed=None), model_name="gpt-test")
