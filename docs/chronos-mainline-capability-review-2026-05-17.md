@@ -69,7 +69,7 @@ P2 只保留和执行主线强相关的部分：Goals、依赖、洞察、解释
 
 | 能力 | 当前等级 | 结论 | 边界 |
 | --- | --- | --- | --- |
-| Goals Home / Goal Detail | L2-L3 | 已能展示目标进度、任务列表、推荐下一步 | 不做复杂项目管理 |
+| Goals Home / Goal Detail | L3 | 已能展示目标进度、任务列表、推荐下一步；目标进度会汇总 Task partial progress | 不做复杂项目管理 |
 | Goal recommended next task | L3 | 已避开仍有未完成前置任务的后续任务 | 若全部任务被阻塞，允许 fallback 到最高价值未完成任务 |
 | Goal Next Action Coverage | L2-L3 | Today 会为高价值 / 临近截止目标各自保护一个下一步行动，避免某个目标的任务列表挤掉其他重要方向 | 只做轻量保护，不做复杂项目排程 |
 | Task Dependency | L3 | 依赖新增 / 删除会在涉及当前 Today 时触发 `system_refresh` | 依赖是执行顺序信号，不做甘特图替代品 |

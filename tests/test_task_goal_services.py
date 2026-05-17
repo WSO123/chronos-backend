@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime, timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from app.ai.providers.base import LLMProviderError
@@ -329,6 +330,35 @@ class TaskGoalServiceTests(unittest.TestCase):
         self.assertEqual(detail["dependency_map"]["edges"], [])
         self.assertEqual(detail["ai_suggestion"]["next_action_task_id"], next_task.id)
         self.assertFalse(detail["actions"]["can_mark_complete"])
+
+    def test_goal_progress_counts_partial_task_progress(self):
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Partial progress goal",
+            value_level=ValueLevel.HIGH,
+        )
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="推进一个大目标任务",
+            estimated_duration_min=180,
+            value_level=ValueLevel.HIGH,
+        )
+        task_service.record_partial_progress(
+            self.db,
+            task_id=task.id,
+            user_id=self.user.id,
+            progress_delta=Decimal("0.25"),
+        )
+
+        detail = goal_service.get_goal_detail(self.db, goal_id=goal.id, user_id=self.user.id)
+
+        self.assertEqual(detail["progress"]["total_task_count"], 1)
+        self.assertEqual(detail["progress"]["completed_task_count"], 0)
+        self.assertEqual(detail["progress"]["unfinished_task_count"], 1)
+        self.assertEqual(detail["progress"]["completion_rate"], 0.25)
 
     def test_task_dependencies_create_edges_and_goal_dependency_map(self):
         goal = goal_service.create_goal(self.db, user_id=self.user.id, title="Dependency goal")

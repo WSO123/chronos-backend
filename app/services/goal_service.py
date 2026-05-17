@@ -321,7 +321,8 @@ class GoalService:
         completed_task_count = len([task for task in tasks if task.status == TaskStatus.COMPLETED])
         unfinished_task_count = total_task_count - completed_task_count
         postponed_task_count = len([task for task in tasks if task.status == TaskStatus.POSTPONED])
-        completion_rate = round(completed_task_count / total_task_count, 2) if total_task_count else 0.0
+        progress_sum = sum(float(task.progress or 0) for task in tasks)
+        completion_rate = round(progress_sum / total_task_count, 2) if total_task_count else 0.0
         total_estimated_duration_min = sum(task.estimated_duration_min or 0 for task in tasks)
         total_actual_duration_min = sum(task.actual_duration_min for task in tasks)
         risk_level, risk_reason = self._risk_for(

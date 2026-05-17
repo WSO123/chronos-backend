@@ -430,6 +430,7 @@ prerequisite_task -> dependent_task
 - `goals`
 - 每个 goal card 的 progress / risk / associated task count / recommended next task id
 - `recommended_next_task_id` 会避开仍有未完成前置任务的后续任务；如果所有未完成任务都被阻塞，则回退到排序最高的未完成任务。
+- Goal `progress` / `completion_rate` 按任务自身 `progress` 汇总，能反映最小推进切片带来的部分进展；`completed_task_count` 仍只表示真正完成的 Task 数。
 
 ### GET `/api/v1/goals/{goal_id}/detail`
 

@@ -26,6 +26,7 @@ Planning Engine 已经能在时间不够时保护高价值任务的最小推进�
 - 当前 DailyPlanItem 仍标记 completed，用于今日进度和报告。
 - 同日 replan 不把已完成切片重新塞回主序列。
 - Daily Report 的完成率可以承认已完成计划切片，但完成任务数只统计真正 completed 的 Task。
+- Goal progress 汇总 Task partial progress，让“今天推进了一小步”体现在目标进度上。
 
 非目标：
 
@@ -59,6 +60,7 @@ Minimum viable slice -> complete slice -> partial Task progress -> next plan con
 | Same-day replan stability | 同日 replan 保留已完成切片，不重复排同一任务 | Must | 避免进度回退 |
 | Activity event | 记录 `TASK_PARTIAL_PROGRESS_RECORDED` | Should | 供报告 / 洞察使用 |
 | Report metrics | Daily Report 不把 partial slice 当作 completed task | Should | completion_rate 仍按计划项 |
+| Goal progress | Goal completion_rate 汇总 Task progress | Should | completed_task_count 仍只算完成任务 |
 
 ### 用户故事
 
@@ -127,6 +129,7 @@ ActivityEvent = TASK_PARTIAL_PROGRESS_RECORDED
 - [x] 同日 replan 保留已完成切片，不把同一 active task 重新排入主序列。
 - [x] 产生 `TASK_PARTIAL_PROGRESS_RECORDED`，不产生 `TASK_COMPLETED`。
 - [x] Daily Report 的 `completed_task_count` 不统计 partial slice，`completion_rate` 仍可体现计划项完成。
+- [x] Goal Detail / Goals Home 的 progress 能反映 Task partial progress。
 
 ---
 
@@ -151,13 +154,19 @@ uv run python -m unittest tests.test_report_me_services tests.test_today_service
 结果：45 tests OK。
 
 ```bash
+uv run python -m unittest tests.test_task_goal_services tests.test_task_goal_api tests.test_report_me_services tests.test_today_services tests.test_focus_services
+```
+
+结果：90 tests OK。
+
+```bash
 uv run python scripts/verify_local.py --planner-eval --planner-eval-policy
 ```
 
-结果：313 tests OK；compile OK；git diff --check OK；9 个 planner eval 场景通过；planner eval policy 无 regression / change。
+结果：314 tests OK；compile OK；git diff --check OK；9 个 planner eval 场景通过；planner eval policy 无 regression / change。
 
 ```bash
 .venv/bin/python3 scripts/verify_local.py --smoke mainline-state
 ```
 
-结果：313 tests OK；compile OK；git diff --check OK；MAINLINE-STATE smoke passed。
+结果：314 tests OK；compile OK；git diff --check OK；MAINLINE-STATE smoke passed。
