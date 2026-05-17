@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.agents.daily_planner import DailyPlannerAgent, daily_planner_agent
+from app.ai.providers.registry import llm_provider_registry
 from app.ai.schemas.planning import DailyPlannerOutput
 from app.models.activity_event import ActivityEvent
 from app.models.ai_job import AIJob
@@ -363,14 +364,15 @@ class PlanningService:
         planned_tasks: list[PlannedTask],
         strategy_payload: dict,
     ) -> dict:
+        planner_provider = llm_provider_registry.current_provider()
         job = ai_job_service.create_job(
             db,
             user_id=plan.user_id,
             job_type=AIJobType.DAILY_PLANNER,
             input_entity_type=EntityType.DAILY_PLAN.value,
             input_entity_id=plan.id,
-            provider="mock",
-            model="structured-mock-v1",
+            provider=planner_provider.provider_name,
+            model=planner_provider.model_name,
             prompt_version=self.planner_agent.prompt_version,
             metadata={
                 "mode": "sync_structured_shell",
@@ -398,6 +400,7 @@ class PlanningService:
                     "primary_reason": strategy_payload["primary_reason"],
                     "score_factors": strategy_payload["score_factors"],
                 },
+                provider=planner_provider,
             )
             job.provider = agent_result.provider
             job.model = agent_result.model

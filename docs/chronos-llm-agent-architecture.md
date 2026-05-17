@@ -149,8 +149,8 @@ Provider 职责：
 ```env
 AI_ENABLE_REAL_LLM=false
 
-LLM_PROVIDER=openai
-LLM_MODEL=gpt-4.1-mini
+LLM_PROVIDER=mock
+LLM_MODEL=structured-mock-v1
 LLM_API_KEY=
 LLM_BASE_URL=
 
@@ -170,7 +170,19 @@ AI_ENABLE_REAL_LLM=false
 - `AI_ENABLE_REAL_LLM=false`
 - Daily Planner 使用 mock provider 和 structured output shell。
 - Planning Engine v1 仍是最终排序和 fallback 核心。
-- 真实 provider 必须单独迭代接入，不能绕过业务层校验和用户确认边界。
+- 已提供 OpenAI-compatible provider adapter；只有 `AI_ENABLE_REAL_LLM=true` 时才会被 registry 选中。
+- 真实 provider 不能绕过业务层校验和用户确认边界。
+
+真实 provider 示例：
+
+```env
+AI_ENABLE_REAL_LLM=true
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4.1-mini
+LLM_API_KEY=...
+LLM_BASE_URL=
+LLM_FALLBACK_PROVIDER=mock
+```
 
 ---
 
@@ -310,6 +322,7 @@ class CaptureParseOutput(BaseModel):
 - Planning Engine v1 已读取任务价值、优先级、deadline、估时、依赖、用户修正、行为反馈、当日容量和 Energy 信号。
 - 已接入 Daily Planner Agent shell：`PlanningService` 先生成 deterministic candidates，再调用 Agent 返回 structured output。
 - 默认 provider 是 `mock`，模型标识为 `structured-mock-v1`；`AI_ENABLE_REAL_LLM=false` 时不会调用外部模型。
+- 已接入 OpenAI-compatible provider adapter，可通过 `LLM_PROVIDER=openai` 或 `LLM_PROVIDER=openai-compatible` 显式启用；本地和 CI 默认关闭。
 - 每次 plan revision 都记录一条 `AIJob(job_type=daily_planner)`，Strategy Detail `source.ai_job_id` 可追踪调用结果。
 - Daily Planner prompt 已迁移到 `app/ai/prompts/daily_planner/p2-daily-planner-agent-v1.md`，通过 prompt registry 加载，并在 `AIJob.job_metadata.prompt_checksum` 里记录 checksum。
 - v1 只允许 Agent 更新策略摘要和推荐理由；业务层校验禁止 Agent 改变任务集合、排序和 section。
@@ -527,6 +540,7 @@ Chronos 的核心闭环不能依赖 LLM 成功。
 所有 fallback 都应：
 
 - 记录 AIJob fallback 状态。
+- 记录实际选中的 provider / model，不能失败后误写为 mock。
 - 保留 error_message。
 - 允许 retry。
 - 不阻塞用户继续使用产品。

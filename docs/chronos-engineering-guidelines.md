@@ -440,6 +440,7 @@ Service 返回业务对象或明确 DTO，不直接返回未处理的 ORM 给 AP
 - 失败必须有 fallback。
 - LLM 不直接写业务表。
 - Prompt 文件必须版本化。
+- 真实 provider 必须显式开关，默认本地和 CI 使用 mock。
 - 不在普通日志里输出用户隐私内容。
 
 ### 7.1 AIJob
@@ -507,6 +508,14 @@ AI 测试默认用 mock provider。
 - fallback
 - AIJob 状态流转
 - retry
+
+涉及真实 provider adapter 时，必须覆盖：
+
+- 默认关闭真实 LLM 时仍返回 mock provider
+- provider 调用参数和 structured schema
+- 内部 `mock_output` / prompt trace 不发送给真实 provider
+- provider 错误统一包装为 `LLMProviderError`
+- service fallback 时 `AIJob.provider` / `AIJob.model` 记录实际选中的 provider
 
 涉及 Daily Planner Agent / Planning Engine 时，必须覆盖：
 

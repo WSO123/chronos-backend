@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import uuid
 
 from app.ai.schemas.planning import DailyPlannerOutput
+from app.core.config import settings
 from app.models.activity_event import ActivityEvent
 from app.models.ai_job import AIJob
 from app.models.enums import AIJobStatus, AIJobType, DailyPlanItemStatus, EntityType, TaskStatus, ValueLevel
@@ -225,6 +226,42 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(planner_job.job_metadata["output_applied"], False)
         self.assertEqual(planner_job.job_metadata["fallback_reason"], "daily_planner_agent_invalid_output")
         self.assertEqual(planner_job.job_metadata["fallback_error_type"], "ValueError")
+
+    def test_real_llm_provider_failure_records_provider_and_falls_back(self):
+        original = {
+            "AI_ENABLE_REAL_LLM": settings.AI_ENABLE_REAL_LLM,
+            "LLM_PROVIDER": settings.LLM_PROVIDER,
+            "LLM_MODEL": settings.LLM_MODEL,
+            "LLM_API_KEY": settings.LLM_API_KEY,
+        }
+        try:
+            settings.AI_ENABLE_REAL_LLM = True
+            settings.LLM_PROVIDER = "openai"
+            settings.LLM_MODEL = "gpt-test"
+            settings.LLM_API_KEY = None
+            task_service.create_task(
+                self.db,
+                user_id=self.user.id,
+                title="Real provider fallback task",
+                estimated_duration_min=30,
+                priority=1,
+                value_level=ValueLevel.HIGH,
+            )
+
+            strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+            planner_job = self.db.get(AIJob, uuid.UUID(strategy["source"]["ai_job_id"]))
+            self.assertEqual(planner_job.status, AIJobStatus.SUCCEEDED_WITH_FALLBACK)
+            self.assertEqual(planner_job.provider, "openai")
+            self.assertEqual(planner_job.model, "gpt-test")
+            self.assertEqual(planner_job.job_metadata["output_applied"], False)
+            self.assertEqual(planner_job.job_metadata["fallback_reason"], "daily_planner_agent_failed")
+            self.assertIn("LLM_API_KEY", planner_job.error_message)
+        finally:
+            settings.AI_ENABLE_REAL_LLM = original["AI_ENABLE_REAL_LLM"]
+            settings.LLM_PROVIDER = original["LLM_PROVIDER"]
+            settings.LLM_MODEL = original["LLM_MODEL"]
+            settings.LLM_API_KEY = original["LLM_API_KEY"]
 
     def test_planning_engine_rolls_over_work_beyond_today_capacity(self):
         task_service.create_task(

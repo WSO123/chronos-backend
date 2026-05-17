@@ -60,7 +60,16 @@ LLM_MODEL=structured-mock-v1
 LLM_FALLBACK_PROVIDER=mock
 ```
 
-真实 provider 需要单独接入和开启，不能让 LLM 绕过业务层校验或用户确认。
+真实 provider 需要显式开启，不能让 LLM 绕过业务层校验或用户确认：
+
+```env
+AI_ENABLE_REAL_LLM=true
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4.1-mini
+LLM_API_KEY=...
+LLM_BASE_URL=
+LLM_FALLBACK_PROVIDER=mock
+```
 
 执行数据库迁移：
 
