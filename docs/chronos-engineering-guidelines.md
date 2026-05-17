@@ -509,6 +509,12 @@ uv run python -m compileall app tests scripts
 git diff --check
 ```
 
+也可以使用统一入口执行基础验证：
+
+```bash
+uv run python scripts/verify_local.py
+```
+
 涉及数据库模型、索引、枚举或 migration 时，必须额外执行：
 
 ```bash
@@ -531,6 +537,12 @@ uv run python scripts/smoke_p2_goal_insight_loop.py
 
 ```bash
 uv run python scripts/smoke_p3_natural_growth_loop.py
+```
+
+需要完整 smoke 梯度时，可执行：
+
+```bash
+uv run python scripts/verify_local.py --all-smoke
 ```
 
 Smoke 脚本约束：
