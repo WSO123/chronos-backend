@@ -573,6 +573,12 @@ uv run python scripts/smoke_p2_goal_insight_loop.py
 uv run python scripts/evaluate_planning_engine.py
 ```
 
+需要沉淀 provider / prompt 对比记录时，追加 JSONL 输出：
+
+```bash
+uv run python scripts/evaluate_planning_engine.py --jsonl-output /tmp/chronos-planner-eval.jsonl
+```
+
 涉及 Daily Planner Agent shell 或 LLM provider 时，额外执行：
 
 ```bash

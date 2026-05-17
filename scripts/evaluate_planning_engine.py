@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import argparse
 from dataclasses import asdict, dataclass
 from datetime import date
 import json
 from pathlib import Path
 import sys
 from typing import Callable
+import uuid
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -13,6 +15,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.models.enums import DailyPlanItemStatus, TaskStatus, ValueLevel
+from app.models.ai_job import AIJob
 from app.services.energy_service import energy_service
 from app.services.planning_service import planning_service
 from app.services.task_service import task_service
@@ -21,6 +24,7 @@ from tests.factories import create_user
 
 
 PLAN_DATE = date(2026, 5, 17)
+EVALUATOR_VERSION = "p2-planning-engine-eval-v1"
 
 
 @dataclass(frozen=True)
@@ -31,7 +35,8 @@ class ScenarioResult:
     failures: list[str]
 
 
-def run_evaluation() -> dict:
+def run_evaluation(*, run_id: str | None = None) -> dict:
+    resolved_run_id = run_id or str(uuid.uuid4())
     scenarios: list[Callable[[], ScenarioResult]] = [
         _scenario_capacity_rollover,
         _scenario_protected_overload_warning,
@@ -40,6 +45,8 @@ def run_evaluation() -> dict:
     ]
     results = [scenario() for scenario in scenarios]
     return {
+        "run_id": resolved_run_id,
+        "evaluator_version": EVALUATOR_VERSION,
         "status": "ok" if all(result.passed for result in results) else "failed",
         "scenario_count": len(results),
         "passed_count": len([result for result in results if result.passed]),
@@ -87,7 +94,7 @@ def _scenario_capacity_rollover() -> ScenarioResult:
         return ScenarioResult(
             name="capacity_rollover",
             passed=not failures,
-            details=_details(today=today, strategy=strategy),
+            details=_details(db=db, today=today, strategy=strategy),
             failures=failures,
         )
     finally:
@@ -122,7 +129,7 @@ def _scenario_protected_overload_warning() -> ScenarioResult:
         return ScenarioResult(
             name="protected_overload_warning",
             passed=not failures,
-            details=_details(today=today, strategy=strategy),
+            details=_details(db=db, today=today, strategy=strategy),
             failures=failures,
         )
     finally:
@@ -168,7 +175,7 @@ def _scenario_low_energy_lightens_plan() -> ScenarioResult:
         return ScenarioResult(
             name="low_energy_lightens_plan",
             passed=not failures,
-            details=_details(today=today, strategy=strategy),
+            details=_details(db=db, today=today, strategy=strategy),
             failures=failures,
         )
     finally:
@@ -214,7 +221,7 @@ def _scenario_high_energy_prioritizes_deep_work_without_expansion() -> ScenarioR
         return ScenarioResult(
             name="high_energy_deep_fit_no_expansion",
             passed=not failures,
-            details=_details(today=today, strategy=strategy),
+            details=_details(db=db, today=today, strategy=strategy),
             failures=failures,
         )
     finally:
@@ -226,8 +233,9 @@ def _fresh_db():
     return TestingSessionLocal()
 
 
-def _details(*, today: dict, strategy: dict) -> dict:
+def _details(*, db, today: dict, strategy: dict) -> dict:
     ordered_items = _all_items(today)
+    planner_trace = _planner_trace(db, strategy=strategy)
     return {
         "main_count": today["progress"]["total_count"],
         "rolled_over_count": len(today["sections"]["rolled_over_tasks"]),
@@ -240,6 +248,7 @@ def _details(*, today: dict, strategy: dict) -> dict:
         "rolled_over_estimated_minutes": strategy["factors"]["rolled_over_estimated_minutes"],
         "over_capacity_minutes": strategy["factors"]["over_capacity_minutes"],
         "energy_applied": strategy["factors"]["energy_applied"],
+        **planner_trace,
     }
 
 
@@ -257,8 +266,109 @@ def _check_all(*checks: tuple[str, bool]) -> list[str]:
     return [label for label, passed in checks if not passed]
 
 
+def _planner_trace(db, *, strategy: dict) -> dict:
+    ai_job_id = strategy.get("source", {}).get("ai_job_id")
+    if not ai_job_id:
+        return _empty_planner_trace()
+    job = db.get(AIJob, uuid.UUID(ai_job_id))
+    if job is None:
+        return _empty_planner_trace()
+    metadata = job.job_metadata or {}
+    return {
+        "planner_agent_job_id": str(job.id),
+        "planner_agent_status": job.status.value,
+        "planner_agent_provider": job.provider,
+        "planner_agent_model": job.model,
+        "planner_agent_prompt_version": job.prompt_version,
+        "planner_agent_prompt_checksum": metadata.get("prompt_checksum"),
+        "planner_agent_latency_ms": job.latency_ms,
+        "planner_agent_failure_type": metadata.get("failure_type"),
+        "planner_agent_output_applied": metadata.get("output_applied"),
+        "planner_agent_usage": metadata.get("usage"),
+    }
+
+
+def _empty_planner_trace() -> dict:
+    return {
+        "planner_agent_job_id": None,
+        "planner_agent_status": None,
+        "planner_agent_provider": None,
+        "planner_agent_model": None,
+        "planner_agent_prompt_version": None,
+        "planner_agent_prompt_checksum": None,
+        "planner_agent_latency_ms": None,
+        "planner_agent_failure_type": None,
+        "planner_agent_output_applied": None,
+        "planner_agent_usage": None,
+    }
+
+
+def write_jsonl_result(result: dict, output_path: Path, *, append: bool = False) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    mode = "a" if append else "w"
+    with output_path.open(mode, encoding="utf-8") as file:
+        records = _jsonl_records(result)
+        for record in records:
+            file.write(json.dumps(record, ensure_ascii=False, default=str))
+            file.write("\n")
+    return output_path
+
+
+def _jsonl_records(result: dict) -> list[dict]:
+    base = {
+        "run_id": result["run_id"],
+        "evaluator_version": result["evaluator_version"],
+    }
+    records = [
+        {
+            **base,
+            "record_type": "run_summary",
+            "status": result["status"],
+            "scenario_count": result["scenario_count"],
+            "passed_count": result["passed_count"],
+            "failed_count": result["failed_count"],
+        }
+    ]
+    records.extend(
+        {
+            **base,
+            "record_type": "scenario_result",
+            "scenario_name": scenario["name"],
+            "passed": scenario["passed"],
+            "failures": scenario["failures"],
+            "details": scenario["details"],
+        }
+        for scenario in result["scenarios"]
+    )
+    return records
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Evaluate deterministic Chronos planning scenarios.")
+    parser.add_argument(
+        "--jsonl-output",
+        type=Path,
+        default=None,
+        help="Optional path to write offline evaluation JSONL records.",
+    )
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="Append JSONL records instead of overwriting the output file.",
+    )
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help="Optional stable run id for repeatable offline comparisons.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
-    result = run_evaluation()
+    args = _parse_args()
+    result = run_evaluation(run_id=args.run_id)
+    if args.jsonl_output is not None:
+        write_jsonl_result(result, args.jsonl_output, append=args.append)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     if result["status"] != "ok":
         raise SystemExit(1)
