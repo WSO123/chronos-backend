@@ -221,7 +221,25 @@ class ReportAndMeAPITests(unittest.TestCase):
     def test_me_overview_uses_current_user_only(self):
         self.client.post("/api/v1/tasks", json={"title": "Private overview task"}, headers=self.headers)
         self.client.get(f"/api/v1/today?plan_date={self.report_date}", headers=self.headers)
+        self.client.put(
+            "/api/v1/data-sources/calendar/google_calendar",
+            json={},
+            headers=self.headers,
+        )
+        self.client.post(
+            "/api/v1/reminders",
+            json={
+                "title": "Private overview reminder",
+                "scheduled_for": (datetime.now(ZoneInfo("UTC")) - timedelta(minutes=1)).isoformat(),
+            },
+            headers=self.headers,
+        )
         self.client.post("/api/v1/tasks", json={"title": "Other user task"}, headers=self.other_headers)
+        self.client.put(
+            "/api/v1/data-sources/email/gmail",
+            json={},
+            headers=self.other_headers,
+        )
 
         response = self.client.get(f"/api/v1/me/overview?today={self.report_date}", headers=self.headers)
 
@@ -229,6 +247,11 @@ class ReportAndMeAPITests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["profile"]["user_id"], str(self.user.id))
         self.assertEqual(body["tasks"]["active_task_count"], 1)
+        self.assertEqual(body["data_sources"]["connected_count"], 1)
+        self.assertEqual(body["data_sources"]["attention_count"], 0)
+        self.assertEqual(body["reminders"]["pending_count"], 1)
+        self.assertEqual(body["reminders"]["unseen_count"], 1)
+        self.assertEqual(body["reminders"]["due_count"], 1)
         self.assertEqual(body["reports"]["daily_report_available"], False)
         self.assertTrue(body["insights"]["highlights"])
         self.assertEqual(body["insights"]["suggested_next_view"], "insights_detail")

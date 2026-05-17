@@ -1271,7 +1271,9 @@ PATCH /api/v1/me/settings
 说明：
 
 - P1 返回基础数据总览。
-- Insights 已支持 P2 轻量详情；Energy、Social 作为后续入口。
+- P2 已支持 Insights 轻量详情。
+- P3 已在 Me Overview 增加 Data Source 和 Reminder 的入口级摘要，只返回 connected / attention / pending / unseen / due 等 counts，不返回完整列表。
+- 完整 Data Source / Reminder / Energy 仍进入二级页，避免 Me 变成复杂 dashboard。
 
 ### Energy
 

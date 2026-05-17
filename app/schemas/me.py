@@ -41,6 +41,18 @@ class MeReportsOverviewResponse(BaseModel):
     daily_report_id: uuid.UUID | None
 
 
+class MeDataSourcesOverviewResponse(BaseModel):
+    connected_count: int
+    sync_enabled_count: int
+    attention_count: int
+
+
+class MeRemindersOverviewResponse(BaseModel):
+    pending_count: int
+    unseen_count: int
+    due_count: int
+
+
 class MeSettingsOverviewResponse(BaseModel):
     notification_enabled: bool
     focus_mode_default_minutes: int
@@ -68,5 +80,7 @@ class MeOverviewResponse(BaseModel):
     goals: MeGoalOverviewResponse
     tasks: MeTaskOverviewResponse
     reports: MeReportsOverviewResponse
+    data_sources: MeDataSourcesOverviewResponse
+    reminders: MeRemindersOverviewResponse
     insights: MeInsightsOverviewResponse
     settings: MeSettingsOverviewResponse

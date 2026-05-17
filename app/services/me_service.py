@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, timedelta
+from datetime import UTC, date, datetime, timedelta
 import uuid
 
 from sqlalchemy import select
@@ -12,7 +12,9 @@ from app.models.goal import Goal
 from app.models.report import DailyReport
 from app.models.task import Task
 from app.models.user import User, UserSettings
+from app.services.data_source_service import data_source_service
 from app.services.errors import NotFoundError
+from app.services.reminder_service import reminder_service
 from app.services.report_service import report_service
 
 
@@ -41,6 +43,8 @@ class MeService:
         active_task_count = self._task_count(db, user_id=user_id, statuses={TaskStatus.ACTIVE, TaskStatus.IN_FOCUS})
         postponed_task_count = self._task_count(db, user_id=user_id, statuses={TaskStatus.POSTPONED})
         completed_task_count = self._task_count(db, user_id=user_id, statuses={TaskStatus.COMPLETED})
+        data_source_summary = data_source_service.sync_summary(db, user_id=user_id)
+        reminder_summary = reminder_service.reminder_summary(db, user_id=user_id, now=datetime.now(UTC))
 
         return {
             "profile": {
@@ -78,6 +82,16 @@ class MeService:
             "reports": {
                 "daily_report_available": daily_report is not None,
                 "daily_report_id": daily_report.id if daily_report else None,
+            },
+            "data_sources": {
+                "connected_count": data_source_summary["connected_count"],
+                "sync_enabled_count": data_source_summary["sync_enabled_count"],
+                "attention_count": data_source_summary["attention_count"],
+            },
+            "reminders": {
+                "pending_count": reminder_summary["pending_count"],
+                "unseen_count": reminder_summary["unseen_count"],
+                "due_count": reminder_summary["due_count"],
             },
             "insights": self._insights_overview(
                 completion_rate=metrics.completion_rate,

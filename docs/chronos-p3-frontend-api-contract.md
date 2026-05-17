@@ -35,6 +35,7 @@ P3 原则仍然是：外部能力只作为输入和上下文，不直接绕过�
 | Calendar / Email Fake Provider Adapter | internal provider registry | Ready |
 | Data Source Scheduler Plan | `GET /api/v1/scheduler/data-sources` | Ready |
 | Data Source Celery Beat Proposal | `GET /api/v1/scheduler/data-sources/celery-beat` | Ready |
+| Me Overview P3 Status | `GET /api/v1/me/overview` -> `data_sources` / `reminders` | Ready |
 | Energy Daily Metric Upsert | `PUT /api/v1/energy/daily-metrics` | Ready |
 | Energy Dashboard | `GET /api/v1/energy/dashboard` | Ready |
 | Health Energy Sync Worker | `health.sync_energy_connection` | Ready |
@@ -652,7 +653,36 @@ Rules:
 - 至少保留一个 reminder channel，不允许 in_app / push / email 全部关闭。
 - 当前 channel 只影响 reminder 记录上的 `channel` 字段，不触发真实发送。
 
-## 9. Reminder Center
+## 9. Me Overview P3 Status
+
+`GET /api/v1/me/overview` 是 Me 首页入口聚合。P3 只在这里补充数据接入和提醒的轻量状态，不展开完整二级页列表。
+
+Response fragment:
+
+```json
+{
+  "data_sources": {
+    "connected_count": 1,
+    "sync_enabled_count": 1,
+    "attention_count": 0
+  },
+  "reminders": {
+    "pending_count": 2,
+    "unseen_count": 1,
+    "due_count": 1
+  }
+}
+```
+
+Frontend notes:
+
+- Me 只展示入口级状态和可关注数字。
+- 完整数据源列表仍使用 `/api/v1/data-sources`。
+- 完整同步历史仍使用 `/api/v1/data-sources/{connection_id}/sync-runs`。
+- 完整提醒列表仍使用 `/api/v1/reminders`。
+- Me Overview 不触发 data source sync、不生成 reminder、不 dispatch reminder。
+
+## 10. Reminder Center
 
 Reminder Center 是 P3 自动提醒能力的承接层。当前只做提醒记录、列表、手动创建、dismiss 和 worker 规则生成，不做真实推送。
 
@@ -886,7 +916,7 @@ Rules:
 - `sent` / `dismissed` / `canceled` reminder 不能 snooze。
 - Snooze 不修改 Task / Goal / Today。
 
-## 10. Reminder Scheduler Plan
+## 11. Reminder Scheduler Plan
 
 ### GET `/api/v1/scheduler/reminders`
 
@@ -1030,7 +1060,7 @@ Rules:
 - 当前包含 deadline generation、execution fanout、due dispatch、delivery attempt cleanup。
 - 单用户 `reminder.generate_execution` 不直接进入 Beat；Beat 只使用安全 fanout worker。
 
-## 11. Scheduler Overview
+## 12. Scheduler Overview
 
 ### GET `/api/v1/scheduler/overview`
 
@@ -1102,7 +1132,7 @@ Rules:
 - 完整 guardrails 和 payload template 仍从 `/scheduler/data-sources`、`/scheduler/reminders` 读取。
 - Overview 不写数据库、不启动 worker、不修改 `celery_app.conf`。
 
-## 12. Data Source Scheduler Plan
+## 13. Data Source Scheduler Plan
 
 ### GET `/api/v1/scheduler/data-sources`
 
@@ -1202,14 +1232,14 @@ Rules:
 - 当前只包含 ready fanout worker。
 - 单连接 worker 不直接进入 Beat，必须由明确的连接级操作触发。
 
-## 13. 当前安全边界
+## 14. 当前安全边界
 
 - 仍使用开发态 `X-User-Id` 用户上下文。
 - 不保存外部平台 access token / refresh token。
 - 当前不接真实第三方 API。
 - 外部来源任务只进入 Capture / Inbox，由用户确认后再生成 Task / Goal。
 
-## 14. 后续 P3
+## 15. 后续 P3
 
 - 真实 Calendar / Email provider adapter。
 - 定时调度与失败重试策略。

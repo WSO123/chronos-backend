@@ -3,12 +3,14 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.models.activity_event import ActivityEvent
-from app.models.enums import DailyPlanItemStatus, ValueLevel
+from app.models.enums import DailyPlanItemStatus, DataSourceType, ValueLevel
 from app.models.report import DailyReport
+from app.services.data_source_service import data_source_service
 from app.services.focus_service import focus_service
 from app.services.goal_service import goal_service
 from app.services.me_service import me_service
 from app.services.planning_service import planning_service
+from app.services.reminder_service import reminder_service
 from app.services.report_service import report_service
 from app.services.task_service import task_service
 from tests.db import TestingSessionLocal, reset_database
@@ -219,6 +221,20 @@ class ReportAndMeServiceTests(unittest.TestCase):
 
     def test_me_overview_returns_basic_feedback_without_generating_report(self):
         task_service.create_task(self.db, user_id=self.user.id, title="Overview task")
+        data_source_service.connect_source(
+            self.db,
+            user_id=self.user.id,
+            source_type=DataSourceType.CALENDAR,
+            provider="google_calendar",
+        )
+        reminder_service.create_reminder(
+            self.db,
+            user_id=self.user.id,
+            payload={
+                "title": "Overview reminder",
+                "scheduled_for": datetime.now(ZoneInfo("UTC")) - timedelta(minutes=1),
+            },
+        )
         today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.report_date)
         item_id = today["sections"]["recommended_tasks"][0]["daily_plan_item_id"]
         planning_service.update_item_status(
@@ -235,6 +251,11 @@ class ReportAndMeServiceTests(unittest.TestCase):
         self.assertEqual(overview["today"]["completion_rate"], 1.0)
         self.assertEqual(overview["tasks"]["completed_task_count"], 1)
         self.assertEqual(overview["reports"]["daily_report_available"], False)
+        self.assertEqual(overview["data_sources"]["connected_count"], 1)
+        self.assertEqual(overview["data_sources"]["attention_count"], 0)
+        self.assertEqual(overview["reminders"]["pending_count"], 1)
+        self.assertEqual(overview["reminders"]["unseen_count"], 1)
+        self.assertEqual(overview["reminders"]["due_count"], 1)
         self.assertEqual(overview["insights"]["highlights"][0]["key"], "strong_today")
         self.assertEqual(overview["insights"]["suggested_next_view"], "insights_detail")
         self.assertTrue(overview["insights"]["detail_available"])
