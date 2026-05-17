@@ -205,6 +205,14 @@ uv run python scripts/smoke_llm_provider.py
 AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_ALLOWED_MODELS=gpt-4.1-mini LLM_API_KEY=... uv run python scripts/smoke_llm_provider.py --allow-real-llm
 ```
 
+真实 provider 验收记录：
+
+```text
+docs/llm-provider-acceptance/TEMPLATE.md
+```
+
+每次真实 provider 验收都应记录 provider、model、prompt version、prompt checksum、usage、latency、provider response id、planner eval JSONL compare 结果和最终结论。记录中不能包含 API key、真实用户输入或 provider 原始敏感响应。
+
 真实 provider 保护边界：
 
 - `LLM_ALLOWED_PROVIDERS` 限制可发起真实请求的 provider。

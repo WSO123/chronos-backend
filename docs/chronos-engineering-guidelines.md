@@ -607,6 +607,7 @@ AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_ALLOWED_M
 - `LLM_ALLOWED_MODELS` 覆盖目标 model。
 - `LLM_MAX_OUTPUT_TOKENS` 为正数且足够小。
 - guard 失败时 Today / Strategy 仍走 fallback，不阻塞执行闭环。
+- 使用 [LLM Provider Acceptance Template](./llm-provider-acceptance/TEMPLATE.md) 记录 model、usage、prompt checksum、JSONL compare 和最终结论。
 
 或通过统一验证入口追加：
 

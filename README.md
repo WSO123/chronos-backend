@@ -84,6 +84,12 @@ uv run python scripts/smoke_llm_provider.py
 AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_ALLOWED_MODELS=gpt-4.1-mini LLM_API_KEY=... uv run python scripts/smoke_llm_provider.py --allow-real-llm
 ```
 
+真实 provider 手动验收需要按模板记录 model、usage、prompt checksum、JSONL compare 和最终结论：
+
+```text
+docs/llm-provider-acceptance/TEMPLATE.md
+```
+
 执行数据库迁移：
 
 ```bash

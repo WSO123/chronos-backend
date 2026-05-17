@@ -307,6 +307,6 @@ git diff --check
 
 ## 13. 后续迭代建议
 
-1. 增加真实 provider 手动验收记录模板，记录 model、usage、prompt checksum、JSONL compare 结果和结论。
+1. 已在后续迭代补充真实 provider 手动验收记录模板，记录 model、usage、prompt checksum、JSONL compare 结果和结论。
 2. 增加多 Goal 竞争 / 超期目标恢复的 planner eval 场景。
 3. 将 compare 输出接入后续手动发布 checklist。
