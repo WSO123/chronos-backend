@@ -295,12 +295,12 @@ git diff --check
 
 ### 已知问题
 
-- fallback 检查仍是人工 checkbox，后续可以增加 synthetic fallback smoke 或 failure-path evidence。
+- fallback 检查已在后续 [P2 Daily Planner Fallback Smoke Evidence](./2026-05-17-p2-daily-planner-fallback-smoke.md) 中改为 synthetic fallback smoke evidence。
 
 ---
 
 ## 13. 后续迭代建议
 
-1. 为 Daily Planner Agent fallback 增加手动 / 自动 smoke evidence，减少验收记录中 fallback 人工核对。
+1. 已为 Daily Planner Agent fallback 增加自动 smoke evidence，验收记录不再依赖 fallback 人工核对。
 2. 为 Today Strategy Detail 增加更清晰的 goal-aware explanation 文案，但仍不进入 Today 首屏。
 3. 增加 planner eval 数值阈值 policy，例如 selected minutes、over capacity 和关键 score signal 的允许范围。

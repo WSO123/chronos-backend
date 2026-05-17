@@ -303,7 +303,7 @@ git diff --check
 
 ### 已知问题
 
-- fallback 检查仍是人工 checkbox，后续可以让 smoke 或服务层输出更多可验证字段。
+- fallback 检查已在后续 [P2 Daily Planner Fallback Smoke Evidence](./2026-05-17-p2-daily-planner-fallback-smoke.md) 中改为结构化 smoke JSON。
 
 ---
 

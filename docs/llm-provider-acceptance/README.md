@@ -6,7 +6,7 @@
 
 ## 使用方式
 
-1. 优先使用 `scripts/generate_llm_acceptance_record.py` 从 smoke / compare / policy JSON 输出生成草稿；必要时从 [TEMPLATE.md](./TEMPLATE.md) 手动复制一份记录。
+1. 优先使用 `scripts/generate_llm_acceptance_record.py` 从 provider smoke / fallback smoke / compare / policy JSON 输出生成草稿；必要时从 [TEMPLATE.md](./TEMPLATE.md) 手动复制一份记录。
 2. 文件命名建议：
 
 ```text
@@ -24,6 +24,7 @@ YYYY-MM-DD-<provider>-<model>-<purpose>.md
 - provider / model / base URL 类型。
 - commit hash 和测试日期。
 - `scripts/smoke_llm_provider.py` 的输出摘要。
+- `scripts/smoke_daily_planner_fallback.py` 的输出摘要，用于证明 provider 失败时 Today 仍可走 Planning Engine。
 - prompt version 和 prompt checksum。
 - task id preservation 明细：`expected_task_ids`、`output_task_ids`、`task_ids_preserved`、`task_id_set_preserved`。
 - usage / latency / response id 摘要。
@@ -59,6 +60,12 @@ LLM_API_KEY=<redacted> \
 uv run python scripts/smoke_llm_provider.py --allow-real-llm
 ```
 
+Daily Planner fallback smoke，不发网络请求：
+
+```bash
+uv run python scripts/smoke_daily_planner_fallback.py
+```
+
 Planner eval JSONL 对比：
 
 ```bash
@@ -73,6 +80,7 @@ uv run python scripts/check_planner_eval_policy.py /tmp/chronos-planner-candidat
 ```bash
 uv run python scripts/generate_llm_acceptance_record.py \
   --smoke-json /tmp/chronos-llm-smoke.json \
+  --fallback-json /tmp/chronos-llm-fallback.json \
   --compare-json /tmp/chronos-planner-compare.json \
   --policy-json /tmp/chronos-planner-policy.json \
   --provider openai \
@@ -81,4 +89,4 @@ uv run python scripts/generate_llm_acceptance_record.py \
   --output docs/llm-provider-acceptance/YYYY-MM-DD-openai-gpt-4-1-mini-daily-planner-smoke.md
 ```
 
-脚本只生成草稿，不调用真实 provider，不代表免 review。生成后仍需人工核对 fallback 和 changed 原因；task id preservation 会优先使用 smoke JSON 中的结构化字段。
+脚本只生成草稿，不调用真实 provider，不代表免 review。生成后仍需人工核对 changed 原因和业务语义；task id preservation 与 fallback 可用性会优先使用 smoke JSON 中的结构化字段。

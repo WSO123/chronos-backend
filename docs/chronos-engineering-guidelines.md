@@ -611,6 +611,7 @@ uv run python scripts/generate_llm_acceptance_record.py \
 
 生成结果仍必须人工 review；脚本默认隐藏 provider response id，不应把 API key、真实用户输入或 provider 原始响应写入验收记录。
 真实 provider smoke 输出中应包含 `expected_task_ids`、`output_task_ids`、`task_ids_preserved`、`task_id_set_preserved`、`task_count_preserved`、`missing_task_ids` 和 `unexpected_task_ids`，用于证明 provider 没有改写、删除或新增任务。
+真实 provider 验收还必须运行 `uv run python scripts/smoke_daily_planner_fallback.py`，并在验收记录中沉淀 `fallback_verified`、`planning_engine_used`、`planner_agent_status`、`planner_agent_failure_type` 和 `planner_agent_output_applied`，用于证明 provider 失败时 Today 仍可返回 Planning Engine fallback。
 
 涉及 Daily Planner Agent shell 或 LLM provider 时，额外执行：
 
@@ -623,6 +624,7 @@ uv run python -m unittest tests.test_daily_planner_agent tests.test_today_servic
 ```bash
 uv run python scripts/smoke_llm_provider.py
 AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_ALLOWED_MODELS=gpt-4.1-mini LLM_API_KEY=... uv run python scripts/smoke_llm_provider.py --allow-real-llm
+uv run python scripts/smoke_daily_planner_fallback.py
 ```
 
 真实 provider 相关改动必须确认：
@@ -631,7 +633,7 @@ AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_ALLOWED_M
 - `LLM_ALLOWED_MODELS` 覆盖目标 model。
 - `LLM_MAX_OUTPUT_TOKENS` 为正数且足够小。
 - guard 失败时 Today / Strategy 仍走 fallback，不阻塞执行闭环。
-- 使用 [LLM Provider Acceptance Template](./llm-provider-acceptance/TEMPLATE.md) 记录 model、usage、prompt checksum、JSONL compare 和最终结论。
+- 使用 [LLM Provider Acceptance Template](./llm-provider-acceptance/TEMPLATE.md) 记录 model、usage、prompt checksum、fallback smoke、JSONL compare 和最终结论。
 
 或通过统一验证入口追加：
 

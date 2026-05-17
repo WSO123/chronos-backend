@@ -12,6 +12,7 @@ class LLMProviderAcceptanceRecordGeneratorTests(unittest.TestCase):
     def test_generate_acceptance_record_accepts_clean_inputs_and_redacts_response_id(self):
         markdown = generate_acceptance_markdown(
             smoke=_smoke(status="ok", provider_response_id="resp_secret_123"),
+            fallback=_fallback(status="ok"),
             compare=_compare(status="ok"),
             policy=_policy(status="ok"),
             purpose="daily-planner-smoke",
@@ -29,12 +30,15 @@ class LLMProviderAcceptanceRecordGeneratorTests(unittest.TestCase):
         self.assertNotIn("resp_secret_123", markdown)
         self.assertIn("scripts/check_planner_eval_policy.py", markdown)
         self.assertIn("| Task ids preserved | True |", markdown)
+        self.assertIn("| Fallback verified | True |", markdown)
         self.assertIn("- [x] task ids 未被 provider 改写且顺序保持一致。", markdown)
         self.assertIn("- [x] task 集合未被 provider 增删。", markdown)
+        self.assertIn("- [x] 失败时 Today 仍可走 Planning Engine fallback。", markdown)
 
     def test_generate_acceptance_record_marks_changed_as_notes(self):
         markdown = generate_acceptance_markdown(
             smoke=_smoke(status="ok"),
+            fallback=_fallback(status="ok"),
             compare=_compare(status="changed", changed_count=2),
             policy=_policy(status="changed", change_count=1),
             record_date="2026-05-17",
@@ -47,6 +51,7 @@ class LLMProviderAcceptanceRecordGeneratorTests(unittest.TestCase):
     def test_generate_acceptance_record_rejects_regression(self):
         markdown = generate_acceptance_markdown(
             smoke={**_smoke(status="ok"), "error": "raw provider response should not appear"},
+            fallback=_fallback(status="ok"),
             compare=_compare(status="regressed", regression_count=1),
             policy=_policy(status="ok"),
             record_date="2026-05-17",
@@ -60,6 +65,7 @@ class LLMProviderAcceptanceRecordGeneratorTests(unittest.TestCase):
     def test_generate_acceptance_record_blocks_skipped_smoke(self):
         markdown = generate_acceptance_markdown(
             smoke={"status": "skipped", "reason": "safe default"},
+            fallback=_fallback(status="ok"),
             compare=_compare(status="ok"),
             policy=_policy(status="ok"),
             record_date="2026-05-17",
@@ -80,6 +86,7 @@ class LLMProviderAcceptanceRecordGeneratorTests(unittest.TestCase):
 
         markdown = generate_acceptance_markdown(
             smoke=smoke,
+            fallback=_fallback(status="ok"),
             compare=_compare(status="ok"),
             policy=_policy(status="ok"),
             record_date="2026-05-17",
@@ -90,6 +97,37 @@ class LLMProviderAcceptanceRecordGeneratorTests(unittest.TestCase):
         self.assertIn("| Missing task ids | [\"manual-smoke-task-1\"] |", markdown)
         self.assertIn("| Unexpected task ids | [\"other-task\"] |", markdown)
         self.assertIn("- [ ] task ids 未被 provider 改写且顺序保持一致。", markdown)
+
+    def test_generate_acceptance_record_blocks_missing_fallback_evidence(self):
+        markdown = generate_acceptance_markdown(
+            smoke=_smoke(status="ok"),
+            compare=_compare(status="ok"),
+            policy=_policy(status="ok"),
+            record_date="2026-05-17",
+        )
+
+        self.assertIn("> 状态：Blocked", markdown)
+        self.assertIn("Fallback smoke JSON is missing", markdown)
+        self.assertIn("- [ ] 失败时 Today 仍可走 Planning Engine fallback。", markdown)
+
+    def test_generate_acceptance_record_rejects_failed_fallback_evidence(self):
+        fallback = {
+            **_fallback(status="failed"),
+            "fallback_verified": False,
+            "planner_agent_status": "failed",
+        }
+
+        markdown = generate_acceptance_markdown(
+            smoke=_smoke(status="ok"),
+            fallback=fallback,
+            compare=_compare(status="ok"),
+            policy=_policy(status="ok"),
+            record_date="2026-05-17",
+        )
+
+        self.assertIn("> 状态：Rejected", markdown)
+        self.assertIn("Fallback smoke status is failed", markdown)
+        self.assertIn("| Fallback verified | False |", markdown)
 
     def test_load_json_payload_extracts_json_from_command_output(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -103,6 +141,7 @@ class LLMProviderAcceptanceRecordGeneratorTests(unittest.TestCase):
     def test_generate_acceptance_record_renders_empty_diff_details(self):
         markdown = generate_acceptance_markdown(
             smoke=_smoke(status="ok"),
+            fallback=_fallback(status="ok"),
             compare=_compare(status="changed", changed_count=1),
             policy=_policy(status="ok"),
             record_date="2026-05-17",
@@ -115,9 +154,11 @@ class LLMProviderAcceptanceRecordGeneratorTests(unittest.TestCase):
             tmp_path = Path(tmp_dir)
             smoke_path = tmp_path / "smoke.json"
             compare_path = tmp_path / "compare.json"
+            fallback_path = tmp_path / "fallback.json"
             policy_path = tmp_path / "policy.json"
             output_path = tmp_path / "acceptance.md"
             smoke_path.write_text(json.dumps(_smoke(status="ok")), encoding="utf-8")
+            fallback_path.write_text(json.dumps(_fallback(status="ok")), encoding="utf-8")
             compare_path.write_text(json.dumps(_compare(status="ok")), encoding="utf-8")
             policy_path.write_text(json.dumps(_policy(status="ok")), encoding="utf-8")
 
@@ -127,6 +168,8 @@ class LLMProviderAcceptanceRecordGeneratorTests(unittest.TestCase):
                     "scripts/generate_llm_acceptance_record.py",
                     "--smoke-json",
                     str(smoke_path),
+                    "--fallback-json",
+                    str(fallback_path),
                     "--compare-json",
                     str(compare_path),
                     "--policy-json",
@@ -171,6 +214,30 @@ def _smoke(*, status: str, provider_response_id: str | None = "resp_123") -> dic
             "cost_usd": 0.001,
         },
         "provider_response_id": provider_response_id,
+    }
+
+
+def _fallback(*, status: str) -> dict:
+    return {
+        "status": status,
+        "scenario": "daily_planner_provider_failure",
+        "fallback_verified": status == "ok",
+        "today_available": status == "ok",
+        "planning_engine_used": status == "ok",
+        "daily_plan_id": "daily-plan-1",
+        "ai_job_id": "ai-job-1",
+        "planner_agent_status": "succeeded_with_fallback" if status == "ok" else "failed",
+        "planner_agent_provider": "openai",
+        "planner_agent_model": "gpt-4.1-mini",
+        "planner_agent_failure_type": "provider_error",
+        "planner_agent_output_applied": False,
+        "fallback_reason": "daily_planner_agent_failed",
+        "fallback_error_type": "LLMProviderError",
+        "fallback_root_error_type": "LLMProviderError",
+        "provider_observability_version": "v1",
+        "latency_ms": 5,
+        "task_count": 1,
+        "task_titles": ["Fallback protected task"],
     }
 
 

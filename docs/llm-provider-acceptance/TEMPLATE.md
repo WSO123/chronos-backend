@@ -93,6 +93,7 @@
 ```bash
 uv run python scripts/generate_llm_acceptance_record.py \
   --smoke-json /tmp/chronos-llm-smoke.json \
+  --fallback-json /tmp/chronos-llm-fallback.json \
   --compare-json /tmp/chronos-planner-compare.json \
   --policy-json /tmp/chronos-planner-policy.json \
   --output docs/llm-provider-acceptance/YYYY-MM-DD-provider-model-purpose.md
@@ -164,6 +165,33 @@ uv run python scripts/smoke_llm_provider.py --allow-real-llm
 }
 ```
 
+### Daily Planner fallback smoke
+
+该命令不调用真实 provider。它会强制 real-provider guard 失败，验证 Today / Strategy 仍能返回 Planning Engine fallback 结果。
+
+```bash
+uv run python scripts/smoke_daily_planner_fallback.py
+```
+
+结果摘要：
+
+```json
+{
+  "status": "ok",
+  "scenario": "daily_planner_provider_failure",
+  "fallback_verified": true,
+  "today_available": true,
+  "planning_engine_used": true,
+  "planner_agent_status": "succeeded_with_fallback",
+  "planner_agent_provider": "openai",
+  "planner_agent_model": "gpt-4.1-mini",
+  "planner_agent_failure_type": "provider_error",
+  "planner_agent_output_applied": false,
+  "fallback_reason": "daily_planner_agent_failed",
+  "fallback_root_error_type": "LLMProviderError"
+}
+```
+
 ### Planner eval baseline / candidate
 
 ```bash
@@ -225,6 +253,25 @@ uv run python scripts/check_planner_eval_policy.py /tmp/chronos-planner-candidat
 | Cost USD |  |
 | Provider response id |  |
 
+### Fallback smoke output
+
+| 项 | 值 |
+| --- | --- |
+| Status |  |
+| Scenario |  |
+| Fallback verified |  |
+| Today available |  |
+| Planning Engine used |  |
+| AI job id |  |
+| Planner status |  |
+| Planner provider |  |
+| Planner model |  |
+| Failure type |  |
+| Output applied |  |
+| Fallback reason |  |
+| Fallback root error type |  |
+| Task count |  |
+
 ### Planner compare output
 
 | 项 | 值 |
@@ -257,7 +304,7 @@ uv run python scripts/check_planner_eval_policy.py /tmp/chronos-planner-candidat
 - [ ] task 集合未增删。
 - [ ] `compare_planner_eval_jsonl.py` 没有 regression。
 - [ ] `check_planner_eval_policy.py` 没有 regression；如为 changed，已记录原因和结论。
-- [ ] Fallback 仍可用。
+- [ ] Fallback smoke `status=ok` 且 `fallback_verified=true`。
 
 ### 可以接受但需要记录
 

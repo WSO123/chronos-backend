@@ -24,6 +24,7 @@ def load_json_payload(path: Path) -> dict[str, Any]:
 def generate_acceptance_markdown(
     *,
     smoke: dict[str, Any],
+    fallback: dict[str, Any] | None = None,
     compare: dict[str, Any],
     policy: dict[str, Any],
     provider: str | None = None,
@@ -38,9 +39,15 @@ def generate_acceptance_markdown(
     notes: str = "",
 ) -> str:
     record_date = record_date or date.today().isoformat()
+    fallback = fallback or {}
     resolved_provider = provider or _text(smoke.get("provider"), "<provider>")
     resolved_model = model or _text(smoke.get("model"), "<model>")
-    conclusion, conclusion_reason = _infer_conclusion(smoke=smoke, compare=compare, policy=policy)
+    conclusion, conclusion_reason = _infer_conclusion(
+        smoke=smoke,
+        fallback=fallback,
+        compare=compare,
+        policy=policy,
+    )
     prompt_version = _text(smoke.get("prompt_version"), "<prompt_version>")
     prompt_checksum = _text(smoke.get("prompt_checksum"), "<prompt_checksum>")
 
@@ -58,7 +65,7 @@ def generate_acceptance_markdown(
             "",
             "## 1. 验收摘要",
             "",
-            "自动生成的 LLM provider 验收草稿，用于汇总 smoke、planner eval compare 和 golden policy check 结果。",
+            "自动生成的 LLM provider 验收草稿，用于汇总 provider smoke、fallback smoke、planner eval compare 和 golden policy check 结果。",
             "",
             "### 最终结论",
             "",
@@ -125,7 +132,7 @@ def generate_acceptance_markdown(
                 smoke.get("task_id_set_preserved") is True and smoke.get("task_count_preserved") is True,
                 "task 集合未被 provider 增删。",
             ),
-            "- [ ] 失败时 Today 仍可走 Planning Engine fallback。需要人工或测试记录确认。",
+            _checkbox(_fallback_verified(fallback), "失败时 Today 仍可走 Planning Engine fallback。"),
             "- [x] 没有在本草稿中写入 API key、真实用户输入或 provider 原始敏感响应。",
             "",
             "---",
@@ -149,6 +156,12 @@ def generate_acceptance_markdown(
             "LLM_MAX_OUTPUT_TOKENS=800 \\",
             "LLM_API_KEY=<redacted> \\",
             "uv run python scripts/smoke_llm_provider.py --allow-real-llm",
+            "```",
+            "",
+            "### Daily Planner fallback smoke",
+            "",
+            "```bash",
+            "uv run python scripts/smoke_daily_planner_fallback.py",
             "```",
             "",
             "### Planner eval baseline / candidate",
@@ -181,6 +194,14 @@ def generate_acceptance_markdown(
             "Smoke JSON 摘要：",
             "",
             _json_block(_safe_summary(smoke, fields=_smoke_summary_fields())),
+            "",
+            "### Fallback smoke output",
+            "",
+            _fallback_table(fallback),
+            "",
+            "Fallback JSON 摘要：",
+            "",
+            _json_block(_safe_summary(fallback, fields=_fallback_summary_fields())),
             "",
             "### Planner compare output",
             "",
@@ -216,7 +237,7 @@ def generate_acceptance_markdown(
             _checkbox(smoke.get("task_ids_preserved") is True, "task ids 未变化。"),
             _checkbox(compare.get("status") != "regressed", "`compare_planner_eval_jsonl.py` 没有 regression。"),
             _checkbox(policy.get("status") != "regressed", "`check_planner_eval_policy.py` 没有 regression。"),
-            "- [ ] Fallback 仍可用。需要人工或自动化记录补充。",
+            _checkbox(_fallback_verified(fallback), "Fallback 仍可用。"),
             "",
             "### 可以接受但需要记录",
             "",
@@ -237,7 +258,7 @@ def generate_acceptance_markdown(
             "",
             "| 风险 | 影响 | 应对 |",
             "| --- | --- | --- |",
-            _risk_row(compare=compare, policy=policy),
+            _risk_row(fallback=fallback, compare=compare, policy=policy),
             "",
             "### 后续动作",
             "",
@@ -270,8 +291,15 @@ def generate_acceptance_markdown(
     )
 
 
-def _infer_conclusion(*, smoke: dict[str, Any], compare: dict[str, Any], policy: dict[str, Any]) -> tuple[str, str]:
+def _infer_conclusion(
+    *,
+    smoke: dict[str, Any],
+    fallback: dict[str, Any],
+    compare: dict[str, Any],
+    policy: dict[str, Any],
+) -> tuple[str, str]:
     smoke_status = smoke.get("status")
+    fallback_status = fallback.get("status")
     compare_status = compare.get("status")
     policy_status = policy.get("status")
     if smoke_status == "skipped":
@@ -282,6 +310,12 @@ def _infer_conclusion(*, smoke: dict[str, Any], compare: dict[str, Any], policy:
         return "Rejected", "Smoke reported task id preservation failure."
     if smoke.get("task_id_set_preserved") is False or smoke.get("task_count_preserved") is False:
         return "Rejected", "Smoke reported task set preservation failure."
+    if not fallback:
+        return "Blocked", "Fallback smoke JSON is missing, so this record cannot prove Today fallback behavior."
+    if fallback_status != "ok":
+        return "Rejected", f"Fallback smoke status is {fallback_status or 'unknown'}."
+    if not _fallback_verified(fallback):
+        return "Rejected", "Fallback smoke did not verify Planning Engine fallback."
     if compare_status == "regressed" or _number(compare.get("regression_count")) > 0:
         return "Rejected", "Planner compare reported a regression."
     if policy_status == "regressed" or _number(policy.get("regression_count")) > 0:
@@ -325,6 +359,26 @@ def _smoke_table(smoke: dict[str, Any]) -> str:
         ("Total tokens", usage.get("total_tokens")),
         ("Cost USD", usage.get("cost_usd")),
         ("Provider response id", _redacted_response_id(smoke.get("provider_response_id"))),
+    ]
+    return _markdown_table(rows)
+
+
+def _fallback_table(fallback: dict[str, Any]) -> str:
+    rows = [
+        ("Status", fallback.get("status")),
+        ("Scenario", fallback.get("scenario")),
+        ("Fallback verified", fallback.get("fallback_verified")),
+        ("Today available", fallback.get("today_available")),
+        ("Planning Engine used", fallback.get("planning_engine_used")),
+        ("AI job id", fallback.get("ai_job_id")),
+        ("Planner status", fallback.get("planner_agent_status")),
+        ("Planner provider", fallback.get("planner_agent_provider")),
+        ("Planner model", fallback.get("planner_agent_model")),
+        ("Failure type", fallback.get("planner_agent_failure_type")),
+        ("Output applied", fallback.get("planner_agent_output_applied")),
+        ("Fallback reason", fallback.get("fallback_reason")),
+        ("Fallback root error type", fallback.get("fallback_root_error_type")),
+        ("Task count", fallback.get("task_count")),
     ]
     return _markdown_table(rows)
 
@@ -425,6 +479,30 @@ def _smoke_summary_fields() -> list[str]:
     ]
 
 
+def _fallback_summary_fields() -> list[str]:
+    return [
+        "status",
+        "scenario",
+        "fallback_verified",
+        "today_available",
+        "planning_engine_used",
+        "daily_plan_id",
+        "ai_job_id",
+        "planner_agent_status",
+        "planner_agent_provider",
+        "planner_agent_model",
+        "planner_agent_failure_type",
+        "planner_agent_output_applied",
+        "fallback_reason",
+        "fallback_error_type",
+        "fallback_root_error_type",
+        "provider_observability_version",
+        "latency_ms",
+        "task_count",
+        "task_titles",
+    ]
+
+
 def _compare_summary_fields() -> list[str]:
     return [
         "comparison_version",
@@ -458,12 +536,26 @@ def _json_block(payload: dict[str, Any]) -> str:
     return "```json\n" + json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n```"
 
 
-def _risk_row(*, compare: dict[str, Any], policy: dict[str, Any]) -> str:
+def _risk_row(*, fallback: dict[str, Any], compare: dict[str, Any], policy: dict[str, Any]) -> str:
+    if not fallback or not _fallback_verified(fallback):
+        return "| Fallback evidence missing | 真实 provider 失败时可能阻断 Today | 运行 `scripts/smoke_daily_planner_fallback.py` 并重生成验收记录 |"
     if compare.get("status") == "regressed" or policy.get("status") == "regressed":
         return "| Planner regression | 不能接受真实 provider / prompt 改动 | 修复后重跑 smoke、compare 和 policy check |"
     if compare.get("status") == "changed" or policy.get("status") == "changed":
         return "| Planner behavior changed | 可能影响 Today 编排信任 | 人工解释变化来源，必要时更新 baseline policy |"
-    return "| 未发现自动化阻断项 | 仍需人工确认 task ids / fallback | 按模板完成 review |"
+    return "| 未发现自动化阻断项 | 仍需人工确认业务语义与 changed 原因 | 按模板完成 review |"
+
+
+def _fallback_verified(fallback: dict[str, Any]) -> bool:
+    return (
+        fallback.get("status") == "ok"
+        and fallback.get("fallback_verified") is True
+        and fallback.get("today_available") is True
+        and fallback.get("planning_engine_used") is True
+        and fallback.get("planner_agent_status") == "succeeded_with_fallback"
+        and fallback.get("planner_agent_output_applied") is False
+        and fallback.get("planner_agent_failure_type") == "provider_error"
+    )
 
 
 def _extract_first_json_object(text: str, *, path: Path) -> dict[str, Any]:
@@ -550,6 +642,12 @@ def _escape_cell(value: Any) -> str:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a Markdown LLM provider acceptance draft.")
     parser.add_argument("--smoke-json", type=Path, required=True, help="Path to smoke_llm_provider.py JSON output.")
+    parser.add_argument(
+        "--fallback-json",
+        type=Path,
+        required=True,
+        help="Path to smoke_daily_planner_fallback.py JSON output.",
+    )
     parser.add_argument("--compare-json", type=Path, required=True, help="Path to planner eval compare JSON output.")
     parser.add_argument("--policy-json", type=Path, required=True, help="Path to planner eval policy check JSON output.")
     parser.add_argument("--output", type=Path, default=None, help="Optional Markdown output path. Defaults to stdout.")
@@ -570,6 +668,7 @@ def main() -> None:
     args = _parse_args()
     markdown = generate_acceptance_markdown(
         smoke=load_json_payload(args.smoke_json),
+        fallback=load_json_payload(args.fallback_json),
         compare=load_json_payload(args.compare_json),
         policy=load_json_payload(args.policy_json),
         provider=args.provider,
