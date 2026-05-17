@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
 
     # Security
+    ENVIRONMENT: str = "development"
+    AUTH_MODE: str = "dev_header"
+    ALLOW_DEV_AUTH_HEADER: bool = True
     SECRET_KEY: str = "change-me-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30

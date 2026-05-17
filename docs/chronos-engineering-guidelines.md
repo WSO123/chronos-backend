@@ -234,6 +234,15 @@ user_id
 
 P1 即使是单用户开发模式，也保留 `user_id`。
 
+### 4.1.1 认证与权限边界
+
+- API 层必须通过 `get_current_user_id` 或 `get_current_user` 获取用户上下文，不能信任 request body / query / path 中由客户端传入的 `user_id`。
+- 本地开发可以使用 `AUTH_MODE=dev_header` + `X-User-Id`，但只允许在 `ENVIRONMENT` 非 production 且 `ALLOW_DEV_AUTH_HEADER=true` 时启用。
+- 生产或准生产环境必须使用 `AUTH_MODE=jwt` + `Authorization: Bearer <access_token>`。
+- production 环境使用 JWT 时，`SECRET_KEY` 不能保留默认值。
+- 无论认证模式如何，业务 Service 仍必须按 `user_id` 过滤资源，保持多用户隔离。
+- `is_active=false` 的用户必须在 API 入口被拒绝，不能进入业务 Service。
+
 ### 4.2 状态字段
 
 状态字段必须使用明确枚举，不使用随意字符串。

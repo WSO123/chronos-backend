@@ -230,7 +230,7 @@ P1 暂不深入：
 
 为了避免开发时反复摇摆，P1 先采用以下默认决策：
 
-- 用户体系：P1 采用单用户开发模式，但数据库保留 `user_id`。后端提供 `get_current_user` 开发 stub，默认返回 seed user；不在 P1 做完整注册、登录和权限系统。
+- 用户体系：P1 保留本地开发态 `X-User-Id`，但认证边界已经拆为 `AUTH_MODE=dev_header` 和 `AUTH_MODE=jwt`。开发态 header 只能在非 production 环境启用；生产 / 准生产必须使用 Bearer access token。数据库和 Service 层继续保留 `user_id` 多用户隔离；暂不做完整注册、登录和 refresh token 生命周期。
 - AI 接入：P1 支持真实 LLM adapter，但核心流程必须有规则 fallback / mock AI 输出。不能让 Capture、Today、Focus、Report 因 LLM 不可用而不可用。
 - DailyPlan 生成时机：用户首次打开当天 `Today` 时，如果不存在 active plan，则 lazy create；用户主动 replan 时生成新 version。
 - Focus 范围：P1 只做 start / complete / interrupt / postpone。`pause` 状态保留，但不作为 P1 必做。
@@ -1935,7 +1935,7 @@ AI output -> schema validation -> service decision -> DB write
 - LangGraph agents
 - AgentRun 状态模型
 - 真实 OAuth / provider adapters
-- 生产级鉴权
+- 完整注册 / 登录 / refresh token 生命周期
 - 生产级 worker 调度、失败重试与监控
 - P3 Health / Energy 数据导入
 - P3 Notification / Reminder Center

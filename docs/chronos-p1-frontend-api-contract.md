@@ -38,11 +38,22 @@ http://localhost:8000/api/v1
 
 ### Auth / User Context
 
-P1 暂未接真实登录，所有业务接口都必须传：
+本地开发默认使用开发态用户上下文，所有业务接口都必须传：
 
 ```http
 X-User-Id: <user_uuid>
 ```
+
+生产或准生产环境必须改用 Bearer access token：
+
+```http
+Authorization: Bearer <access_token>
+```
+
+后端通过 `AUTH_MODE` 控制认证模式：
+
+- `AUTH_MODE=dev_header`：仅用于本地开发，读取 `X-User-Id`。当 `ENVIRONMENT=production` 或 `ALLOW_DEV_AUTH_HEADER=false` 时会失败关闭。
+- `AUTH_MODE=jwt`：读取 `Authorization: Bearer ...`，并校验 token subject 对应的用户存在且 `is_active=true`。此模式不会接受 `X-User-Id` 作为认证凭据；production 环境下 `SECRET_KEY` 不能保留默认值。
 
 本地可通过以下命令创建用户和 demo 数据：
 
@@ -71,7 +82,13 @@ uv run python scripts/dev_seed_demo.py
 | --- | --- | --- |
 | `MISSING_USER_ID` | 400 | 开发态提示缺少 `X-User-Id` |
 | `INVALID_USER_ID` | 400 | 用户上下文损坏，回到开发态入口 |
+| `AUTH_REQUIRED` | 401 | 生产认证缺少 Bearer token，跳转登录 |
+| `INVALID_AUTH_HEADER` | 401 | Authorization 格式错误，重新登录 |
+| `INVALID_ACCESS_TOKEN` | 401 | token 无效，重新登录 |
+| `ACCESS_TOKEN_EXPIRED` | 401 | token 过期，刷新 token 或重新登录 |
 | `USER_NOT_FOUND` | 404 | 当前 user 不存在，重新 seed / 登录 |
+| `USER_INACTIVE` | 403 | 用户已停用，退出当前会话 |
+| `INSECURE_AUTH_CONFIGURATION` | 500 | 后端认证配置不安全，前端提示环境配置错误 |
 | `NOT_FOUND` | 404 | 资源不存在或不属于当前用户 |
 | `INVALID_STATE` | 400 | 按钮状态过期，刷新当前页面 |
 | `VALIDATION_ERROR` | 400 | 业务字段不合法 |

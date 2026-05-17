@@ -96,7 +96,7 @@ docs/llm-provider-acceptance/TEMPLATE.md
 uv run alembic upgrade head
 ```
 
-创建本地开发用户，并复制输出的 `X-User-Id` 到后续 API 请求头：
+创建本地开发用户，并复制输出的 `X-User-Id` 到后续 API 请求头。本地默认 `AUTH_MODE=dev_header`；生产 / 准生产环境应使用 `AUTH_MODE=jwt` 和 `Authorization: Bearer <access_token>`，不要继续信任开发态 header。
 
 ```bash
 uv run python scripts/dev_seed_user.py
@@ -220,7 +220,7 @@ uv run python -m compileall app tests scripts
 git diff --check
 ```
 
-`scripts/dev_seed_demo.py` 用于前端和手动体验，默认创建 `demo@chronos.local` 用户并输出 `X-User-Id`。
+`scripts/dev_seed_demo.py` 用于前端和手动体验，默认创建 `demo@chronos.local` 用户并输出开发态 `X-User-Id`。
 `scripts/smoke_p1_execution_loop.py` 用于开发后快速防回归，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_p2_goal_insight_loop.py` 用于验证 P2 Goals / Reports / Insights 合同，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_p3_natural_growth_loop.py` 用于验证 P3 数据接入、精力、外部输入、提醒、Me 入口状态和调度契约，每次默认创建一个独立 smoke 用户，不会重置数据库。
