@@ -12,6 +12,8 @@
 
 P2 已完成能力的集中合同见：[Chronos P2 Frontend API Contract](./chronos-p2-frontend-api-contract.md)。
 
+Bearer token 版 P1 本地联调 walkthrough 见：[Chronos P1 Bearer API Walkthrough](./chronos-p1-bearer-api-walkthrough.md)。
+
 Chronos P1 的主路径是：
 
 ```text
