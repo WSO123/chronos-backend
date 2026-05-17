@@ -231,6 +231,20 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
         raise RuntimeError("reminder summary did not show pending unseen reminders")
     reminder_id = summary["next_reminder"]["id"]
 
+    me_overview = _expect(
+        client.get(f"/api/v1/me/overview?today={plan_date.isoformat()}", headers=headers),
+        200,
+        "get me overview P3 status",
+    )
+    if me_overview["data_sources"]["connected_count"] != 3:
+        raise RuntimeError(f"me overview did not show three connected data sources: {me_overview['data_sources']}")
+    if me_overview["data_sources"]["attention_count"] != 0:
+        raise RuntimeError(f"me overview data source status needs attention unexpectedly: {me_overview['data_sources']}")
+    if me_overview["reminders"]["pending_count"] < 1 or me_overview["reminders"]["unseen_count"] < 1:
+        raise RuntimeError(f"me overview did not show pending unseen reminders: {me_overview['reminders']}")
+    if me_overview["reminders"]["due_count"] < 1:
+        raise RuntimeError(f"me overview did not show due reminders: {me_overview['reminders']}")
+
     batch_seen = _expect(
         client.post(
             "/api/v1/reminders/seen",
@@ -323,6 +337,9 @@ def run_smoke(*, email: str, name: str, timezone: str) -> dict[str, Any]:
         "execution_reminder_id": reminder_id,
         "execution_created_count": execution_reminders["created_count"],
         "summary_pending_count": summary["pending_count"],
+        "me_data_source_connected_count": me_overview["data_sources"]["connected_count"],
+        "me_reminder_pending_count": me_overview["reminders"]["pending_count"],
+        "me_reminder_due_count": me_overview["reminders"]["due_count"],
         "batch_seen_updated_count": batch_seen["updated_count"],
         "dispatch_sent_count": dispatch["sent_count"],
         "scheduler_entries": sorted(scheduler_tasks),

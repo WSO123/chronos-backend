@@ -152,13 +152,14 @@ git diff --check
 `scripts/dev_seed_demo.py` 用于前端和手动体验，默认创建 `demo@chronos.local` 用户并输出 `X-User-Id`。
 `scripts/smoke_p1_execution_loop.py` 用于开发后快速防回归，每次默认创建一个独立 smoke 用户，不会重置数据库。
 `scripts/smoke_p2_goal_insight_loop.py` 用于验证 P2 Goals / Reports / Insights 合同，每次默认创建一个独立 smoke 用户，不会重置数据库。
-`scripts/smoke_p3_natural_growth_loop.py` 用于验证 P3 数据接入、精力、外部输入、提醒和调度契约，每次默认创建一个独立 smoke 用户，不会重置数据库。
+`scripts/smoke_p3_natural_growth_loop.py` 用于验证 P3 数据接入、精力、外部输入、提醒、Me 入口状态和调度契约，每次默认创建一个独立 smoke 用户，不会重置数据库。
 
 前端联调接口契约见：
 
 ```text
 docs/chronos-p1-frontend-api-contract.md
 docs/chronos-p2-frontend-api-contract.md
+docs/chronos-p3-frontend-api-contract.md
 ```
 
 ##  开发指南

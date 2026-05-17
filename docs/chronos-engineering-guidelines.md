@@ -527,7 +527,7 @@ uv run python scripts/smoke_p1_execution_loop.py
 uv run python scripts/smoke_p2_goal_insight_loop.py
 ```
 
-涉及 P3 数据接入、精力、外部输入、提醒、调度 worker 或 notification 时，额外执行：
+涉及 P3 数据接入、精力、外部输入、提醒、Me 入口状态、调度 worker 或 notification 时，额外执行：
 
 ```bash
 uv run python scripts/smoke_p3_natural_growth_loop.py
