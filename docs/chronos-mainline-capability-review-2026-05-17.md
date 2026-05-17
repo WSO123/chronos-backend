@@ -176,6 +176,12 @@ git diff --check
 uv run python scripts/verify_local.py --smoke p1-bearer-capture
 ```
 
+核心状态联动变更：
+
+```bash
+uv run python scripts/verify_local.py --smoke mainline-state
+```
+
 Planning Engine / Today 变更：
 
 ```bash

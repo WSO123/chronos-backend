@@ -45,6 +45,7 @@ def _parse_args() -> argparse.Namespace:
             "p3",
             "auth",
             "auth-errors",
+            "mainline-state",
             "ai-mainline",
             "llm-fallback",
         ),
@@ -128,6 +129,7 @@ def _smoke_step(smoke: str) -> VerificationStep:
         "p3": "scripts/smoke_p3_natural_growth_loop.py",
         "auth": "scripts/smoke_auth_token_loop.py",
         "auth-errors": "scripts/smoke_auth_frontend_error_contract.py",
+        "mainline-state": "scripts/smoke_mainline_state_consistency.py",
         "ai-mainline": "scripts/smoke_core_ai_mainline.py",
         "llm-fallback": "scripts/smoke_daily_planner_fallback.py",
     }
