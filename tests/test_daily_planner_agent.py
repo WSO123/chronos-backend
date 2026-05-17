@@ -91,8 +91,8 @@ class DailyPlannerAgentTests(unittest.TestCase):
 
         template = prompt_registry.get("daily_planner")
         self.assertIn("Chronos Daily Planner Agent v1", provider.prompt)
-        self.assertIn("Do not reorder tasks in v1.", provider.prompt)
-        self.assertIn("Review the Planning Engine result", provider.prompt)
+        self.assertIn("v1 不允许重排任务。", provider.prompt)
+        self.assertIn("审阅 Planning Engine 结果，不要替代它。", provider.prompt)
         self.assertEqual(provider.metadata["prompt"]["key"], "daily_planner")
         self.assertEqual(provider.metadata["prompt"]["version"], template.version)
         self.assertEqual(provider.metadata["prompt"]["checksum"], template.checksum)

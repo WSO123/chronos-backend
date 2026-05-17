@@ -87,12 +87,12 @@ def build_dry_run_payloads() -> dict[str, dict[str, Any]]:
             "status": "ok",
             "policy": {
                 "policy_version": "p2-planner-eval-policy-v1",
-                "evaluator_version": "p2-planning-engine-eval-v3",
+                "evaluator_version": "p2-planning-engine-eval-v4",
                 "required_scenario_count": 9,
             },
             "eval_run": {
                 "run_id": "dry-run-candidate",
-                "evaluator_version": "p2-planning-engine-eval-v3",
+                "evaluator_version": "p2-planning-engine-eval-v4",
                 "scenario_count": 9,
             },
             "regression_count": 0,

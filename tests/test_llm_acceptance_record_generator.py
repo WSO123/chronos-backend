@@ -264,12 +264,12 @@ def _policy(*, status: str, regression_count: int = 0, change_count: int = 0) ->
         "status": status,
         "policy": {
             "policy_version": "p2-planner-eval-policy-v1",
-            "evaluator_version": "p2-planning-engine-eval-v3",
+            "evaluator_version": "p2-planning-engine-eval-v4",
             "required_scenario_count": 9,
         },
         "eval_run": {
             "run_id": "candidate",
-            "evaluator_version": "p2-planning-engine-eval-v3",
+            "evaluator_version": "p2-planning-engine-eval-v4",
             "scenario_count": 9,
         },
         "regression_count": regression_count,

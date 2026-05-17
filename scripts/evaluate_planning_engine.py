@@ -26,7 +26,7 @@ from tests.factories import create_user
 
 
 PLAN_DATE = date(2026, 5, 17)
-EVALUATOR_VERSION = "p2-planning-engine-eval-v3"
+EVALUATOR_VERSION = "p2-planning-engine-eval-v4"
 
 
 @dataclass(frozen=True)
@@ -98,6 +98,7 @@ def _scenario_capacity_rollover() -> ScenarioResult:
             ("selected minutes equals capacity", strategy["factors"]["selected_estimated_minutes"] == 150),
             ("no overload when selected equals capacity", strategy["factors"]["over_capacity_minutes"] == 0),
         )
+        failures += _explainability_failures(strategy)
         return ScenarioResult(
             name="capacity_rollover",
             passed=not failures,
@@ -133,6 +134,7 @@ def _scenario_protected_overload_warning() -> ScenarioResult:
                 today["insights_preview"]["risk_alerts"][0]["key"] == "main_sequence_over_capacity",
             ),
         )
+        failures += _explainability_failures(strategy)
         return ScenarioResult(
             name="protected_overload_warning",
             passed=not failures,
@@ -179,6 +181,7 @@ def _scenario_low_energy_lightens_plan() -> ScenarioResult:
             ("long task rolls over under low capacity", bool(rolled) and rolled[0]["task_id"] == long_task.id),
             ("energy was applied", strategy["factors"]["energy_applied"] is True),
         )
+        failures += _explainability_failures(strategy)
         return ScenarioResult(
             name="low_energy_lightens_plan",
             passed=not failures,
@@ -225,6 +228,7 @@ def _scenario_high_energy_prioritizes_deep_work_without_expansion() -> ScenarioR
             ("energy was applied", strategy["factors"]["energy_applied"] is True),
             ("no expansion overload", strategy["factors"]["over_capacity_minutes"] == 0),
         )
+        failures += _explainability_failures(strategy)
         return ScenarioResult(
             name="high_energy_deep_fit_no_expansion",
             passed=not failures,
@@ -275,6 +279,7 @@ def _scenario_dependency_chain_protection() -> ScenarioResult:
                 bool(pinned) and "unlocks another planned task" in pinned[0]["recommendation_reason"],
             ),
         )
+        failures += _explainability_failures(strategy)
         return ScenarioResult(
             name="dependency_chain_protection",
             passed=not failures,
@@ -329,6 +334,7 @@ def _scenario_user_priority_adjustment_protection() -> ScenarioResult:
                 bool(pinned) and pinned[0]["score_breakdown"].get("user_preference_score", 0) > 0,
             ),
         )
+        failures += _explainability_failures(strategy)
         return ScenarioResult(
             name="user_priority_adjustment_protection",
             passed=not failures,
@@ -393,6 +399,7 @@ def _scenario_behavior_feedback_penalizes_interruptions() -> ScenarioResult:
                 len(recommended) >= 2 and recommended[1]["score_breakdown"].get("behavior_feedback_score", 0) < 0,
             ),
         )
+        failures += _explainability_failures(strategy)
         return ScenarioResult(
             name="behavior_feedback_penalizes_interruptions",
             passed=not failures,
@@ -474,6 +481,7 @@ def _scenario_multi_goal_competition_protects_high_value_goal() -> ScenarioResul
             ("optional low-goal work rolls over", bool(rolled) and rolled[0]["task_id"] == optional_low_goal_task.id),
             ("main sequence still respects capacity", strategy["factors"]["selected_estimated_minutes"] == 150),
         )
+        failures += _explainability_failures(strategy)
         return ScenarioResult(
             name="multi_goal_competition_protects_high_value_goal",
             passed=not failures,
@@ -540,6 +548,7 @@ def _scenario_overdue_goal_recovery_promotes_next_task() -> ScenarioResult:
             ),
             ("plan stays within capacity", strategy["factors"]["capacity_status"] == "within_capacity"),
         )
+        failures += _explainability_failures(strategy)
         return ScenarioResult(
             name="overdue_goal_recovery_promotes_next_task",
             passed=not failures,
@@ -558,12 +567,17 @@ def _fresh_db():
 def _details(*, db, today: dict, strategy: dict) -> dict:
     ordered_items = _all_items(today)
     planner_trace = _planner_trace(db, strategy=strategy)
+    score_explanation = strategy.get("score_explanation") or {}
     return {
         "main_count": today["progress"]["total_count"],
         "rolled_over_count": len(today["sections"]["rolled_over_tasks"]),
         "ordered_titles": [item["title"] for item in ordered_items],
         "rolled_over_titles": [item["title"] for item in today["sections"]["rolled_over_tasks"]],
-        "item_signals": _item_signals(ordered_items),
+        "score_explanation_summary": score_explanation.get("summary"),
+        "score_explanation_signal_keys": [
+            signal["key"] for signal in score_explanation.get("signals", []) if signal.get("key")
+        ],
+        "item_signals": _item_signals(strategy.get("task_rationales", [])),
         "risk_keys": [alert["key"] for alert in today["insights_preview"]["risk_alerts"]],
         "capacity_status": strategy["factors"]["capacity_status"],
         "daily_capacity_minutes": strategy["factors"]["daily_capacity_minutes"],
@@ -596,13 +610,18 @@ def _item_signals(items: list[dict]) -> list[dict]:
     return [
         {
             "title": item["title"],
-            "section": item["section"].value,
+            "section": item["section"].value if hasattr(item["section"], "value") else item["section"],
+            "score_version": item["score_breakdown"].get("score_version"),
+            "score_band": item["score_breakdown"].get("score_band"),
             "total_score": item["score_breakdown"].get("total_score"),
             "goal_value_score": item["score_breakdown"].get("goal_value_score"),
             "goal_urgency_score": item["score_breakdown"].get("goal_urgency_score"),
             "behavior_feedback_score": item["score_breakdown"].get("behavior_feedback_score"),
             "dependency_score": item["score_breakdown"].get("dependency_score"),
             "user_preference_score": item["score_breakdown"].get("user_preference_score"),
+            "dominant_factor": item.get("dominant_factor"),
+            "dominant_reason": item.get("dominant_reason"),
+            "score_signal_keys": [signal["key"] for signal in item.get("score_signals", []) if signal.get("key")],
         }
         for item in items
     ]
@@ -610,6 +629,25 @@ def _item_signals(items: list[dict]) -> list[dict]:
 
 def _check_all(*checks: tuple[str, bool]) -> list[str]:
     return [label for label, passed in checks if not passed]
+
+
+def _explainability_failures(strategy: dict) -> list[str]:
+    score_explanation = strategy.get("score_explanation") or {}
+    score_signals = score_explanation.get("signals") or []
+    task_rationales = strategy.get("task_rationales") or []
+    return _check_all(
+        ("score explanation has summary", bool(score_explanation.get("summary"))),
+        ("score explanation has signals", bool(score_signals)),
+        (
+            "task rationales have dominant factors",
+            bool(task_rationales)
+            and all(item.get("dominant_factor") and item.get("dominant_reason") for item in task_rationales),
+        ),
+        (
+            "task rationales have score signals",
+            bool(task_rationales) and all(item.get("score_signals") for item in task_rationales),
+        ),
+    )
 
 
 def _planner_trace(db, *, strategy: dict) -> dict:

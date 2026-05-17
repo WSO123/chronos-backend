@@ -78,7 +78,7 @@ class CaptureParserAgentTests(unittest.TestCase):
 
         template = prompt_registry.get("capture_parser")
         self.assertIn("Chronos Capture Parser Agent v1", provider.prompt)
-        self.assertIn("Do not create Tasks or Goals directly.", provider.prompt)
+        self.assertIn("不要直接创建 Task 或 Goal。", provider.prompt)
         self.assertEqual(provider.metadata["prompt"]["key"], "capture_parser")
         self.assertEqual(provider.metadata["prompt"]["version"], template.version)
         self.assertEqual(provider.metadata["prompt"]["checksum"], template.checksum)

@@ -75,7 +75,7 @@ class TaskBreakdownAgentTests(unittest.TestCase):
 
         template = prompt_registry.get("task_breakdown")
         self.assertIn("Chronos Task Breakdown Agent v1", provider.prompt)
-        self.assertIn("Do not overwrite existing user-created steps.", provider.prompt)
+        self.assertIn("不要覆盖用户已有步骤。", provider.prompt)
         self.assertEqual(provider.metadata["prompt"]["key"], "task_breakdown")
         self.assertEqual(provider.metadata["prompt"]["version"], template.version)
         self.assertEqual(provider.metadata["prompt"]["checksum"], template.checksum)

@@ -36,6 +36,15 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
             self.assertEqual(scenario["details"]["planner_agent_model"], "structured-mock-v1")
             self.assertEqual(scenario["details"]["planner_agent_prompt_version"], "p2-daily-planner-agent-v1")
             self.assertTrue(scenario["details"]["planner_agent_output_applied"])
+            self.assertTrue(scenario["details"]["score_explanation_summary"])
+            self.assertTrue(scenario["details"]["score_explanation_signal_keys"])
+            self.assertTrue(scenario["details"]["item_signals"])
+            for item_signal in scenario["details"]["item_signals"]:
+                self.assertTrue(item_signal["score_version"])
+                self.assertTrue(item_signal["score_band"])
+                self.assertTrue(item_signal["dominant_factor"])
+                self.assertTrue(item_signal["dominant_reason"])
+                self.assertTrue(item_signal["score_signal_keys"])
 
     def test_write_jsonl_result_outputs_summary_and_scenario_records(self):
         result = run_evaluation(run_id="jsonl-test-run")
@@ -69,6 +78,9 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
         )
         self.assertEqual(records[1]["details"]["planner_agent_provider"], "mock")
         self.assertIn("item_signals", records[1]["details"])
+        self.assertIn("score_explanation_summary", records[1]["details"])
+        self.assertIn("score_explanation_signal_keys", records[1]["details"])
+        self.assertIn("dominant_factor", records[1]["details"]["item_signals"][0])
 
     def test_cli_can_write_jsonl_output(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -1,6 +1,6 @@
 {
   "policy_version": "p2-planner-eval-policy-v1",
-  "evaluator_version": "p2-planning-engine-eval-v3",
+  "evaluator_version": "p2-planning-engine-eval-v4",
   "status": "active",
   "required_run_status": "ok",
   "exact_scenario_set": true,
@@ -20,16 +20,23 @@
     "planner_agent_prompt_version",
     "planner_agent_prompt_checksum",
     "planner_agent_output_applied",
+    "score_explanation_summary",
+    "score_explanation_signal_keys",
     "item_signals"
   ],
   "required_item_signal_fields": [
     "section",
+    "score_version",
+    "score_band",
     "total_score",
     "goal_value_score",
     "goal_urgency_score",
     "behavior_feedback_score",
     "dependency_score",
-    "user_preference_score"
+    "user_preference_score",
+    "dominant_factor",
+    "dominant_reason",
+    "score_signal_keys"
   ],
   "required_scenarios": [
     {

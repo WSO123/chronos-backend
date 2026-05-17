@@ -99,7 +99,7 @@ class InsightDetailAgentTests(unittest.TestCase):
 
         template = prompt_registry.get("insight_detail")
         self.assertIn("Chronos Insight Detail Agent v1", provider.prompt)
-        self.assertIn("Do not change tasks", provider.prompt)
+        self.assertIn("不要改变 task、goal、plan", provider.prompt)
         self.assertEqual(provider.metadata["prompt"]["key"], "insight_detail")
         self.assertEqual(provider.metadata["prompt"]["version"], template.version)
         self.assertEqual(provider.metadata["prompt"]["checksum"], template.checksum)

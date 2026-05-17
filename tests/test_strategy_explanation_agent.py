@@ -77,7 +77,7 @@ class StrategyExplanationAgentTests(unittest.TestCase):
 
         template = prompt_registry.get("strategy_explanation")
         self.assertIn("Chronos Strategy Explanation Agent v1", provider.prompt)
-        self.assertIn("Do not change task order", provider.prompt)
+        self.assertIn("不要改变任务顺序", provider.prompt)
         self.assertEqual(provider.metadata["prompt"]["key"], "strategy_explanation")
         self.assertEqual(provider.metadata["prompt"]["version"], template.version)
         self.assertEqual(provider.metadata["prompt"]["checksum"], template.checksum)
