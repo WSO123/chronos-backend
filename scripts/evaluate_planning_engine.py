@@ -14,8 +14,9 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from app.models.enums import DailyPlanItemStatus, TaskStatus, ValueLevel
+from app.models.activity_event import ActivityEvent
 from app.models.ai_job import AIJob
+from app.models.enums import DailyPlanItemStatus, EntityType, TaskStatus, ValueLevel
 from app.services.energy_service import energy_service
 from app.services.planning_service import planning_service
 from app.services.task_service import task_service
@@ -24,7 +25,7 @@ from tests.factories import create_user
 
 
 PLAN_DATE = date(2026, 5, 17)
-EVALUATOR_VERSION = "p2-planning-engine-eval-v1"
+EVALUATOR_VERSION = "p2-planning-engine-eval-v2"
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,9 @@ def run_evaluation(*, run_id: str | None = None) -> dict:
         _scenario_protected_overload_warning,
         _scenario_low_energy_lightens_plan,
         _scenario_high_energy_prioritizes_deep_work_without_expansion,
+        _scenario_dependency_chain_protection,
+        _scenario_user_priority_adjustment_protection,
+        _scenario_behavior_feedback_penalizes_interruptions,
     ]
     results = [scenario() for scenario in scenarios]
     return {
@@ -228,6 +232,174 @@ def _scenario_high_energy_prioritizes_deep_work_without_expansion() -> ScenarioR
         db.close()
 
 
+def _scenario_dependency_chain_protection() -> ScenarioResult:
+    db = _fresh_db()
+    try:
+        user = create_user(db, name="Planner Eval Dependencies")
+        prerequisite = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Draft source outline",
+            estimated_duration_min=30,
+            priority=4,
+            value_level=ValueLevel.LOW,
+        )
+        dependent = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Write final proposal",
+            estimated_duration_min=60,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+        )
+        task_service.add_task_dependency(
+            db,
+            task_id=dependent.id,
+            user_id=user.id,
+            prerequisite_task_id=prerequisite.id,
+            reason="Proposal needs the outline first",
+        )
+
+        today = planning_service.get_today(db, user_id=user.id, plan_date=PLAN_DATE)
+        strategy = planning_service.get_strategy_detail(db, user_id=user.id, plan_date=PLAN_DATE)
+        pinned = today["sections"]["pinned_tasks"]
+        failures = _check_all(
+            ("prerequisite is first pinned task", len(pinned) >= 2 and pinned[0]["task_id"] == prerequisite.id),
+            ("dependent follows prerequisite", len(pinned) >= 2 and pinned[1]["task_id"] == dependent.id),
+            ("dependency protection counted", strategy["factors"]["dependency_protected_count"] == 1),
+            (
+                "prerequisite reason explains unlock",
+                bool(pinned) and "unlocks another planned task" in pinned[0]["recommendation_reason"],
+            ),
+        )
+        return ScenarioResult(
+            name="dependency_chain_protection",
+            passed=not failures,
+            details=_details(db=db, today=today, strategy=strategy),
+            failures=failures,
+        )
+    finally:
+        db.close()
+
+
+def _scenario_user_priority_adjustment_protection() -> ScenarioResult:
+    db = _fresh_db()
+    try:
+        user = create_user(db, name="Planner Eval User Priority")
+        adjusted_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Promote important follow-up",
+            estimated_duration_min=35,
+            priority=5,
+            value_level=ValueLevel.LOW,
+        )
+        task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Ordinary medium work",
+            estimated_duration_min=35,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task_service.adjust_task_priority(
+            db,
+            task_id=adjusted_task.id,
+            user_id=user.id,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+            reason="This became important today",
+        )
+
+        today = planning_service.get_today(db, user_id=user.id, plan_date=PLAN_DATE)
+        strategy = planning_service.get_strategy_detail(db, user_id=user.id, plan_date=PLAN_DATE)
+        pinned = today["sections"]["pinned_tasks"]
+        failures = _check_all(
+            ("adjusted task is first pinned task", bool(pinned) and pinned[0]["task_id"] == adjusted_task.id),
+            ("user adjustment counted", strategy["factors"]["user_adjusted_count"] == 1),
+            (
+                "recommendation references user correction",
+                bool(pinned) and "Adjusted by you" in pinned[0]["recommendation_reason"],
+            ),
+            (
+                "score breakdown applies user preference boost",
+                bool(pinned) and pinned[0]["score_breakdown"].get("user_preference_score", 0) > 0,
+            ),
+        )
+        return ScenarioResult(
+            name="user_priority_adjustment_protection",
+            passed=not failures,
+            details=_details(db=db, today=today, strategy=strategy),
+            failures=failures,
+        )
+    finally:
+        db.close()
+
+
+def _scenario_behavior_feedback_penalizes_interruptions() -> ScenarioResult:
+    db = _fresh_db()
+    try:
+        user = create_user(db, name="Planner Eval Behavior Feedback")
+        stable_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Stable task",
+            estimated_duration_min=30,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        interrupted_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Frequently interrupted task",
+            estimated_duration_min=30,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        db.add_all(
+            [
+                ActivityEvent(
+                    user_id=user.id,
+                    entity_type=EntityType.TASK,
+                    entity_id=interrupted_task.id,
+                    event_type="FOCUS_SESSION_INTERRUPTED",
+                    related_task_id=interrupted_task.id,
+                ),
+                ActivityEvent(
+                    user_id=user.id,
+                    entity_type=EntityType.TASK,
+                    entity_id=interrupted_task.id,
+                    event_type="FOCUS_SESSION_INTERRUPTED",
+                    related_task_id=interrupted_task.id,
+                ),
+            ]
+        )
+        db.commit()
+
+        today = planning_service.get_today(db, user_id=user.id, plan_date=PLAN_DATE)
+        strategy = planning_service.get_strategy_detail(db, user_id=user.id, plan_date=PLAN_DATE)
+        recommended = today["sections"]["recommended_tasks"]
+        failures = _check_all(
+            ("stable task is recommended first", len(recommended) >= 2 and recommended[0]["task_id"] == stable_task.id),
+            (
+                "interrupted task follows stable task",
+                len(recommended) >= 2 and recommended[1]["task_id"] == interrupted_task.id,
+            ),
+            (
+                "interrupted task receives behavior penalty",
+                len(recommended) >= 2 and recommended[1]["score_breakdown"].get("behavior_feedback_score", 0) < 0,
+            ),
+        )
+        return ScenarioResult(
+            name="behavior_feedback_penalizes_interruptions",
+            passed=not failures,
+            details=_details(db=db, today=today, strategy=strategy),
+            failures=failures,
+        )
+    finally:
+        db.close()
+
+
 def _fresh_db():
     reset_database()
     return TestingSessionLocal()
@@ -241,6 +413,7 @@ def _details(*, db, today: dict, strategy: dict) -> dict:
         "rolled_over_count": len(today["sections"]["rolled_over_tasks"]),
         "ordered_titles": [item["title"] for item in ordered_items],
         "rolled_over_titles": [item["title"] for item in today["sections"]["rolled_over_tasks"]],
+        "item_signals": _item_signals(ordered_items),
         "risk_keys": [alert["key"] for alert in today["insights_preview"]["risk_alerts"]],
         "capacity_status": strategy["factors"]["capacity_status"],
         "daily_capacity_minutes": strategy["factors"]["daily_capacity_minutes"],
@@ -260,6 +433,20 @@ def _all_items(today: dict) -> list[dict]:
         + sections["low_priority_tasks"]
         + sections["rolled_over_tasks"]
     )
+
+
+def _item_signals(items: list[dict]) -> list[dict]:
+    return [
+        {
+            "title": item["title"],
+            "section": item["section"].value,
+            "total_score": item["score_breakdown"].get("total_score"),
+            "behavior_feedback_score": item["score_breakdown"].get("behavior_feedback_score"),
+            "dependency_score": item["score_breakdown"].get("dependency_score"),
+            "user_preference_score": item["score_breakdown"].get("user_preference_score"),
+        }
+        for item in items
+    ]
 
 
 def _check_all(*checks: tuple[str, bool]) -> list[str]:

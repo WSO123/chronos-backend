@@ -15,7 +15,7 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
         self.assertEqual(result["run_id"], "test-run")
         self.assertEqual(result["evaluator_version"], EVALUATOR_VERSION)
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["scenario_count"], 4)
+        self.assertEqual(result["scenario_count"], 7)
         self.assertEqual(result["failed_count"], 0)
         self.assertEqual(
             {scenario["name"] for scenario in result["scenarios"]},
@@ -24,6 +24,9 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
                 "protected_overload_warning",
                 "low_energy_lightens_plan",
                 "high_energy_deep_fit_no_expansion",
+                "dependency_chain_protection",
+                "user_priority_adjustment_protection",
+                "behavior_feedback_penalizes_interruptions",
             },
         )
         for scenario in result["scenarios"]:
@@ -42,22 +45,26 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
 
             records = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
 
-        self.assertEqual(len(records), 10)
+        self.assertEqual(len(records), 16)
         self.assertEqual(records[0]["record_type"], "run_summary")
         self.assertEqual(records[0]["run_id"], "jsonl-test-run")
         self.assertEqual(records[0]["status"], "ok")
-        self.assertEqual(records[5]["record_type"], "run_summary")
-        self.assertEqual({record["record_type"] for record in records[1:5]}, {"scenario_result"})
+        self.assertEqual(records[8]["record_type"], "run_summary")
+        self.assertEqual({record["record_type"] for record in records[1:8]}, {"scenario_result"})
         self.assertEqual(
-            {record["scenario_name"] for record in records[1:5]},
+            {record["scenario_name"] for record in records[1:8]},
             {
                 "capacity_rollover",
                 "protected_overload_warning",
                 "low_energy_lightens_plan",
                 "high_energy_deep_fit_no_expansion",
+                "dependency_chain_protection",
+                "user_priority_adjustment_protection",
+                "behavior_feedback_penalizes_interruptions",
             },
         )
         self.assertEqual(records[1]["details"]["planner_agent_provider"], "mock")
+        self.assertIn("item_signals", records[1]["details"])
 
     def test_cli_can_write_jsonl_output(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -80,7 +87,7 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
 
         self.assertEqual(payload["run_id"], "cli-test-run")
         self.assertEqual(records[0]["run_id"], "cli-test-run")
-        self.assertEqual(len(records), 5)
+        self.assertEqual(len(records), 8)
 
 
 if __name__ == "__main__":

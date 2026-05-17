@@ -198,11 +198,11 @@ Run summary：
 ```json
 {
   "run_id": "uuid",
-  "evaluator_version": "p2-planning-engine-eval-v1",
+  "evaluator_version": "p2-planning-engine-eval-v2",
   "record_type": "run_summary",
   "status": "ok",
-  "scenario_count": 4,
-  "passed_count": 4,
+  "scenario_count": 7,
+  "passed_count": 7,
   "failed_count": 0
 }
 ```
@@ -212,7 +212,7 @@ Scenario result：
 ```json
 {
   "run_id": "uuid",
-  "evaluator_version": "p2-planning-engine-eval-v1",
+  "evaluator_version": "p2-planning-engine-eval-v2",
   "record_type": "scenario_result",
   "scenario_name": "capacity_rollover",
   "passed": true,
@@ -222,6 +222,13 @@ Scenario result：
     "planner_agent_provider": "mock",
     "planner_agent_model": "structured-mock-v1",
     "planner_agent_prompt_version": "p2-daily-planner-agent-v1",
+    "item_signals": [
+      {
+        "title": "Protected deep work",
+        "section": "pinned",
+        "total_score": 52
+      }
+    ],
     "planner_agent_usage": {
       "input_tokens": null,
       "output_tokens": null,
@@ -240,7 +247,7 @@ Scenario result：
 
 - [x] 默认评估仍打印 JSON 并返回原有 pass/fail。
 - [x] `run_evaluation(run_id=...)` 返回稳定 run id 和 evaluator version。
-- [x] `--jsonl-output` 写出 1 条 run summary 和 4 条 scenario result。
+- [x] `--jsonl-output` 写出 1 条 run summary 和 7 条 scenario result。
 - [x] JSONL scenario result 包含 planner provider / model / prompt / usage trace。
 - [x] `--append` 支持后续追加，不影响默认路径。
 
@@ -306,7 +313,7 @@ git diff --check
 | 日期 | 决策 | 原因 | 影响 |
 | --- | --- | --- | --- |
 | 2026-05-17 | JSONL 默认关闭 | 避免 verify_local 产生文件副作用 | 需要显式传 `--jsonl-output` |
-| 2026-05-17 | 输出 run summary + scenario result | 便于按 run 或按场景聚合 | 每次 4 场景输出 5 行 |
+| 2026-05-17 | 输出 run summary + scenario result | 便于按 run 或按场景聚合 | 当前 7 场景输出 8 行 |
 | 2026-05-17 | 从 AIJob 读取 planner trace | 保持 Strategy Detail 轻量 | 评估文件仍可比较 provider / prompt |
 
 ---
@@ -337,12 +344,12 @@ git diff --check
 
 ### 已知问题
 
-- JSONL 目前只覆盖 4 个 deterministic scenarios，后续需要增加更接近真实日常的任务组合。
+- JSONL 目前覆盖 7 个 deterministic scenarios，仍不是完整 planner quality benchmark。
 
 ---
 
 ## 14. 后续迭代建议
 
-1. 增加 provider allowlist / cost guard，避免真实 LLM 评估误用高成本模型。
-2. 增加更多 planner eval scenarios：依赖链、用户手动优先级、重复中断行为反馈。
-3. 增加对比脚本，读取多份 JSONL 并输出 provider / prompt 差异摘要。
+1. 增加对比脚本，读取多份 JSONL 并输出 provider / prompt 差异摘要。
+2. 增加真实 provider 手动验收记录模板，记录 model、usage、prompt checksum 和结论。
+3. 继续扩展真实日常任务组合场景，例如多 Goal 竞争、超期目标恢复、低价值琐事挤压。

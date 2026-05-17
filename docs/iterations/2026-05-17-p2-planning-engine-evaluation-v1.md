@@ -272,7 +272,7 @@ uv run python scripts/evaluate_planning_engine.py
 | 日期 | 变更 | 文件 / 模块 | 备注 |
 | --- | --- | --- | --- |
 | 2026-05-17 | 增加 capacity factors / overload warning | `app/services/planning_service.py`, `app/schemas/today.py` | Strategy Detail + Today Preview |
-| 2026-05-17 | 新增固定场景评估脚本 | `scripts/evaluate_planning_engine.py` | 4 个 deterministic scenarios |
+| 2026-05-17 | 新增固定场景评估脚本 | `scripts/evaluate_planning_engine.py` | 4 个 deterministic scenarios；后续 v2 已扩展为 7 个场景 |
 | 2026-05-17 | 新增 evaluation 回归测试 | `tests/test_planning_engine_evaluation.py`, `tests/test_today_services.py`, `tests/test_today_api.py` | service / API / evaluation |
 | 2026-05-17 | 统一验证入口支持 planner eval | `scripts/verify_local.py` | `--planner-eval` |
 | 2026-05-17 | 更新文档 | README / Architecture / LLM Agent / Engineering Guidelines / P2 Contract | 开发约束对齐 |
