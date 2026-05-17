@@ -74,6 +74,7 @@ P2 只保留和执行主线强相关的部分：Goals、依赖、洞察、解释
 | Priority / Value Adjustment | L3 | 用户调整当前 Today 任务会触发 `manual_adjust` revision，并返回 `today_impact` | 不做复杂手动排序系统 |
 | Strategy Detail | L3 | 解释 Planning Engine 结果、依赖保护、用户修正、容量状态和 agent review | 不进入 Today 首屏 |
 | Task Semantic Planning Signal | L2-L3 | 能把任务语义、目标对齐、复杂度、语义估时和最小推进动作写入可追踪信号，并被 Today 评分读取 | 后续需要补自动刷新策略和 Focus 反馈校准 |
+| Minimum Viable Progress | L2-L3 | 大任务带有语义信号时，Today 可只安排今日最小推进切片，不覆盖 Task 原估时 | 后续需要把 Focus 实际结果用于校准切片大小 |
 | Insights / Weekly / Monthly | L2 | 作为复盘与趋势入口可用 | 不能替代 Today 的每日执行决策 |
 
 ---

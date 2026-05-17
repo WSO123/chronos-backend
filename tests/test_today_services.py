@@ -675,6 +675,48 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["factors"]["semantic_protected_count"], 1)
         self.assertEqual(strategy["task_rationales"][0]["dominant_factor"], "semantic_planning")
 
+    def test_planning_engine_slices_large_semantic_task_into_minimum_viable_progress(self):
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="High value launch goal",
+            value_level=ValueLevel.HIGH,
+        )
+        large_goal_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="实现高价值目标的完整方案",
+            estimated_duration_min=180,
+            priority=4,
+            value_level=ValueLevel.MEDIUM,
+        )
+        follow_up = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Medium follow-up work",
+            estimated_duration_min=80,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task_planning_signal_service.generate_signal(self.db, task_id=large_goal_task.id, user_id=self.user.id)
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        first_item = today["sections"]["pinned_tasks"][0]
+        self.assertEqual(first_item["task_id"], large_goal_task.id)
+        self.assertEqual(first_item["estimated_duration_min"], 45)
+        self.assertEqual(first_item["score_breakdown"]["original_estimated_duration_min"], 180)
+        self.assertEqual(first_item["score_breakdown"]["planned_duration_min"], 45)
+        self.assertTrue(first_item["score_breakdown"]["minimum_viable_progress_applied"])
+        self.assertEqual(first_item["score_breakdown"]["minimum_viable_progress_reason"], "semantic_minimum_viable_progress")
+        self.assertIn("最小可执行动作", first_item["recommendation_reason"])
+        self.assertEqual(today["sections"]["recommended_tasks"][0]["task_id"], follow_up.id)
+        self.assertEqual(strategy["factors"]["minimum_viable_progress_count"], 1)
+        self.assertEqual(strategy["factors"]["selected_estimated_minutes"], 125)
+        self.assertEqual(strategy["task_rationales"][0]["dominant_factor"], "minimum_viable_progress")
+
     def test_today_planner_orders_prerequisites_before_dependent_tasks(self):
         prerequisite = task_service.create_task(
             self.db,

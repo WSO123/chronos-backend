@@ -499,6 +499,7 @@ Planning Engine v1 已使用的信号：
 - Agent 输出落库为 `TaskPlanningSignal`，包含 `task_type`、`complexity`、`cognitive_load`、`energy_fit`、`blocking_risk`、`estimated_duration_min`、`goal_alignment_score`、`semantic_priority_score`、`minimum_viable_step`。
 - Task Detail 在 `ai_info.planning_signal` 返回最新信号；推荐时长会优先使用语义估时，但用户显式填写的任务估时仍是 Planning Engine 的优先来源。
 - Planning Engine 会读取最新 TaskPlanningSignal，并在 `DailyPlanItem.score_breakdown` 写入 `semantic_signal_applied`、`semantic_total_score`、`goal_alignment_signal_score`、`semantic_priority_signal_score`、`semantic_minimum_viable_step` 等分项。
+- 如果任务明显大于今日容量且存在 `minimum_viable_step`，Planning Engine 可以在 DailyPlanItem 层使用 planned slice duration，并在 `score_breakdown` 保留 `original_estimated_duration_min`、`planned_duration_min`、`minimum_viable_progress_applied`；这不会覆盖 Task 原估时。
 - 高 goal alignment 且阻塞风险高的任务可以进入 protected section，但仍由 Planning Engine 决定，不由 LLM 直接排序。
 
 失败 fallback：

@@ -534,6 +534,11 @@ class PlanningService:
         scored_tasks: list[PlannedTask] = []
         for task in tasks:
             score_breakdown = self._score_breakdown_for(task, context=context, signals=signals)
+            planned_duration_min, score_breakdown = self._planned_duration_for_today(
+                task,
+                score_breakdown=score_breakdown,
+                context=context,
+            )
             base_section = self._section_for(
                 task,
                 plan_date=plan_date,
@@ -553,7 +558,7 @@ class PlanningService:
                         semantic_by_task_id=signals["semantic_by_task_id"],
                         score_breakdown=score_breakdown,
                     ),
-                    estimated_duration_min=int(score_breakdown["estimated_duration_min"]),
+                    estimated_duration_min=planned_duration_min,
                     score=int(score_breakdown["total_score"]),
                     score_breakdown=score_breakdown,
                     dependency_depth=signals["dependency_depth_by_task_id"].get(task.id, 0),
@@ -985,6 +990,46 @@ class PlanningService:
             return 3
         return 2
 
+    def _planned_duration_for_today(
+        self,
+        task: Task,
+        *,
+        score_breakdown: dict,
+        context: PlanningContext,
+    ) -> tuple[int, dict]:
+        original_duration = int(score_breakdown["estimated_duration_min"])
+        planned_duration = original_duration
+        minimum_viable_applied = False
+        minimum_viable_reason = None
+
+        has_minimum_step = bool(score_breakdown.get("semantic_minimum_viable_step"))
+        semantic_protected = int(score_breakdown.get("semantic_total_score") or 0) >= 28
+        high_value_goal = task.goal is not None and task.goal.value_level == ValueLevel.HIGH
+        high_value_task = task.value_level == ValueLevel.HIGH
+        heavy_for_today = original_duration > max(60, int(context.daily_capacity_minutes * 0.6))
+
+        if (
+            score_breakdown.get("semantic_signal_applied")
+            and has_minimum_step
+            and heavy_for_today
+            and (semantic_protected or high_value_goal or high_value_task)
+        ):
+            planned_duration = min(
+                original_duration,
+                max(25, min(45, context.daily_capacity_minutes // 2)),
+            )
+            minimum_viable_applied = planned_duration < original_duration
+            minimum_viable_reason = "semantic_minimum_viable_progress" if minimum_viable_applied else None
+
+        updated_breakdown = {
+            **score_breakdown,
+            "original_estimated_duration_min": original_duration,
+            "planned_duration_min": planned_duration,
+            "minimum_viable_progress_applied": minimum_viable_applied,
+            "minimum_viable_progress_reason": minimum_viable_reason,
+        }
+        return planned_duration, updated_breakdown
+
     def _score_band(self, total_score: int) -> str:
         if total_score >= 70:
             return "high"
@@ -1319,6 +1364,8 @@ class PlanningService:
             return "Dependent task kept after its prerequisite in today's sequence."
         if task.id in adjusted_task_ids:
             return "Adjusted by you, so the planner keeps that preference visible."
+        if score_breakdown.get("minimum_viable_progress_applied"):
+            return "任务较大，今天先保护最小可执行动作，避免高价值目标被整块任务压垮。"
         if (
             semantic_signal is not None
             and score_breakdown.get("semantic_signal_applied")
@@ -1372,6 +1419,9 @@ class PlanningService:
         semantic_protected_count = len(
             [planned for planned in active_tasks if planned.score_breakdown.get("semantic_total_score", 0) >= 28]
         )
+        minimum_viable_progress_count = len(
+            [planned for planned in active_tasks if planned.score_breakdown.get("minimum_viable_progress_applied")]
+        )
         first_breakdown = planned_tasks[0].score_breakdown if planned_tasks else {}
         daily_capacity_minutes = int(first_breakdown.get("daily_capacity_minutes") or 0)
         energy_level = str(first_breakdown.get("energy_level") or "unknown")
@@ -1400,6 +1450,7 @@ class PlanningService:
                     "user_adjusted_count": 0,
                     "semantic_signal_count": 0,
                     "semantic_protected_count": 0,
+                    "minimum_viable_progress_count": 0,
                     "energy_level": energy_level,
                     "energy_applied": energy_applied,
                 },
@@ -1434,6 +1485,7 @@ class PlanningService:
                 "user_adjusted_count": user_adjusted_count,
                 "semantic_signal_count": semantic_signal_count,
                 "semantic_protected_count": semantic_protected_count,
+                "minimum_viable_progress_count": minimum_viable_progress_count,
                 "energy_level": energy_level,
                 "energy_applied": energy_applied,
                 "average_score": round(
@@ -1622,6 +1674,16 @@ class PlanningService:
                     "score": factors["semantic_signal_count"],
                 }
             )
+        if factors["minimum_viable_progress_count"]:
+            signals.append(
+                {
+                    "key": "minimum_viable_progress",
+                    "title": "最小推进动作",
+                    "message": f"{factors['minimum_viable_progress_count']} 个高价值大任务只保护今天能完成的最小推进动作。",
+                    "signal": "positive",
+                    "score": factors["minimum_viable_progress_count"],
+                }
+            )
         if factors["energy_applied"]:
             signals.append(
                 {
@@ -1726,6 +1788,7 @@ class PlanningService:
             "user_adjusted_count": int(score_factors.get("user_adjusted_count", 0) or 0),
             "semantic_signal_count": int(score_factors.get("semantic_signal_count", 0) or 0),
             "semantic_protected_count": int(score_factors.get("semantic_protected_count", 0) or 0),
+            "minimum_viable_progress_count": int(score_factors.get("minimum_viable_progress_count", 0) or 0),
             "energy_level": str(score_factors.get("energy_level") or "unknown"),
             "energy_applied": bool(score_factors.get("energy_applied") or False),
             "planner_agent_latency_ms": score_factors.get("planner_agent_latency_ms"),
@@ -1754,6 +1817,8 @@ class PlanningService:
             explanation.append(f"{factors['user_adjusted_count']} 个任务读取了你的优先级修正，让 AI 判断保持可校正。")
         if factors["semantic_signal_count"]:
             explanation.append(f"{factors['semantic_signal_count']} 个任务读取了语义规划信号，用来理解目标对齐、复杂度和最小推进动作。")
+        if factors["minimum_viable_progress_count"]:
+            explanation.append(f"{factors['minimum_viable_progress_count']} 个高价值大任务只安排最小推进动作，避免 Today 变成不可执行清单。")
         if strategy.mode == PlanningPreference.LIGHT:
             explanation.append("今天保持轻量，让第一个动作更容易开始。")
         elif strategy.mode == PlanningPreference.SPRINT:
@@ -2046,6 +2111,17 @@ class PlanningService:
                     "message": "你的优先级或策略偏好已经进入本次排序。",
                     "signal": "positive",
                     "score": user_preference_score,
+                }
+            )
+
+        if score_breakdown.get("minimum_viable_progress_applied"):
+            signals.append(
+                {
+                    "key": "minimum_viable_progress",
+                    "title": "最小推进动作",
+                    "message": "任务本身偏大，Today 只保护一个今天做得出来的推进切片。",
+                    "signal": "positive",
+                    "score": score_breakdown.get("planned_duration_min"),
                 }
             )
 
