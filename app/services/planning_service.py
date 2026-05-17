@@ -189,6 +189,54 @@ class PlanningService:
             return None
         return self._current_item_for_task(db, plan=plan, task_id=task_id)
 
+    def refresh_current_today_for_dependency_change(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        task_ids: set[uuid.UUID],
+    ) -> dict | None:
+        plan_date = self._resolve_plan_date(db, user_id=user_id, plan_date=None)
+        plan = self._get_active_plan(db, user_id=user_id, plan_date=plan_date)
+        if plan is None:
+            return None
+
+        current_task_ids = {item.task_id for item in self._current_items(db, plan=plan)}
+        impacted_task_ids = current_task_ids.intersection(task_ids)
+        if not impacted_task_ids:
+            return None
+
+        previous_version = plan.current_version
+        self._create_revision(
+            db,
+            plan=plan,
+            trigger=PlanRevisionTrigger.SYSTEM_REFRESH,
+            reason="Task dependency changed",
+        )
+        activity_event_service.add_event(
+            db,
+            user_id=user_id,
+            entity_type=EntityType.DAILY_PLAN,
+            entity_id=plan.id,
+            event_type="DAILY_PLAN_SYSTEM_REFRESHED",
+            actor_type=ActorType.SYSTEM,
+            related_daily_plan_id=plan.id,
+            payload={
+                "source": "task_dependency",
+                "task_ids": [str(task_id) for task_id in sorted(task_ids, key=str)],
+                "impacted_task_ids": [str(task_id) for task_id in sorted(impacted_task_ids, key=str)],
+                "previous_version": previous_version,
+                "version": plan.current_version,
+            },
+        )
+        return {
+            "plan_date": plan_date,
+            "daily_plan_id": plan.id,
+            "previous_version": previous_version,
+            "plan_version": plan.current_version,
+            "impacted_task_ids": [task_id for task_id in sorted(impacted_task_ids, key=str)],
+        }
+
     def include_confirmed_task_from_inbox(
         self,
         db: Session,

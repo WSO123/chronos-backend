@@ -270,6 +270,8 @@ prerequisite_task -> dependent_task
 - 不允许自依赖。
 - 不允许形成环。
 - 不允许跨用户依赖。
+- 如果新增 / 删除的依赖涉及当前 active Today plan 中的任务，后端会触发 `system_refresh` 生成新的 Today version，使 Planning Engine 的排序和 Strategy Detail 解释立即读取最新依赖。
+- 如果相关任务不在当前 Today，依赖只更新 Task Detail / Goal Detail；后续生成或主动刷新 Today 时再读取该信号。
 
 ## 5. Goals
 

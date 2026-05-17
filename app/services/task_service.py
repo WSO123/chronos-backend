@@ -651,6 +651,11 @@ class TaskService:
                 "reason": reason,
             },
         )
+        self._refresh_today_after_dependency_change(
+            db,
+            user_id=user_id,
+            task_ids={dependent_task.id, prerequisite_task.id},
+        )
         db.commit()
         db.refresh(edge)
         return self._dependency_response(edge)
@@ -674,6 +679,7 @@ class TaskService:
         if edge is None:
             raise NotFoundError("Task dependency not found")
         db.delete(edge)
+        db.flush()
         activity_event_service.add_event(
             db,
             user_id=user_id,
@@ -683,8 +689,28 @@ class TaskService:
             related_task_id=dependent_task.id,
             payload={"prerequisite_task_id": str(prerequisite_task.id)},
         )
+        self._refresh_today_after_dependency_change(
+            db,
+            user_id=user_id,
+            task_ids={dependent_task.id, prerequisite_task.id},
+        )
         db.commit()
         return self.get_task_dependencies(db, task_id=dependent_task.id, user_id=user_id)
+
+    def _refresh_today_after_dependency_change(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        task_ids: set[uuid.UUID],
+    ) -> None:
+        from app.services.planning_service import planning_service
+
+        planning_service.refresh_current_today_for_dependency_change(
+            db,
+            user_id=user_id,
+            task_ids=task_ids,
+        )
 
     def _get_user_task(self, db: Session, *, task_id: uuid.UUID, user_id: uuid.UUID) -> Task:
         task = db.get(Task, task_id)

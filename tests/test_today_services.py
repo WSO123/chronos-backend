@@ -668,6 +668,64 @@ class TodayServiceTests(unittest.TestCase):
         self.assertIn("after its prerequisite", today["sections"]["pinned_tasks"][1]["recommendation_reason"])
         self.assertEqual(strategy["factors"]["dependency_protected_count"], 1)
 
+    def test_dependency_added_after_today_exists_refreshes_current_plan(self):
+        prerequisite = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Draft dependency outline after plan",
+            estimated_duration_min=30,
+            priority=4,
+            value_level=ValueLevel.LOW,
+        )
+        dependent = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Write dependency proposal after plan",
+            estimated_duration_min=60,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+        )
+        initial_today = planning_service.get_today(self.db, user_id=self.user.id)
+
+        task_service.add_task_dependency(
+            self.db,
+            task_id=dependent.id,
+            user_id=self.user.id,
+            prerequisite_task_id=prerequisite.id,
+            reason="Proposal still needs the outline first",
+        )
+        refreshed_today = planning_service.get_today(self.db, user_id=self.user.id)
+        ordered_titles = [
+            item["title"]
+            for section in refreshed_today["sections"].values()
+            for item in section
+        ]
+        refresh_events = (
+            self.db.query(ActivityEvent)
+            .filter(
+                ActivityEvent.user_id == self.user.id,
+                ActivityEvent.event_type == "DAILY_PLAN_SYSTEM_REFRESHED",
+            )
+            .all()
+        )
+
+        self.assertEqual(refreshed_today["plan_version"], initial_today["plan_version"] + 1)
+        self.assertEqual(len(refresh_events), 1)
+        self.assertEqual(refresh_events[0].payload["source"], "task_dependency")
+        self.assertLess(
+            ordered_titles.index("Draft dependency outline after plan"),
+            ordered_titles.index("Write dependency proposal after plan"),
+        )
+        self.assertIn(
+            "unlocks another planned task",
+            next(
+                item
+                for section in refreshed_today["sections"].values()
+                for item in section
+                if item["task_id"] == prerequisite.id
+            )["recommendation_reason"],
+        )
+
     def test_today_planner_uses_user_priority_adjustment_signal(self):
         task = task_service.create_task(
             self.db,
