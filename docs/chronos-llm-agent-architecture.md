@@ -299,6 +299,13 @@ class CaptureParseOutput(BaseModel):
 生成今日推荐执行顺序和策略摘要。
 ```
 
+当前实现状态：
+
+- 已落地 Planning Engine v1，作为 deterministic planner core 和未来 LLM Daily Planner 的 fallback。
+- Planning Engine v1 已读取任务价值、优先级、deadline、估时、依赖、用户修正、行为反馈、当日容量和 Energy 信号。
+- 每个 `DailyPlanItem` 会保存 `score_breakdown`，Strategy Detail 可以解释排序，Today 首屏不展开完整评分。
+- 超出容量的非保护任务进入 `section=rolled_over`；系统容量滚动不把 Task 本体改为 postponed。
+
 输入：
 
 - 未完成任务
@@ -332,6 +339,7 @@ class PlanItemOutput(BaseModel):
     section: Literal["pinned", "recommended", "low_priority", "rolled_over"]
     sort_order: int
     recommendation_reason: str
+    score_breakdown: dict | None = None
 
 class DailyPlanOutput(BaseModel):
     mode: Literal["light", "normal", "sprint"]
@@ -348,10 +356,11 @@ P1 不建议完全依赖 LLM 排序。
 
 推荐策略：
 
-- 规则排序负责基础顺序。
-- LLM 负责策略摘要、推荐理由和轻量解释。
+- Planning Engine v1 负责确定性基础顺序、容量筛选、`score_breakdown` 和 fallback。
+- LLM 后续只增强策略摘要、推荐理由、异常场景判断和可解释性，不直接写业务表。
+- Service 负责校验 LLM 输出是否违反依赖、容量和用户修正边界。
 
-规则排序可考虑：
+Planning Engine v1 已使用的信号：
 
 - deadline
 - priority
@@ -360,11 +369,15 @@ P1 不建议完全依赖 LLM 排序。
 - 是否多次延后
 - 是否属于高价值目标
 - 今日已完成 / 中断情况
+- task dependencies
+- user priority adjustment
+- daily capacity
+- EnergyDailyMetric
 
 失败 fallback：
 
-- 用规则排序生成 DailyPlan。
-- StrategySnapshot 使用系统默认摘要。
+- 用 Planning Engine v1 生成 DailyPlan。
+- StrategySnapshot 使用确定性摘要。
 - `AIJob.status = succeeded_with_fallback`
 - 用户仍然可以打开 Today。
 

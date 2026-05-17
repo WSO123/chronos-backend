@@ -41,6 +41,7 @@ class TodayTaskResponse(BaseModel):
     priority: int
     value_level: ValueLevel
     deadline: date | None
+    score_breakdown: dict = Field(default_factory=dict)
 
 
 class TodaySectionsResponse(BaseModel):
@@ -99,8 +100,13 @@ class StrategyDetailFactorsResponse(BaseModel):
     low_priority_count: int
     rolled_over_count: int
     total_estimated_minutes: int
+    daily_capacity_minutes: int
+    selected_estimated_minutes: int
+    rolled_over_estimated_minutes: int
     dependency_protected_count: int
     user_adjusted_count: int
+    energy_level: str
+    energy_applied: bool
     completed_count: int
     focus_minutes: int
 

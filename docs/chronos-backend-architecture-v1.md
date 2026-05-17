@@ -371,7 +371,10 @@ Today 不是任务列表，而是每日执行入口。
 - 每次 AI 重排都生成新的 plan version 或 revision。
 - 用户手动调整计划也要记录。
 - Today 默认返回轻量摘要，不返回完整评分细节。
-- P2 起 Today planner 会读取任务依赖边和 `TASK_PRIORITY_ADJUSTED` 事件，但只把结果表现为更合理的顺序、简短推荐理由和 Strategy Detail 轻量解释。
+- P2 起 Today planner 升级为 Planning Engine v1：读取任务价值、优先级、deadline、估时、依赖、用户优先级修正、行为反馈、当日容量和 Energy 信号。
+- Planning Engine v1 会为每个 DailyPlanItem 保存 `score_breakdown`，但 Today 首屏只显示分区、顺序和简短推荐理由；完整评分只进入 Strategy Detail。
+- 超出当日容量的非保护任务进入 `rolled_over`，保留可见但不挤占主执行序列。
+- 系统容量滚动只改变 `DailyPlanItem.section=rolled_over`，不把 Task 本体改成 postponed；用户手动延后仍通过 Task / item status 表达。
 
 核心对象：
 
@@ -958,6 +961,7 @@ DailyPlanItem {
   section                 // pinned | recommended | low_priority | rolled_over
   recommendation_reason
   estimated_duration_min
+  score_breakdown          // json, Planning Engine v1 per-task factors
   status                  // planned | completed | postponed | skipped
   created_at
   updated_at
@@ -1178,7 +1182,7 @@ PATCH /api/v1/today/items/{item_id}
 - 包含 strategy summary、推荐任务序列、今日进度、Today Insights Preview、快速操作状态。
 - 不默认返回完整 AI 评分细节。
 - `GET /today/strategy` 返回 Strategy Detail，解释当前策略、PlanRevision、轻量 factors 和任务推荐理由。
-- P3 已在 Strategy Detail 增加只读 `energy` 解释块，说明 Energy 数据是否存在、推荐任务类型和是否已影响排序；当前 `applied_to_plan=false`，不自动重排。
+- P3 已在 Strategy Detail 增加只读 `energy` 解释块，说明 Energy 数据是否存在、推荐任务类型，以及新 plan / replan 时是否已进入 Planning Engine；既有计划不会被 Energy 静默改版。
 - `replan` 生成新的 PlanRevision；若异步执行，返回 `ai_job_id`。
 
 ### Tasks
@@ -1288,8 +1292,8 @@ GET /api/v1/energy/dashboard
 - `PUT /daily-metrics` 可用于手动 check-in、测试导入或后续 Health provider worker。
 - `GET /dashboard` 返回趋势、今日精力摘要和轻量任务类型建议。
 - Health worker 占位同步通过 `health.sync_energy_connection` / `health.sync_ready_energy_connections` 写入 `EnergyDailyMetric`，当前 fake adapter 从 connection metadata 读取 `fake_energy_metrics`。
-- 当前不把 Energy 数据直接写入 Today 排序，只作为解释和后续策略输入。
-- `GET /today/strategy` 会读取同日 Energy metric 生成只读解释，但不会改变 DailyPlan / DailyPlanItem。
+- Planning Engine v1 会在新 plan / replan 时读取同日 Energy metric，将其作为 `energy_fit_score` 和轻量容量保护因子；低精力可降低容量，高精力只提升深度/高价值任务适配分，不自动增加工作量。Today 首屏不展示健康细节。
+- `GET /today/strategy` 会解释 Energy 是否已应用到当前策略，但读取接口本身不会改变 DailyPlan / DailyPlanItem。
 
 ### Reminders
 
@@ -1869,7 +1873,7 @@ AI output -> schema validation -> service decision -> DB write
 - Calendar / Email provider adapter 的最小字段标准。
 - Data Source sync 是否需要独立 SyncRun 表记录每次同步结果。
 - Reminder Center 的提醒策略边界：只提醒高价值任务，还是允许用户配置更细粒度规则？
-- Health / Energy 数据是否直接影响 Today 排序，还是先只作为解释和洞察输入？
+- Health / Energy 对 Today 的影响已先落到 Planning Engine v1 的轻量容量保护和 `energy_fit_score`；后续问题是是否引入更细的时间段预测和用户可配置策略。
 - P1 首选 LLM provider 是 OpenAI、Qwen、DeepSeek，还是继续保留 adapter 抽象后再接入？
 
 ---

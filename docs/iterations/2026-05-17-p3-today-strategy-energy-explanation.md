@@ -6,11 +6,13 @@
 > 负责人：Codex  
 > 关联 PR / Issue / Commit：待提交
 
+> 历史备注：本迭代记录的是 Energy 初次进入 Strategy Detail 时的只读边界。该边界已被 [P2 Planning Engine v1](./2026-05-17-p2-planning-engine-v1.md) 迭代推进：当前新 plan / replan 会把 Energy 作为排序和容量因子，但读 Strategy Detail 仍不会静默改版旧计划。
+
 ---
 
 ## 1. 迭代摘要
 
-在 Today Strategy Detail 中增加只读 `energy` 解释块，让用户理解当日 Energy 数据对执行建议的参考意义，同时明确当前不会自动重排 Today。
+在 Today Strategy Detail 中增加只读 `energy` 解释块，让用户理解当日 Energy 数据对执行建议的参考意义，同时在本迭代完成时明确不会自动重排 Today。
 
 ---
 
@@ -27,13 +29,13 @@
 
 ### 背景
 
-P3 已完成 Energy Dashboard 和 Health worker。产品上 Energy 主要服务 Today 的 AI 排序与 Me 的洞察反馈，但当前不能直接让健康数据改变 Today，否则容易让 Today 变成复杂驾驶舱。因此先在 Strategy Detail 提供只读解释。
+P3 已完成 Energy Dashboard 和 Health worker。产品上 Energy 主要服务 Today 的 AI 排序与 Me 的洞察反馈，但本迭代完成时尚未让健康数据改变 Today，否则容易让 Today 变成复杂驾驶舱。因此先在 Strategy Detail 提供只读解释。
 
 ### 目标
 
 - `GET /api/v1/today/strategy` 新增 `energy` 字段。
 - 返回当天 Energy 数据是否存在、energy_level、recommended_mode 和解释文案。
-- 明确 `applied_to_plan=false`，当前不改变排序。
+- 本迭代完成时明确 `applied_to_plan=false`，不改变排序；后续 Planning Engine v1 已推进该边界。
 - 补测试保证无数据和有数据路径都可解释。
 
 ### 非目标
@@ -85,7 +87,7 @@ Energy explanation 是用户主动进入 Strategy Detail 才看到的解释，�
 | --- | --- | --- | --- |
 | Strategy energy field | 返回 Energy 解释块 | Must | 只读 |
 | No-data explanation | 无 Energy 数据时解释边界 | Must | 不影响排序 |
-| Applied flag | 返回 `applied_to_plan=false` | Must | 防止误解 |
+| Applied flag | 本迭代完成时返回 `applied_to_plan=false` | Must | 防止误解 |
 | Tests | API 覆盖有/无数据 | Must | Today 不重排 |
 
 ### 用户故事
@@ -192,7 +194,7 @@ GET /today/strategy
 
 - [x] 无 Energy 数据时返回 `has_data=false`。
 - [x] 有 Energy 数据时返回 level 和 recommended_mode。
-- [x] 始终返回 `applied_to_plan=false`。
+- [x] 本迭代完成时始终返回 `applied_to_plan=false`。
 - [x] Task rationales 顺序不因 Energy 数据改变。
 
 ### 数据验收
@@ -232,7 +234,7 @@ GET /today/strategy
 
 | 风险 | 影响 | 应对 |
 | --- | --- | --- |
-| 用户误以为 Energy 已参与排序 | 信任受损 | `applied_to_plan=false` 明确边界 |
+| 用户误以为 Energy 已参与排序 | 信任受损 | 本迭代完成时用 `applied_to_plan=false` 明确边界 |
 | Strategy Detail 过载 | 解释抢走行动感 | 只加一个紧凑解释块 |
 | 健康数据制造压力 | 违背产品人格 | 文案克制，不做惩罚式提示 |
 
@@ -249,7 +251,7 @@ GET /today/strategy
 | 日期 | 决策 | 原因 | 影响 |
 | --- | --- | --- | --- |
 | 2026-05-17 | Strategy Detail 增加 energy block | P3 Energy 需要与 Today 建立解释性连接 | 用户能理解系统边界 |
-| 2026-05-17 | `applied_to_plan=false` | 当前不让 Energy 自动重排 | 后续真正接入排序时需单独迭代 |
+| 2026-05-17 | `applied_to_plan=false` | 本迭代完成时不让 Energy 自动重排 | 后续已由 Planning Engine v1 单独推进 |
 
 ---
 

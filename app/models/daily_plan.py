@@ -151,6 +151,7 @@ class DailyPlanItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     recommendation_reason: Mapped[str] = mapped_column(String(500), nullable=False)
     estimated_duration_min: Mapped[int | None] = mapped_column(Integer)
+    score_breakdown: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     status: Mapped[DailyPlanItemStatus] = mapped_column(
         Enum(DailyPlanItemStatus, name="daily_plan_item_status", values_callable=enum_values),
         default=DailyPlanItemStatus.PLANNED,

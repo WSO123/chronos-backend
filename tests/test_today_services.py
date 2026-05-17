@@ -2,8 +2,9 @@ import unittest
 from datetime import date, timedelta
 
 from app.models.activity_event import ActivityEvent
-from app.models.enums import DailyPlanItemStatus, TaskStatus, ValueLevel
+from app.models.enums import DailyPlanItemStatus, EntityType, TaskStatus, ValueLevel
 from app.models.task import Task
+from app.services.energy_service import energy_service
 from app.services.planning_service import planning_service
 from app.services.task_service import task_service
 from tests.db import TestingSessionLocal, reset_database
@@ -45,6 +46,8 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(today["daily_plan_id"], same_today["daily_plan_id"])
         self.assertEqual(today["plan_version"], 1)
         self.assertEqual(today["sections"]["pinned_tasks"][0]["title"], "Protect high value work")
+        self.assertGreater(today["sections"]["pinned_tasks"][0]["score_breakdown"]["total_score"], 0)
+        self.assertEqual(today["sections"]["pinned_tasks"][0]["score_breakdown"]["selected_for_today"], True)
         self.assertEqual(today["sections"]["low_priority_tasks"][0]["title"], "Optional cleanup")
         self.assertEqual(today["progress"]["total_count"], 2)
         self.assertEqual(today["insights_preview"]["source"], "rule-today-insights-v1")
@@ -108,10 +111,183 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["factors"]["pinned_count"], 1)
         self.assertEqual(strategy["factors"]["low_priority_count"], 1)
         self.assertEqual(strategy["factors"]["total_estimated_minutes"], 65)
+        self.assertEqual(strategy["factors"]["daily_capacity_minutes"], 150)
+        self.assertEqual(strategy["factors"]["selected_estimated_minutes"], 65)
+        self.assertEqual(strategy["factors"]["energy_applied"], False)
         self.assertEqual(len(strategy["task_rationales"]), 2)
         self.assertEqual(strategy["task_rationales"][0]["title"], "Protect strategy task")
+        self.assertIn("value_score", strategy["task_rationales"][0]["score_breakdown"])
         self.assertTrue(strategy["explanation"])
-        self.assertEqual(strategy["source"]["model_name"], "rule-planner")
+        self.assertEqual(strategy["source"]["model_name"], "planning-engine-v1")
+
+    def test_planning_engine_rolls_over_work_beyond_today_capacity(self):
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Protected deep work",
+            estimated_duration_min=90,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+        )
+        medium_tasks = []
+        for index in range(3):
+            medium_tasks.append(
+                task_service.create_task(
+                    self.db,
+                    user_id=self.user.id,
+                    title=f"Medium task {index}",
+                    estimated_duration_min=60,
+                    priority=3,
+                    value_level=ValueLevel.MEDIUM,
+                )
+            )
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        self.assertEqual(today["progress"]["total_count"], 2)
+        self.assertEqual(len(today["sections"]["rolled_over_tasks"]), 2)
+        rolled = today["sections"]["rolled_over_tasks"][0]
+        self.assertEqual(rolled["item_status"], DailyPlanItemStatus.PLANNED)
+        self.assertEqual(rolled["task_status"], TaskStatus.ACTIVE)
+        self.assertEqual(self.db.get(Task, medium_tasks[-1].id).status, TaskStatus.ACTIVE)
+        self.assertEqual(rolled["score_breakdown"]["selected_for_today"], False)
+        self.assertEqual(rolled["score_breakdown"]["rollover_reason"], "capacity")
+        self.assertEqual(strategy["factors"]["daily_capacity_minutes"], 150)
+        self.assertEqual(strategy["factors"]["selected_estimated_minutes"], 150)
+        self.assertEqual(strategy["factors"]["rolled_over_estimated_minutes"], 120)
+
+    def test_planning_engine_keeps_user_postponed_tasks_out_of_main_sequence(self):
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Already postponed task",
+            estimated_duration_min=30,
+            priority=2,
+            value_level=ValueLevel.HIGH,
+        )
+        task_service.postpone_task(self.db, task_id=task.id, user_id=self.user.id)
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        self.assertEqual(today["progress"]["total_count"], 0)
+        rolled = today["sections"]["rolled_over_tasks"][0]
+        self.assertEqual(rolled["task_id"], task.id)
+        self.assertEqual(rolled["item_status"], DailyPlanItemStatus.POSTPONED)
+        self.assertEqual(rolled["task_status"], TaskStatus.POSTPONED)
+        self.assertEqual(rolled["score_breakdown"]["rollover_reason"], "postponed")
+
+    def test_planning_engine_behavior_feedback_penalizes_repeated_interruptions(self):
+        stable_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Stable task",
+            estimated_duration_min=30,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        interrupted_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Frequently interrupted task",
+            estimated_duration_min=30,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        self.db.add_all(
+            [
+                ActivityEvent(
+                    user_id=self.user.id,
+                    entity_type=EntityType.TASK,
+                    entity_id=interrupted_task.id,
+                    event_type="FOCUS_SESSION_INTERRUPTED",
+                    related_task_id=interrupted_task.id,
+                ),
+                ActivityEvent(
+                    user_id=self.user.id,
+                    entity_type=EntityType.TASK,
+                    entity_id=interrupted_task.id,
+                    event_type="FOCUS_SESSION_INTERRUPTED",
+                    related_task_id=interrupted_task.id,
+                ),
+            ]
+        )
+        self.db.commit()
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        recommended = today["sections"]["recommended_tasks"]
+
+        self.assertEqual(recommended[0]["task_id"], stable_task.id)
+        self.assertEqual(recommended[1]["task_id"], interrupted_task.id)
+        self.assertLess(recommended[1]["score_breakdown"]["behavior_feedback_score"], 0)
+
+    def test_planning_engine_high_energy_prioritizes_deeper_work_without_expanding_capacity(self):
+        energy_service.upsert_daily_metric(
+            self.db,
+            user_id=self.user.id,
+            payload={"metric_date": self.plan_date, "energy_score": 90},
+        )
+        small_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Small shallow task",
+            estimated_duration_min=20,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        deep_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Deep high-energy task",
+            estimated_duration_min=60,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        first_item = today["sections"]["recommended_tasks"][0]
+        self.assertEqual(first_item["task_id"], deep_task.id)
+        self.assertEqual(today["sections"]["recommended_tasks"][1]["task_id"], small_task.id)
+        self.assertGreater(first_item["score_breakdown"]["energy_fit_score"], 0)
+        self.assertEqual(strategy["factors"]["daily_capacity_minutes"], 150)
+        self.assertEqual(strategy["factors"]["selected_estimated_minutes"], 80)
+        self.assertEqual(strategy["factors"]["energy_applied"], True)
+
+    def test_planning_engine_applies_low_energy_to_capacity_and_score(self):
+        energy_service.upsert_daily_metric(
+            self.db,
+            user_id=self.user.id,
+            payload={"metric_date": self.plan_date, "energy_score": 35},
+        )
+        light_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Small admin step",
+            estimated_duration_min=20,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Long writing block",
+            estimated_duration_min=75,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        first_item = today["sections"]["recommended_tasks"][0]
+        self.assertEqual(first_item["task_id"], light_task.id)
+        self.assertGreater(first_item["score_breakdown"]["energy_fit_score"], 0)
+        self.assertEqual(first_item["score_breakdown"]["energy_applied"], True)
+        self.assertEqual(strategy["factors"]["daily_capacity_minutes"], 90)
+        self.assertEqual(strategy["factors"]["energy_level"], "low")
+        self.assertEqual(strategy["energy"]["applied_to_plan"], True)
 
     def test_today_planner_orders_prerequisites_before_dependent_tasks(self):
         prerequisite = task_service.create_task(

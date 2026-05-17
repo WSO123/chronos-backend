@@ -449,7 +449,7 @@ Frontend notes:
 
 ## 7. Energy / Health Dashboard
 
-Health 数据不走 Capture / Inbox，不会生成 Task。当前先支持日级聚合数据和只读 Dashboard，服务 Me -> Energy Dashboard，并为后续 Today 的精力解释预留输入。
+Health 数据不走 Capture / Inbox，不会生成 Task。当前支持日级聚合数据和只读 Dashboard，服务 Me -> Energy Dashboard，并为 Today Strategy / Planning Engine 提供精力辅助输入。
 
 ### PUT `/api/v1/energy/daily-metrics`
 
@@ -535,7 +535,7 @@ Response key fields:
 Frontend notes:
 
 - Energy Dashboard 可以展示睡眠趋势、压力趋势、精力曲线和任务类型建议。
-- Today 仍不直接依赖该接口改变排序；后续如接入 Today，只能作为解释性输入和可回滚的策略因子。
+- Planning Engine v1 会读取同日 EnergyDailyMetric，将 Energy 作为可解释、可回滚的排序和轻量容量保护因子；低精力可降低容量，高精力只提升深度/高价值任务适配分，不自动增加工作量。Today 首屏仍不展开健康细节。
 - 文案应保持克制，避免用健康数据制造压力。
 
 ### Today Strategy Energy Explanation
@@ -550,8 +550,8 @@ Frontend notes:
     "energy_score": 83,
     "energy_level": "high",
     "recommended_mode": "deep_work",
-    "explanation": "今天精力较好，适合保护深度任务；当前只作为解释，不会自动增加任务量。",
-    "applied_to_plan": false,
+    "explanation": "今天精力较好，Planning Engine 会给高价值或较深的任务更高适配分。",
+    "applied_to_plan": true,
     "source": "energy_daily_metric"
   }
 }
@@ -560,7 +560,8 @@ Frontend notes:
 Rules:
 
 - `energy` 只解释当天策略，不触发 replan。
-- 当前 `applied_to_plan=false`，表示 Energy 尚未参与 Today 排序。
+- 新 plan / replan 时 `applied_to_plan=true` 表示 Energy 已进入 Planning Engine 的 `energy_fit_score` 和容量保护计算。
+- 已存在的旧 plan 不会被 Energy 静默改版；用户主动 replan 或新建当天 plan 后才会读取最新 Energy。
 - 无 Energy 数据时返回 `has_data=false`、`source=none`，并说明 Today 仍基于任务价值、截止时间和依赖。
 - 前端不要把该字段放到 Today 首屏驾驶舱；它属于 Strategy Detail 的补充解释。
 

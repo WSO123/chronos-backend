@@ -370,8 +370,8 @@ Response key fields:
   "task_rationales": [],
   "source": {
     "strategy_snapshot_id": "uuid",
-    "model_name": "rule-planner",
-    "prompt_version": "p2-rule-v1",
+    "model_name": "planning-engine-v1",
+    "prompt_version": "p2-planning-engine-v1",
     "generated_at": "2026-05-16T09:00:00Z"
   }
 }

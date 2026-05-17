@@ -73,9 +73,9 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(body["energy"]["has_data"], False)
         self.assertEqual(body["energy"]["applied_to_plan"], False)
         self.assertEqual(body["energy"]["source"], "none")
-        self.assertEqual(body["source"]["model_name"], "rule-planner")
+        self.assertEqual(body["source"]["model_name"], "planning-engine-v1")
 
-    def test_strategy_detail_returns_energy_explanation_without_reordering(self):
+    def test_strategy_detail_returns_energy_explanation_with_planning_signal(self):
         energy_service.upsert_daily_metric(
             self.db,
             user_id=self.user.id,
@@ -96,9 +96,11 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(body["energy"]["energy_level"], "high")
         self.assertEqual(body["energy"]["recommended_mode"], "deep_work")
         self.assertEqual(body["energy"]["source"], "energy_daily_metric")
-        self.assertEqual(body["energy"]["applied_to_plan"], False)
-        self.assertIn("不会自动", body["energy"]["explanation"])
+        self.assertEqual(body["energy"]["applied_to_plan"], True)
+        self.assertIn("Planning Engine", body["energy"]["explanation"])
+        self.assertEqual(body["factors"]["energy_applied"], True)
         self.assertEqual(body["task_rationales"][0]["title"], "Energy-aware but stable task")
+        self.assertEqual(body["task_rationales"][0]["score_breakdown"]["energy_applied"], True)
 
     def test_replan_and_complete_today_item(self):
         self.client.post("/api/v1/tasks", json={"title": "First task"}, headers=self.headers)

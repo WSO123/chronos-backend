@@ -12,6 +12,7 @@ from app.models.activity_event import ActivityEvent
 from app.models.daily_plan import DailyPlan, DailyPlanItem, PlanRevision, StrategySnapshot
 from app.models.enums import (
     ActorType,
+    AIStrategyPreference,
     DailyPlanItemSection,
     DailyPlanItemStatus,
     DailyPlanStatus,
@@ -23,7 +24,7 @@ from app.models.enums import (
 )
 from app.models.task_dependency import TaskDependency
 from app.models.task import Task
-from app.models.user import User
+from app.models.user import User, UserSettings
 from app.services.activity_event_service import activity_event_service
 from app.services.energy_service import energy_service
 from app.services.errors import InvalidStateError, NotFoundError
@@ -36,12 +37,27 @@ class PlannedTask:
     section: DailyPlanItemSection
     recommendation_reason: str
     estimated_duration_min: int
+    score: int
+    score_breakdown: dict
     status: DailyPlanItemStatus | None = None
     contributes_to_strategy: bool = True
     dependency_depth: int = 0
     unlocks_task: bool = False
     blocked_by_dependency: bool = False
     priority_adjusted: bool = False
+
+
+@dataclass(frozen=True)
+class PlanningContext:
+    plan_date: date
+    planning_preference: PlanningPreference
+    ai_strategy_preference: AIStrategyPreference
+    base_capacity_minutes: int
+    daily_capacity_minutes: int
+    energy_has_data: bool
+    energy_score: int | None
+    energy_level: str
+    energy_recommended_mode: str
 
 
 class PlanningService:
@@ -250,6 +266,7 @@ class PlanningService:
                     section=planned.section,
                     recommendation_reason=planned.recommendation_reason,
                     estimated_duration_min=planned.estimated_duration_min,
+                    score_breakdown=planned.score_breakdown,
                     status=status,
                 )
             )
@@ -264,8 +281,8 @@ class PlanningService:
                 mode=strategy_payload["mode"],
                 primary_reason=strategy_payload["primary_reason"],
                 score_factors=strategy_payload["score_factors"],
-                model_name="rule-planner",
-                prompt_version="p2-rule-v1",
+                model_name="planning-engine-v1",
+                prompt_version="p2-planning-engine-v1",
             )
         )
         db.flush()
@@ -281,31 +298,233 @@ class PlanningService:
             Task.status.in_([TaskStatus.ACTIVE, TaskStatus.POSTPONED]),
         )
         tasks = list(db.scalars(stmt).all())
+        context = self._planning_context(db, user_id=user_id, plan_date=plan_date)
         signals = self._planning_signals(db, user_id=user_id, tasks=tasks)
-        planned_tasks = [
-            PlannedTask(
-                task=task,
-                section=self._section_for(
-                    task,
-                    plan_date=plan_date,
-                    unlocking_task_ids=signals["unlocking_task_ids"],
-                ),
-                recommendation_reason=self._reason_for(
-                    task,
-                    plan_date=plan_date,
-                    unlocking_task_ids=signals["unlocking_task_ids"],
-                    blocked_task_ids=signals["blocked_task_ids"],
-                    adjusted_task_ids=signals["adjusted_task_ids"],
-                ),
-                estimated_duration_min=task.estimated_duration_min or 25,
-                dependency_depth=signals["dependency_depth_by_task_id"].get(task.id, 0),
-                unlocks_task=task.id in signals["unlocking_task_ids"],
-                blocked_by_dependency=task.id in signals["blocked_task_ids"],
-                priority_adjusted=task.id in signals["adjusted_task_ids"],
+        scored_tasks: list[PlannedTask] = []
+        for task in tasks:
+            score_breakdown = self._score_breakdown_for(task, context=context, signals=signals)
+            base_section = self._section_for(
+                task,
+                plan_date=plan_date,
+                unlocking_task_ids=signals["unlocking_task_ids"],
             )
-            for task in tasks
-        ]
-        return sorted(planned_tasks, key=self._planned_sort_key)
+            scored_tasks.append(
+                PlannedTask(
+                    task=task,
+                    section=base_section,
+                    recommendation_reason=self._reason_for(
+                        task,
+                        plan_date=plan_date,
+                        unlocking_task_ids=signals["unlocking_task_ids"],
+                        blocked_task_ids=signals["blocked_task_ids"],
+                        adjusted_task_ids=signals["adjusted_task_ids"],
+                        score_breakdown=score_breakdown,
+                    ),
+                    estimated_duration_min=task.estimated_duration_min or 25,
+                    score=int(score_breakdown["total_score"]),
+                    score_breakdown=score_breakdown,
+                    dependency_depth=signals["dependency_depth_by_task_id"].get(task.id, 0),
+                    unlocks_task=task.id in signals["unlocking_task_ids"],
+                    blocked_by_dependency=task.id in signals["blocked_task_ids"],
+                    priority_adjusted=task.id in signals["adjusted_task_ids"],
+                )
+            )
+        return self._apply_capacity(sorted(scored_tasks, key=self._planned_sort_key), context=context)
+
+    def _planning_context(self, db: Session, *, user_id: uuid.UUID, plan_date: date) -> PlanningContext:
+        settings = self._settings_for(db, user_id=user_id)
+        planning_preference = settings.planning_preference if settings else PlanningPreference.NORMAL
+        ai_strategy_preference = settings.ai_strategy_preference if settings else AIStrategyPreference.BALANCED
+        base_capacity = {
+            PlanningPreference.LIGHT: 90,
+            PlanningPreference.NORMAL: 150,
+            PlanningPreference.SPRINT: 210,
+        }[planning_preference]
+
+        dashboard = energy_service.get_dashboard(db, user_id=user_id, end_date=plan_date, days=1)
+        summary = dashboard["summary"]
+        task_match = dashboard["task_match"]
+        energy_has_data = bool(dashboard["trends"][0]["has_data"])
+        energy_level = summary["energy_level"]
+        daily_capacity = base_capacity
+        if energy_has_data and energy_level == "low":
+            daily_capacity = min(base_capacity, 90)
+
+        return PlanningContext(
+            plan_date=plan_date,
+            planning_preference=planning_preference,
+            ai_strategy_preference=ai_strategy_preference,
+            base_capacity_minutes=base_capacity,
+            daily_capacity_minutes=daily_capacity,
+            energy_has_data=energy_has_data,
+            energy_score=summary["energy_score"],
+            energy_level=energy_level,
+            energy_recommended_mode=task_match["recommended_mode"],
+        )
+
+    def _settings_for(self, db: Session, *, user_id: uuid.UUID) -> UserSettings | None:
+        stmt = select(UserSettings).where(UserSettings.user_id == user_id)
+        return db.scalars(stmt).first()
+
+    def _score_breakdown_for(self, task: Task, *, context: PlanningContext, signals: dict) -> dict:
+        estimated_minutes = task.estimated_duration_min or 25
+        behavior = signals["behavior_by_task_id"].get(
+            task.id,
+            {"completed": 0, "postponed": 0, "interrupted": 0},
+        )
+        value_score = {ValueLevel.HIGH: 30, ValueLevel.MEDIUM: 18, ValueLevel.LOW: 8}[task.value_level]
+        urgency_score = self._urgency_score(task=task, plan_date=context.plan_date)
+        dependency_score = 0
+        if task.id in signals["unlocking_task_ids"]:
+            dependency_score += 18
+        if task.id in signals["blocked_task_ids"]:
+            dependency_score -= 10
+        duration_fit_score = self._duration_fit_score(estimated_minutes, capacity=context.daily_capacity_minutes)
+        energy_fit_score = self._energy_fit_score(
+            estimated_minutes,
+            value_level=task.value_level,
+            context=context,
+        )
+        behavior_feedback_score = min(behavior["completed"], 3) * 2
+        behavior_feedback_score -= min(behavior["postponed"], 3) * 6
+        behavior_feedback_score -= min(behavior["interrupted"], 3) * 4
+        user_preference_score = 10 if task.id in signals["adjusted_task_ids"] else 0
+        if context.ai_strategy_preference == AIStrategyPreference.HIGH_VALUE_FIRST and task.value_level == ValueLevel.HIGH:
+            user_preference_score += 8
+        if context.ai_strategy_preference == AIStrategyPreference.ENERGY_AWARE and context.energy_has_data:
+            user_preference_score += max(energy_fit_score, 0) // 2
+        postponement_penalty = -12 if task.status == TaskStatus.POSTPONED else 0
+        priority_score = max(0, 6 - task.priority) * 4
+        total_score = (
+            value_score
+            + urgency_score
+            + dependency_score
+            + duration_fit_score
+            + energy_fit_score
+            + behavior_feedback_score
+            + user_preference_score
+            + postponement_penalty
+            + priority_score
+        )
+        return {
+            "total_score": int(total_score),
+            "value_score": int(value_score),
+            "urgency_score": int(urgency_score),
+            "dependency_score": int(dependency_score),
+            "duration_fit_score": int(duration_fit_score),
+            "energy_fit_score": int(energy_fit_score),
+            "behavior_feedback_score": int(behavior_feedback_score),
+            "user_preference_score": int(user_preference_score),
+            "postponement_penalty": int(postponement_penalty),
+            "priority_score": int(priority_score),
+            "estimated_duration_min": int(estimated_minutes),
+            "daily_capacity_minutes": int(context.daily_capacity_minutes),
+            "energy_level": context.energy_level,
+            "energy_applied": context.energy_has_data,
+            "behavior": behavior,
+        }
+
+    def _urgency_score(self, *, task: Task, plan_date: date) -> int:
+        if task.deadline is None:
+            return 0
+        days_until_deadline = (task.deadline - plan_date).days
+        if days_until_deadline < 0:
+            return 30
+        if days_until_deadline == 0:
+            return 24
+        if days_until_deadline <= 3:
+            return 16
+        if days_until_deadline <= 7:
+            return 8
+        return 0
+
+    def _duration_fit_score(self, estimated_minutes: int, *, capacity: int) -> int:
+        if estimated_minutes <= 30:
+            return 8
+        if estimated_minutes <= max(45, capacity // 3):
+            return 5
+        if estimated_minutes > max(75, int(capacity * 0.6)):
+            return -8
+        return 2
+
+    def _energy_fit_score(
+        self,
+        estimated_minutes: int,
+        *,
+        value_level: ValueLevel,
+        context: PlanningContext,
+    ) -> int:
+        if not context.energy_has_data:
+            return 0
+        if context.energy_level == "low":
+            if estimated_minutes <= 30:
+                return 14
+            if estimated_minutes >= 60:
+                return -14
+            return 4
+        if context.energy_level == "high":
+            if estimated_minutes >= 45 or value_level == ValueLevel.HIGH:
+                return 12
+            return 4
+        return 4
+
+    def _apply_capacity(self, planned_tasks: list[PlannedTask], *, context: PlanningContext) -> list[PlannedTask]:
+        selected_minutes = 0
+        result: list[PlannedTask] = []
+        for planned in planned_tasks:
+            if planned.task.status == TaskStatus.POSTPONED:
+                result.append(self._roll_over(planned, reason="postponed"))
+                continue
+
+            protected = planned.section == DailyPlanItemSection.PINNED
+            fits_capacity = selected_minutes + planned.estimated_duration_min <= context.daily_capacity_minutes
+            if protected or fits_capacity:
+                selected_minutes += planned.estimated_duration_min
+                score_breakdown = dict(planned.score_breakdown)
+                score_breakdown["selected_for_today"] = True
+                score_breakdown["capacity_remaining_after_minutes"] = max(
+                    context.daily_capacity_minutes - selected_minutes,
+                    0,
+                )
+                result.append(
+                    PlannedTask(
+                        task=planned.task,
+                        section=planned.section,
+                        recommendation_reason=planned.recommendation_reason,
+                        estimated_duration_min=planned.estimated_duration_min,
+                        score=planned.score,
+                        score_breakdown=score_breakdown,
+                        dependency_depth=planned.dependency_depth,
+                        unlocks_task=planned.unlocks_task,
+                        blocked_by_dependency=planned.blocked_by_dependency,
+                        priority_adjusted=planned.priority_adjusted,
+                    )
+                )
+                continue
+            result.append(self._roll_over(planned, reason="capacity"))
+        return result
+
+    def _roll_over(self, planned: PlannedTask, *, reason: str) -> PlannedTask:
+        score_breakdown = dict(planned.score_breakdown)
+        score_breakdown["selected_for_today"] = False
+        score_breakdown["rollover_reason"] = reason
+        if reason == "capacity":
+            recommendation_reason = "Rolled forward because today's capacity is already protected for higher-value work."
+        else:
+            recommendation_reason = planned.recommendation_reason
+        return PlannedTask(
+            task=planned.task,
+            section=DailyPlanItemSection.ROLLED_OVER,
+            recommendation_reason=recommendation_reason,
+            estimated_duration_min=planned.estimated_duration_min,
+            score=planned.score,
+            score_breakdown=score_breakdown,
+            status=DailyPlanItemStatus.POSTPONED if reason == "postponed" else DailyPlanItemStatus.PLANNED,
+            dependency_depth=planned.dependency_depth,
+            unlocks_task=planned.unlocks_task,
+            blocked_by_dependency=planned.blocked_by_dependency,
+            priority_adjusted=planned.priority_adjusted,
+        )
 
     def _planning_signals(self, db: Session, *, user_id: uuid.UUID, tasks: list[Task]) -> dict:
         task_by_id = {task.id: task for task in tasks}
@@ -315,6 +534,7 @@ class PlanningService:
                 "unlocking_task_ids": set(),
                 "blocked_task_ids": set(),
                 "adjusted_task_ids": set(),
+                "behavior_by_task_id": {},
             }
 
         task_ids = set(task_by_id)
@@ -364,12 +584,46 @@ class PlanningService:
                 )
             ).all()
         )
+        behavior_by_task_id = {
+            task_id: {"completed": 0, "postponed": 0, "interrupted": 0}
+            for task_id in task_ids
+        }
+        behavior_events = list(
+            db.scalars(
+                select(ActivityEvent).where(
+                    ActivityEvent.user_id == user_id,
+                    ActivityEvent.related_task_id.in_(task_ids),
+                    ActivityEvent.event_type.in_(
+                        [
+                            "TASK_COMPLETED",
+                            "TASK_POSTPONED",
+                            "FOCUS_SESSION_INTERRUPTED",
+                            "FOCUS_SESSION_POSTPONED",
+                        ]
+                    ),
+                )
+            ).all()
+        )
+        for event in behavior_events:
+            if event.related_task_id is None:
+                continue
+            behavior = behavior_by_task_id.setdefault(
+                event.related_task_id,
+                {"completed": 0, "postponed": 0, "interrupted": 0},
+            )
+            if event.event_type == "TASK_COMPLETED":
+                behavior["completed"] += 1
+            elif event.event_type in {"TASK_POSTPONED", "FOCUS_SESSION_POSTPONED"}:
+                behavior["postponed"] += 1
+            elif event.event_type == "FOCUS_SESSION_INTERRUPTED":
+                behavior["interrupted"] += 1
 
         return {
             "dependency_depth_by_task_id": depth_by_task_id,
             "unlocking_task_ids": unlocking_task_ids,
             "blocked_task_ids": blocked_task_ids,
             "adjusted_task_ids": adjusted_task_ids,
+            "behavior_by_task_id": behavior_by_task_id,
         }
 
     def _completed_carryover_tasks(self, db: Session, *, plan: DailyPlan) -> list[PlannedTask]:
@@ -387,6 +641,8 @@ class PlanningService:
                     section=item.section,
                     recommendation_reason=item.recommendation_reason,
                     estimated_duration_min=item.estimated_duration_min or item.task.estimated_duration_min or 25,
+                    score=int((item.score_breakdown or {}).get("total_score") or 0),
+                    score_breakdown=item.score_breakdown or {},
                     status=DailyPlanItemStatus.COMPLETED,
                     contributes_to_strategy=False,
                 )
@@ -420,6 +676,7 @@ class PlanningService:
         unlocking_task_ids: set[uuid.UUID],
         blocked_task_ids: set[uuid.UUID],
         adjusted_task_ids: set[uuid.UUID],
+        score_breakdown: dict,
     ) -> str:
         if task.status == TaskStatus.POSTPONED:
             return "Postponed item kept visible without pushing it back into the main sequence."
@@ -439,9 +696,11 @@ class PlanningService:
             return "High-priority task placed early for a clearer start."
         if task.priority >= 4:
             return "Lower-priority task kept available after the main sequence."
+        if score_breakdown.get("energy_applied") and score_breakdown.get("energy_fit_score", 0) > 0:
+            return "Placed here because the task shape fits today's energy signal."
         return "Balanced task placed in the recommended execution order."
 
-    def _planned_sort_key(self, planned: PlannedTask) -> tuple[int, int, int, int, int, date, int, int, datetime]:
+    def _planned_sort_key(self, planned: PlannedTask) -> tuple[int, int, int, int, int, int, date, int, int, datetime]:
         section_rank = {
             DailyPlanItemSection.PINNED: 0,
             DailyPlanItemSection.RECOMMENDED: 1,
@@ -455,6 +714,7 @@ class PlanningService:
             0 if planned.unlocks_task else 1,
             1 if planned.blocked_by_dependency else 0,
             0 if planned.priority_adjusted else 1,
+            -planned.score,
             planned.task.deadline or date.max,
             planned.task.priority,
             value_rank[planned.task.value_level],
@@ -463,10 +723,16 @@ class PlanningService:
 
     def _strategy_for(self, planned_tasks: list[PlannedTask]) -> dict:
         active_tasks = [planned for planned in planned_tasks if planned.section != DailyPlanItemSection.ROLLED_OVER]
+        rolled_over_tasks = [planned for planned in planned_tasks if planned.section == DailyPlanItemSection.ROLLED_OVER]
         pinned_count = len([planned for planned in active_tasks if planned.section == DailyPlanItemSection.PINNED])
         total_minutes = sum(planned.estimated_duration_min for planned in active_tasks)
+        rolled_over_minutes = sum(planned.estimated_duration_min for planned in rolled_over_tasks)
         dependency_protected_count = len([planned for planned in active_tasks if planned.unlocks_task])
         user_adjusted_count = len([planned for planned in active_tasks if planned.priority_adjusted])
+        first_breakdown = planned_tasks[0].score_breakdown if planned_tasks else {}
+        daily_capacity_minutes = int(first_breakdown.get("daily_capacity_minutes") or 0)
+        energy_level = str(first_breakdown.get("energy_level") or "unknown")
+        energy_applied = bool(first_breakdown.get("energy_applied") or False)
 
         if not active_tasks:
             return {
@@ -477,11 +743,16 @@ class PlanningService:
                     "task_count": 0,
                     "pinned_count": 0,
                     "total_minutes": 0,
+                    "daily_capacity_minutes": daily_capacity_minutes,
+                    "selected_estimated_minutes": 0,
+                    "rolled_over_estimated_minutes": rolled_over_minutes,
                     "dependency_protected_count": 0,
                     "user_adjusted_count": 0,
+                    "energy_level": energy_level,
+                    "energy_applied": energy_applied,
                 },
             }
-        if total_minutes >= 180 or pinned_count >= 3:
+        if total_minutes >= max(180, daily_capacity_minutes) or pinned_count >= 3:
             mode = PlanningPreference.SPRINT
             summary = "Start with protected high-value work, then move through the remaining sequence."
             primary_reason = "The day has enough important work to benefit from a focused order."
@@ -502,8 +773,17 @@ class PlanningService:
                 "task_count": len(active_tasks),
                 "pinned_count": pinned_count,
                 "total_minutes": total_minutes,
+                "daily_capacity_minutes": daily_capacity_minutes,
+                "selected_estimated_minutes": total_minutes,
+                "rolled_over_estimated_minutes": rolled_over_minutes,
                 "dependency_protected_count": dependency_protected_count,
                 "user_adjusted_count": user_adjusted_count,
+                "energy_level": energy_level,
+                "energy_applied": energy_applied,
+                "average_score": round(
+                    sum(planned.score for planned in active_tasks) / len(active_tasks),
+                    2,
+                ),
             },
         }
 
@@ -564,19 +844,21 @@ class PlanningService:
         }
 
     def _strategy_energy_explanation(self, db: Session, *, plan: DailyPlan) -> dict:
+        strategy = self._current_strategy(db, plan=plan)
         dashboard = energy_service.get_dashboard(db, user_id=plan.user_id, end_date=plan.plan_date, days=1)
         summary = dashboard["summary"]
         task_match = dashboard["task_match"]
         has_data = dashboard["trends"][0]["has_data"]
+        applied_to_plan = bool(strategy.score_factors.get("energy_applied") or False)
         level = summary["energy_level"]
         if not has_data:
             explanation = "今天没有精力数据，排序仍只基于任务价值、截止时间和依赖。"
         elif level == "low":
-            explanation = "今天精力偏低，适合轻量推进；当前只作为解释，不会自动重排 Today。"
+            explanation = "今天精力偏低，Planning Engine 会降低容量，并优先选择更轻量的任务。"
         elif level == "high":
-            explanation = "今天精力较好，适合保护深度任务；当前只作为解释，不会自动增加任务量。"
+            explanation = "今天精力较好，Planning Engine 会给高价值或较深的任务更高适配分。"
         else:
-            explanation = "今天精力状态可用，适合保持稳定节奏；当前不会自动改变任务顺序。"
+            explanation = "今天精力状态可用，Planning Engine 会保持稳定容量和执行节奏。"
         return {
             "has_data": has_data,
             "metric_date": plan.plan_date,
@@ -584,7 +866,7 @@ class PlanningService:
             "energy_level": level,
             "recommended_mode": task_match["recommended_mode"],
             "explanation": explanation,
-            "applied_to_plan": False,
+            "applied_to_plan": applied_to_plan,
             "source": "energy_daily_metric" if has_data else "none",
         }
 
@@ -610,8 +892,15 @@ class PlanningService:
             ),
             "rolled_over_count": len([item for item in items if item.section == DailyPlanItemSection.ROLLED_OVER]),
             "total_estimated_minutes": int(score_factors.get("total_minutes", plan.total_estimated_minutes) or 0),
+            "daily_capacity_minutes": int(score_factors.get("daily_capacity_minutes", 0) or 0),
+            "selected_estimated_minutes": int(
+                score_factors.get("selected_estimated_minutes", plan.total_estimated_minutes) or 0
+            ),
+            "rolled_over_estimated_minutes": int(score_factors.get("rolled_over_estimated_minutes", 0) or 0),
             "dependency_protected_count": int(score_factors.get("dependency_protected_count", 0) or 0),
             "user_adjusted_count": int(score_factors.get("user_adjusted_count", 0) or 0),
+            "energy_level": str(score_factors.get("energy_level") or "unknown"),
+            "energy_applied": bool(score_factors.get("energy_applied") or False),
             "completed_count": plan.completed_count,
             "focus_minutes": plan.focus_minutes,
         }
@@ -621,7 +910,11 @@ class PlanningService:
         if factors["pinned_count"]:
             explanation.append(f"{factors['pinned_count']} 个任务被保护在前面，因为它们更重要或更紧急。")
         if factors["rolled_over_count"]:
-            explanation.append(f"{factors['rolled_over_count']} 个延后任务保留可见，但不会挤占主执行序列。")
+            explanation.append(f"{factors['rolled_over_count']} 个任务被滚动到未来，避免挤占今天的主执行序列。")
+        if factors["daily_capacity_minutes"]:
+            explanation.append(
+                f"今天主序列约 {factors['selected_estimated_minutes']} 分钟，容量参考为 {factors['daily_capacity_minutes']} 分钟。"
+            )
         if factors["dependency_protected_count"]:
             explanation.append(f"{factors['dependency_protected_count']} 个前置任务被提前，用来保护任务依赖顺序。")
         if factors["user_adjusted_count"]:
@@ -666,6 +959,7 @@ class PlanningService:
             "priority": item.task.priority,
             "value_level": item.task.value_level,
             "deadline": item.task.deadline,
+            "score_breakdown": item.score_breakdown or {},
         }
 
     def _insights_preview(self, *, plan: DailyPlan, items: list[DailyPlanItem], progress: dict) -> dict:

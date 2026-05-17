@@ -59,7 +59,8 @@ P2 新增字段：
 - 默认只展示 1 条风险或剩余时间提示。
 - 不在 Today 首屏展开完整解释。
 - 用户需要解释排序时进入 Strategy Detail。
-- Today 排序已读取任务依赖和用户优先级修正信号，但前端仍只按分区和 `sort_order` 渲染，不需要自己重排。
+- Today 排序由 Planning Engine v1 生成，已读取任务价值、优先级、截止时间、依赖、用户优先级修正、行为反馈和可用容量信号；前端仍只按分区和 `sort_order` 渲染，不需要自己重排。
+- `score_breakdown` 可用于调试或 Strategy Detail，不建议在 Today 首屏展开。
 
 ### GET `/api/v1/today/strategy`
 
@@ -85,8 +86,13 @@ P2 新增字段：
   "low_priority_count": 1,
   "rolled_over_count": 0,
   "total_estimated_minutes": 95,
+  "daily_capacity_minutes": 150,
+  "selected_estimated_minutes": 95,
+  "rolled_over_estimated_minutes": 0,
   "dependency_protected_count": 1,
   "user_adjusted_count": 1,
+  "energy_level": "unknown",
+  "energy_applied": false,
   "completed_count": 0,
   "focus_minutes": 0
 }
@@ -96,7 +102,40 @@ P2 新增字段：
 
 - `dependency_protected_count` 表示被提前保护的前置任务数量。
 - `user_adjusted_count` 表示当前计划读取到用户优先级修正事件的任务数量。
-- 这两个字段用于 Strategy Detail 的信任解释，不建议放到 Today 首屏。
+- `daily_capacity_minutes` 是 Planning Engine 的当日容量参考，不是严格日历时间块。
+- `selected_estimated_minutes` 是今天主执行序列的估时总量。
+- `rolled_over_estimated_minutes` 是被滚动到未来、保留可见但不计入主执行序列的估时。
+- `energy_applied=true` 表示同日 Energy 数据已经作为排序和容量保护因子进入 Planning Engine；高精力不会自动增加工作量。
+- 这些字段用于 Strategy Detail 的信任解释，不建议放到 Today 首屏。
+
+`task_rationales[]` 中每个任务会包含 `score_breakdown`：
+
+```json
+{
+  "task_id": "uuid",
+  "title": "Draft proposal",
+  "score_breakdown": {
+    "total_score": 88,
+    "value_score": 30,
+    "urgency_score": 16,
+    "dependency_score": 18,
+    "duration_fit_score": 5,
+    "energy_fit_score": 0,
+    "behavior_feedback_score": 0,
+    "user_preference_score": 10,
+    "postponement_penalty": 0,
+    "priority_score": 16,
+    "daily_capacity_minutes": 150,
+    "selected_for_today": true
+  }
+}
+```
+
+前端约束：
+
+- `score_breakdown` 是解释数据，不要在 Today 首屏展示成复杂驾驶舱。
+- Strategy Detail 可以按需展示 2-3 个最关键因子。
+- `selected_for_today=false` 且 `rollover_reason=capacity` 表示任务被系统滚动到未来，不代表任务被用户手动延后；此时 `item_status` 仍可为 `planned`，前端应以 `section=rolled_over` 判断展示位置。
 
 ## 4. Task Detail
 
