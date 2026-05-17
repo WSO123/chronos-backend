@@ -579,6 +579,13 @@ uv run python scripts/evaluate_planning_engine.py
 uv run python -m unittest tests.test_daily_planner_agent tests.test_today_services tests.test_today_api
 ```
 
+涉及真实 provider 手动验证时，只能在显式允许后执行，不纳入默认 CI / verify_local：
+
+```bash
+uv run python scripts/smoke_llm_provider.py
+AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_API_KEY=... uv run python scripts/smoke_llm_provider.py --allow-real-llm
+```
+
 或通过统一验证入口追加：
 
 ```bash

@@ -184,6 +184,13 @@ LLM_BASE_URL=
 LLM_FALLBACK_PROVIDER=mock
 ```
 
+真实 provider smoke 必须手动显式允许，默认不发网络请求：
+
+```bash
+uv run python scripts/smoke_llm_provider.py
+AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_API_KEY=... uv run python scripts/smoke_llm_provider.py --allow-real-llm
+```
+
 ---
 
 ## 6. AIJob 生命周期

@@ -71,6 +71,13 @@ LLM_BASE_URL=
 LLM_FALLBACK_PROVIDER=mock
 ```
 
+真实 provider smoke 默认不会进入本地验证链路；需要手动显式允许：
+
+```bash
+uv run python scripts/smoke_llm_provider.py
+AI_ENABLE_REAL_LLM=true LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini LLM_API_KEY=... uv run python scripts/smoke_llm_provider.py --allow-real-llm
+```
+
 执行数据库迁移：
 
 ```bash
