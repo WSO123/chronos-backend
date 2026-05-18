@@ -28,7 +28,7 @@ from tests.factories import create_user
 
 
 PLAN_DATE = date(2026, 5, 17)
-EVALUATOR_VERSION = "p2-planning-engine-eval-v10"
+EVALUATOR_VERSION = "p2-planning-engine-eval-v11"
 
 
 @dataclass(frozen=True)
@@ -1254,6 +1254,7 @@ def _details(*, db, today: dict, strategy: dict) -> dict:
     ordered_items = _all_items(today)
     planner_trace = _planner_trace(db, strategy=strategy)
     score_explanation = strategy.get("score_explanation") or {}
+    learning_summary = strategy.get("learning_summary") or {}
     return {
         "main_count": today["progress"]["total_count"],
         "rolled_over_count": len(today["sections"]["rolled_over_tasks"]),
@@ -1263,6 +1264,14 @@ def _details(*, db, today: dict, strategy: dict) -> dict:
         "score_explanation_signal_keys": [
             signal["key"] for signal in score_explanation.get("signals", []) if signal.get("key")
         ],
+        "learning_summary_source": learning_summary.get("source"),
+        "learning_summary_summary": learning_summary.get("summary"),
+        "learning_summary_signal_keys": [
+            signal["key"] for signal in learning_summary.get("signals", []) if signal.get("key")
+        ],
+        "learning_summary_contract_version": (
+            (learning_summary.get("learning_contract") or {}).get("version")
+        ),
         "planner_feedback_summary_key": (
             ((strategy.get("planner_review") or {}).get("feedback_summary") or {}).get("key")
         ),
@@ -1359,11 +1368,18 @@ def _check_all(*checks: tuple[str, bool]) -> list[str]:
 
 def _explainability_failures(strategy: dict) -> list[str]:
     score_explanation = strategy.get("score_explanation") or {}
+    learning_summary = strategy.get("learning_summary") or {}
     score_signals = score_explanation.get("signals") or []
     task_rationales = strategy.get("task_rationales") or []
     return _check_all(
         ("score explanation has summary", bool(score_explanation.get("summary"))),
         ("score explanation has signals", bool(score_signals)),
+        ("learning summary has source", learning_summary.get("source") == "planning-engine-learning-summary-v1"),
+        ("learning summary has summary", bool(learning_summary.get("summary"))),
+        (
+            "learning summary forbids plan mutation",
+            (learning_summary.get("learning_contract") or {}).get("plan_mutation_allowed") is False,
+        ),
         (
             "task rationales have dominant factors",
             bool(task_rationales)

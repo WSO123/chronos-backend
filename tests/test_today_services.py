@@ -178,6 +178,11 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["score_explanation"]["source"], "planning-engine-score-breakdown-v1")
         self.assertTrue(strategy["score_explanation"]["summary"])
         self.assertTrue(strategy["score_explanation"]["signals"])
+        self.assertEqual(strategy["learning_summary"]["version"], "p2-planning-learning-summary-v1")
+        self.assertEqual(strategy["learning_summary"]["source"], "planning-engine-learning-summary-v1")
+        self.assertTrue(strategy["learning_summary"]["summary"])
+        self.assertFalse(strategy["learning_summary"]["learning_contract"]["plan_mutation_allowed"])
+        self.assertIn("today_sort_order", strategy["learning_summary"]["learning_contract"]["cannot_affect"])
         self.assertEqual(strategy["task_rationales"][0]["dominant_factor"], "due_today")
         self.assertIn("今天截止", strategy["task_rationales"][0]["dominant_reason"])
         self.assertTrue(strategy["task_rationales"][0]["score_signals"])
@@ -1444,6 +1449,14 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["factors"]["execution_learning_signal_count"], 1)
         self.assertEqual(strategy["factors"]["execution_learning_friction_risk_count"], 1)
         self.assertEqual(strategy["factors"]["execution_learning_momentum_count"], 0)
+        learning_summary = strategy["learning_summary"]
+        self.assertEqual(learning_summary["version"], "p2-planning-learning-summary-v1")
+        self.assertEqual(learning_summary["signals"][0]["key"], "execution_learning")
+        self.assertEqual(learning_summary["signals"][0]["source"], "execution_learning_v2")
+        self.assertEqual(learning_summary["signals"][0]["evidence_count"], 1)
+        self.assertIn("Focus 结果", learning_summary["summary"])
+        self.assertFalse(learning_summary["learning_contract"]["plan_mutation_allowed"])
+        self.assertIn("llm_direct_sort_order", learning_summary["learning_contract"]["cannot_affect"])
         current_rationale = next(
             rationale for rationale in strategy["task_rationales"] if rationale["task_id"] == current_task.id
         )

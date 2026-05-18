@@ -3193,6 +3193,12 @@ class PlanningService:
             factors=factors,
             task_rationales=task_rationales,
         )
+        planner_review = self._planner_review(score_factors=strategy.score_factors)
+        learning_summary = self._planning_learning_summary(
+            factors=factors,
+            task_rationales=task_rationales,
+            planner_review=planner_review,
+        )
         energy = self._strategy_energy_explanation(db, plan=plan)
         explanation_result = self._run_strategy_explanation_agent(
             db,
@@ -3220,7 +3226,8 @@ class PlanningService:
             "explanation": explanation_result["explanation"],
             "energy": energy,
             "score_explanation": score_explanation,
-            "planner_review": self._planner_review(score_factors=strategy.score_factors),
+            "learning_summary": learning_summary,
+            "planner_review": planner_review,
             "task_rationales": task_rationales,
             "source": {
                 "strategy_snapshot_id": strategy.id,
@@ -3248,6 +3255,193 @@ class PlanningService:
             "suggestions": suggestions[:3],
             "feedback_summary": feedback_summary,
             "source": "daily_planner_agent_v1",
+        }
+
+    def _planning_learning_summary(
+        self,
+        *,
+        factors: dict,
+        task_rationales: list[dict],
+        planner_review: dict | None,
+    ) -> dict:
+        signals = self._planning_learning_signals(
+            factors=factors,
+            task_rationales=task_rationales,
+            planner_review=planner_review,
+        )
+        if signals:
+            summary = self._planning_learning_summary_text(signals=signals)
+        else:
+            summary = "当前还没有足够稳定的语义、目标或执行学习信号，Chronos 会先保持可解释的基础排序。"
+        return {
+            "version": "p2-planning-learning-summary-v1",
+            "summary": summary,
+            "signals": signals[:4],
+            "learning_contract": self._planning_learning_contract(),
+            "source": "planning-engine-learning-summary-v1",
+        }
+
+    def _planning_learning_signals(
+        self,
+        *,
+        factors: dict,
+        task_rationales: list[dict],
+        planner_review: dict | None,
+    ) -> list[dict]:
+        signals: list[dict] = []
+        if factors.get("goal_progress_signal_count"):
+            signals.append(
+                {
+                    "key": "goal_progress_learning",
+                    "title": "目标推进学习",
+                    "message": (
+                        f"{factors['goal_progress_signal_count']} 个目标下一步读取了完成率、剩余任务和截止压力，"
+                        "用于保护更接近目标完成的行动。"
+                    ),
+                    "signal": "positive",
+                    "evidence_count": int(factors.get("goal_progress_signal_count") or 0),
+                    "confidence": self._bounded_learning_confidence(factors.get("goal_progress_signal_count")),
+                    "source": "goal_progress_strategy",
+                }
+            )
+
+        semantic_evidence = max(
+            int(factors.get("semantic_goal_impact_count") or 0),
+            int(factors.get("minimum_viable_progress_count") or 0),
+            int(factors.get("semantic_signal_count") or 0),
+        )
+        if semantic_evidence:
+            signals.append(
+                {
+                    "key": "semantic_planning_learning",
+                    "title": "任务语义理解",
+                    "message": (
+                        f"{int(factors.get('semantic_signal_count') or 0)} 个任务带有语义规划信号，"
+                        f"{int(factors.get('semantic_goal_impact_count') or 0)} 个被识别为能推进目标，"
+                        f"{int(factors.get('minimum_viable_progress_count') or 0)} 个采用了最小推进动作。"
+                    ),
+                    "signal": "positive" if factors.get("semantic_goal_impact_count") else "info",
+                    "evidence_count": semantic_evidence,
+                    "confidence": self._bounded_learning_confidence(semantic_evidence),
+                    "source": "task_semantic_planning_signal",
+                }
+            )
+
+        if factors.get("execution_learning_signal_count"):
+            friction_count = int(factors.get("execution_learning_friction_risk_count") or 0)
+            momentum_count = int(factors.get("execution_learning_momentum_count") or 0)
+            signals.append(
+                {
+                    "key": "execution_learning",
+                    "title": "执行节奏学习",
+                    "message": (
+                        f"{factors['execution_learning_signal_count']} 个任务读取了历史 Focus 结果，"
+                        f"其中 {friction_count} 个有执行阻力、{momentum_count} 个有完成势能。"
+                    ),
+                    "signal": "watch" if friction_count else "positive",
+                    "evidence_count": int(factors.get("execution_learning_signal_count") or 0),
+                    "confidence": self._bounded_learning_confidence(
+                        factors.get("execution_learning_signal_count"),
+                        base=0.52,
+                    ),
+                    "source": "execution_learning_v2",
+                }
+            )
+
+        if factors.get("personalization_signal_count"):
+            signals.append(
+                {
+                    "key": "personal_execution_profile",
+                    "title": "个人执行画像",
+                    "message": f"{factors['personalization_signal_count']} 个任务读取了同类任务历史，用来让估时更贴近真实执行节奏。",
+                    "signal": "info",
+                    "evidence_count": int(factors.get("personalization_signal_count") or 0),
+                    "confidence": self._bounded_learning_confidence(factors.get("personalization_signal_count")),
+                    "source": "semantic_task_history",
+                }
+            )
+
+        feedback_summary = (planner_review or {}).get("feedback_summary") if planner_review else None
+        if isinstance(feedback_summary, dict):
+            signals.append(
+                {
+                    "key": "planner_preference_learning",
+                    "title": "策略偏好学习",
+                    "message": feedback_summary.get("message") or "系统读到了你对策略建议的反馈，但不会自动修改排序。",
+                    "signal": feedback_summary.get("signal") or "info",
+                    "evidence_count": int(feedback_summary.get("evidence_count") or 0),
+                    "confidence": float(feedback_summary.get("confidence") or 0.0),
+                    "source": "planner_review_feedback_v1",
+                }
+            )
+
+        return self._sort_planning_learning_signals(signals=signals, task_rationales=task_rationales)
+
+    def _sort_planning_learning_signals(self, *, signals: list[dict], task_rationales: list[dict]) -> list[dict]:
+        present_signal_keys = {
+            signal.get("key")
+            for rationale in task_rationales
+            for signal in (rationale.get("score_signals") or [])
+            if signal.get("key")
+        }
+        priority = {
+            "execution_learning": 0 if "execution_learning" in present_signal_keys else 2,
+            "goal_progress_learning": 1,
+            "semantic_planning_learning": 2,
+            "personal_execution_profile": 3,
+            "planner_preference_learning": 4,
+        }
+        return sorted(
+            signals,
+            key=lambda signal: (
+                priority.get(signal["key"], 9),
+                -int(signal.get("evidence_count") or 0),
+                signal["key"],
+            ),
+        )
+
+    def _planning_learning_summary_text(self, *, signals: list[dict]) -> str:
+        lead = signals[0]
+        if lead["key"] == "execution_learning":
+            return "Chronos 已经开始从 Focus 结果中学习你的真实执行节奏，并把它用于今天的可解释编排。"
+        if lead["key"] == "goal_progress_learning":
+            return "Chronos 正在把任务执行和目标推进连起来，让 Today 更像是在推进目标完成度。"
+        if lead["key"] == "semantic_planning_learning":
+            return "Chronos 已读取任务语义、目标相关性和最小推进动作，用来让今天更可执行。"
+        if lead["key"] == "planner_preference_learning":
+            return "Chronos 已读到你的策略反馈，但仍只把它作为解释和审阅偏好，不自动改计划。"
+        return "Chronos 正在基于你的历史执行数据校准估时和任务节奏。"
+
+    def _bounded_learning_confidence(self, evidence_count: object, *, base: float = 0.48) -> float:
+        try:
+            count = int(evidence_count or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if count <= 0:
+            return 0.0
+        return round(min(0.86, base + min(count, 5) * 0.08), 2)
+
+    def _planning_learning_contract(self) -> dict:
+        return {
+            "version": "p2-planning-learning-summary-contract-v1",
+            "scope": "strategy_detail_learning_explanation",
+            "source_of_truth": "planning-engine-v1",
+            "can_affect": [
+                "strategy_detail_learning_summary",
+                "strategy_explanation",
+                "task_rationale_score_signals",
+            ],
+            "cannot_affect": [
+                "today_sort_order",
+                "today_sections",
+                "task_estimated_duration_min",
+                "task_status",
+                "goal_state",
+                "llm_direct_sort_order",
+            ],
+            "plan_mutation_allowed": False,
+            "requires_confirmed_signal": True,
+            "explanation": "学习摘要只解释 Planning Engine 已读取的目标、语义和执行信号，不会直接改变计划或业务状态。",
         }
 
     def _strategy_score_explanation(

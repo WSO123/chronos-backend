@@ -44,6 +44,12 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
             self.assertTrue(scenario["details"]["planner_agent_output_applied"])
             self.assertTrue(scenario["details"]["score_explanation_summary"])
             self.assertTrue(scenario["details"]["score_explanation_signal_keys"])
+            self.assertEqual(scenario["details"]["learning_summary_source"], "planning-engine-learning-summary-v1")
+            self.assertTrue(scenario["details"]["learning_summary_summary"])
+            self.assertEqual(
+                scenario["details"]["learning_summary_contract_version"],
+                "p2-planning-learning-summary-contract-v1",
+            )
             self.assertTrue(scenario["details"]["item_signals"])
             for item_signal in scenario["details"]["item_signals"]:
                 self.assertTrue(item_signal["score_version"])
@@ -98,6 +104,8 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
         self.assertIn("item_signals", records[1]["details"])
         self.assertIn("score_explanation_summary", records[1]["details"])
         self.assertIn("score_explanation_signal_keys", records[1]["details"])
+        self.assertIn("learning_summary_source", records[1]["details"])
+        self.assertIn("learning_summary_signal_keys", records[1]["details"])
         self.assertIn("dominant_factor", records[1]["details"]["item_signals"][0])
         self.assertIn("planning_objective_version", records[1]["details"])
         self.assertIn("planning_objective_score", records[1]["details"]["item_signals"][0])

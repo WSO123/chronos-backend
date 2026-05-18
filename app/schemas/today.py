@@ -212,6 +212,35 @@ class StrategyPlannerReviewResponse(BaseModel):
     source: str
 
 
+class StrategyLearningSignalResponse(BaseModel):
+    key: str
+    title: str
+    message: str
+    signal: str
+    evidence_count: int = 0
+    confidence: float = 0.0
+    source: str
+
+
+class PlanningLearningContractResponse(BaseModel):
+    version: str
+    scope: str
+    source_of_truth: str
+    can_affect: list[str] = Field(default_factory=list)
+    cannot_affect: list[str] = Field(default_factory=list)
+    plan_mutation_allowed: bool
+    requires_confirmed_signal: bool
+    explanation: str
+
+
+class StrategyLearningSummaryResponse(BaseModel):
+    version: str
+    summary: str
+    signals: list[StrategyLearningSignalResponse] = Field(default_factory=list)
+    learning_contract: PlanningLearningContractResponse
+    source: str
+
+
 class PlannerReviewFeedbackRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -252,6 +281,7 @@ class StrategyDetailResponse(BaseModel):
     explanation: list[str]
     energy: StrategyDetailEnergyResponse
     score_explanation: StrategyScoreExplanationResponse
+    learning_summary: StrategyLearningSummaryResponse
     planner_review: StrategyPlannerReviewResponse | None = None
     task_rationales: list[StrategyTaskRationaleResponse]
     source: StrategyDetailSourceResponse

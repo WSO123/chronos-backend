@@ -105,6 +105,9 @@ def _policy(*scenario_names: str) -> dict:
             "planner_agent_provider",
             "score_explanation_summary",
             "score_explanation_signal_keys",
+            "learning_summary_source",
+            "learning_summary_summary",
+            "learning_summary_contract_version",
             "semantic_goal_impact_count",
             "execution_learning_signal_count",
             "planning_objective_applied",
@@ -187,6 +190,10 @@ def _scenario(name: str, *, passed: bool = True) -> dict:
             "planner_agent_output_applied": True,
             "score_explanation_summary": "测试策略解释。",
             "score_explanation_signal_keys": ["value"],
+            "learning_summary_source": "planning-engine-learning-summary-v1",
+            "learning_summary_summary": "测试学习摘要。",
+            "learning_summary_signal_keys": [],
+            "learning_summary_contract_version": "p2-planning-learning-summary-contract-v1",
             "item_signals": [
                 {
                     "title": f"{name} task",

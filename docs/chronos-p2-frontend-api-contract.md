@@ -77,6 +77,7 @@ P2 新增字段：
 - `primary_reason`
 - `factors`
 - `score_explanation`
+- `learning_summary`
 - `explanation`
 - `task_rationales`
 - `source`
@@ -194,6 +195,57 @@ P2 新增字段：
 - `score_explanation` 只用于 Strategy Detail，不进入 Today 首屏。
 - `signals` 建议最多展示 2-4 条，作为解释而不是控制项。
 - `signal` 当前可能是 `positive`、`info`、`watch`、`risk`。
+
+`learning_summary` 是 Planning Engine 对“系统正在如何变得更懂用户”的轻量归纳：
+
+```json
+{
+  "learning_summary": {
+    "version": "p2-planning-learning-summary-v1",
+    "summary": "Chronos 已经开始从 Focus 结果中学习你的真实执行节奏，并把它用于今天的可解释编排。",
+    "signals": [
+      {
+        "key": "execution_learning",
+        "title": "执行节奏学习",
+        "message": "1 个任务读取了历史 Focus 结果，其中 1 个有执行阻力、0 个有完成势能。",
+        "signal": "watch",
+        "evidence_count": 1,
+        "confidence": 0.6,
+        "source": "execution_learning_v2"
+      }
+    ],
+    "learning_contract": {
+      "version": "p2-planning-learning-summary-contract-v1",
+      "scope": "strategy_detail_learning_explanation",
+      "source_of_truth": "planning-engine-v1",
+      "can_affect": [
+        "strategy_detail_learning_summary",
+        "strategy_explanation",
+        "task_rationale_score_signals"
+      ],
+      "cannot_affect": [
+        "today_sort_order",
+        "today_sections",
+        "task_estimated_duration_min",
+        "task_status",
+        "goal_state",
+        "llm_direct_sort_order"
+      ],
+      "plan_mutation_allowed": false,
+      "requires_confirmed_signal": true,
+      "explanation": "学习摘要只解释 Planning Engine 已读取的目标、语义和执行信号，不会直接改变计划或业务状态。"
+    },
+    "source": "planning-engine-learning-summary-v1"
+  }
+}
+```
+
+前端约束：
+
+- `learning_summary` 只用于 Strategy Detail，不进入 Today 首屏。
+- 它解释 Chronos 已经读取到哪些学习信号，不是新的控制面板。
+- `signals` 建议最多展示 2-4 条；没有稳定学习信号时可以只展示 summary。
+- `learning_contract.plan_mutation_allowed=false` 是产品边界：学习摘要不代表系统已经自动修改任务、目标或排序。
 
 `planner_review` 来自 Daily Planner Agent 对 Planning Engine 结果的审阅：
 

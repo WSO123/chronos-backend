@@ -1,6 +1,6 @@
 {
-  "policy_version": "p2-planner-eval-policy-v7",
-  "evaluator_version": "p2-planning-engine-eval-v10",
+  "policy_version": "p2-planner-eval-policy-v8",
+  "evaluator_version": "p2-planning-engine-eval-v11",
   "status": "active",
   "required_run_status": "ok",
   "exact_scenario_set": true,
@@ -28,6 +28,9 @@
     "planner_agent_output_applied",
     "score_explanation_summary",
     "score_explanation_signal_keys",
+    "learning_summary_source",
+    "learning_summary_summary",
+    "learning_summary_contract_version",
     "item_signals"
   ],
   "required_item_signal_fields": [

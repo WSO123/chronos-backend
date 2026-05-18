@@ -375,11 +375,11 @@ class CaptureParserOutput(BaseModel):
 - Daily Planner provider 调用记录 `latency_ms`、`provider_latency_ms`、`failure_type`、`provider_response_id` 和 `usage`；真实 provider 返回 usage 时会写入 token 统计，mock / fallback 保持空结构。
 - v1 只允许 Agent 更新策略摘要、推荐理由和 Strategy Detail 的 `planner_review`；业务层校验禁止 Agent 改变任务集合、排序和 section。
 - Agent 失败或输出不合法时，`AIJob.status=succeeded_with_fallback`，继续使用 Planning Engine v1 输出。
-- 每个 `DailyPlanItem` 会保存 `score_breakdown`，包含 `score_version`、`score_band` 和各项评分因子；Strategy Detail 会再归纳出 `score_explanation`、`dominant_factor`、`dominant_reason` 和 `score_signals`，前端不需要自行解释原始权重。
+- 每个 `DailyPlanItem` 会保存 `score_breakdown`，包含 `score_version`、`score_band` 和各项评分因子；Strategy Detail 会再归纳出 `score_explanation`、`learning_summary`、`dominant_factor`、`dominant_reason` 和 `score_signals`，前端不需要自行解释原始权重。
 - 超出容量的非保护任务进入 `section=rolled_over`；系统容量滚动不把 Task 本体改为 postponed。
 - 已提供 `scripts/evaluate_planning_engine.py` 固定场景评估，覆盖容量滚动、容量目标函数保护高价值 Goal 推进、受保护任务超载、低精力保护、高精力深度任务适配、依赖链保护、用户手动优先级修正、重复中断行为反馈、多 Goal 竞争、超期 Goal 恢复、Goal 收口、语义历史个性化、Execution Learning v2、Semantic Planning v2 覆盖度和 Planner Review 偏好边界；支持 `--jsonl-output` 写出 run summary 和 scenario records。
 - 已提供 `scripts/compare_planner_eval_jsonl.py` 比较两次 planner eval JSONL，默认只报告 scenario 通过状态、排序和 `item_signals` 差异；显式加 `--fail-on-regression` 时才作为回归 gate。
-- 已提供 planner eval golden baseline policy：`docs/planner-eval-baselines/p2-planning-engine-eval-v10.json` 和 `scripts/check_planner_eval_policy.py`。后续 LLM Daily Planner 必须通过这些基线、用 compare / policy 工具说明差异，或显式更新评估预期。
+- 已提供 planner eval golden baseline policy：`docs/planner-eval-baselines/p2-planning-engine-eval-v11.json` 和 `scripts/check_planner_eval_policy.py`。后续 LLM Daily Planner 必须通过这些基线、用 compare / policy 工具说明差异，或显式更新评估预期。
 - 已提供 `scripts/generate_llm_acceptance_dry_run.py`，用于在不调用真实 provider 的情况下跑通 provider smoke / fallback / compare / policy 到验收草稿的完整流程。
 - 已提供 `scripts/generate_llm_acceptance_record.py`，用于把真实 provider smoke、fallback smoke、planner eval compare 和 golden policy check 的 JSON 输出生成 Markdown 验收草稿；默认脱敏 provider response id，生成后仍需人工 review。
 

@@ -13,7 +13,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from scripts.compare_planner_eval_jsonl import load_eval_run
 
-DEFAULT_POLICY_PATH = ROOT_DIR / "docs/planner-eval-baselines/p2-planning-engine-eval-v10.json"
+DEFAULT_POLICY_PATH = ROOT_DIR / "docs/planner-eval-baselines/p2-planning-engine-eval-v11.json"
 CHECK_VERSION = "p2-planner-eval-policy-check-v1"
 
 
