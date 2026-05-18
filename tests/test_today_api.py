@@ -140,6 +140,12 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(feedback["learning_signal"], "planner_review_preference")
         self.assertEqual(feedback["applied_to_plan"], False)
         self.assertEqual(feedback["replan_triggered"], False)
+        second_feedback_response = self.client.post(
+            "/api/v1/today/planner-review/feedback?plan_date=2026-05-16",
+            json={"suggestion_key": "respect_rollover", "action": "ignored"},
+            headers=self.headers,
+        )
+        self.assertEqual(second_feedback_response.status_code, 200)
 
         self.client.post(
             "/api/v1/today/replan?plan_date=2026-05-16",
@@ -150,6 +156,10 @@ class TodayAPITests(unittest.TestCase):
         self.assertIn(
             "adjust_capacity_if_needed",
             [suggestion["key"] for suggestion in updated_strategy.json()["planner_review"]["suggestions"]],
+        )
+        self.assertEqual(
+            updated_strategy.json()["planner_review"]["feedback_summary"]["key"],
+            "capacity_flexibility_preferred",
         )
 
     def test_strategy_detail_returns_energy_explanation_with_planning_signal(self):

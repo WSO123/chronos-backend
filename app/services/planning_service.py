@@ -906,6 +906,7 @@ class PlanningService:
             "planner_agent_output_applied": job.job_metadata.get("output_applied", False),
             "planner_agent_review_summary": job.job_metadata.get("review_summary"),
             "planner_agent_suggestions": job.job_metadata.get("suggestions", []),
+            "planner_feedback_summary": review_context["user_feedback"].get("preference_summary"),
         }
         return {"planned_tasks": planned_tasks, "strategy_payload": strategy_payload, "ai_job": job}
 
@@ -990,6 +991,10 @@ class PlanningService:
             "top_accepted_keys": self._top_feedback_keys(accepted_by_key),
             "top_ignored_keys": self._top_feedback_keys(ignored_by_key),
             "recent_feedback": recent_feedback,
+            "preference_summary": self._planner_feedback_preference_summary(
+                accepted_by_key=accepted_by_key,
+                ignored_by_key=ignored_by_key,
+            ),
         }
 
     def _top_feedback_keys(self, counts: dict[str, int]) -> list[str]:
@@ -1000,6 +1005,60 @@ class PlanningService:
                 key=lambda item: (-item[1], item[0]),
             )[:3]
         ]
+
+    def _planner_feedback_preference_summary(
+        self,
+        *,
+        accepted_by_key: dict[str, int],
+        ignored_by_key: dict[str, int],
+    ) -> dict:
+        capacity_flex_evidence = (
+            ignored_by_key.get("respect_rollover", 0)
+            + accepted_by_key.get("adjust_capacity_if_needed", 0)
+        )
+        rollover_boundary_evidence = (
+            accepted_by_key.get("respect_rollover", 0)
+            + ignored_by_key.get("adjust_capacity_if_needed", 0)
+        )
+        if capacity_flex_evidence > rollover_boundary_evidence and capacity_flex_evidence > 0:
+            stable = capacity_flex_evidence >= 2
+            return {
+                "key": "capacity_flexibility_preferred" if stable else "capacity_flexibility_emerging",
+                "title": "更愿意主动调整容量" if stable else "可能更愿意调整容量",
+                "message": (
+                    "你最近更常忽略保持滚动边界的建议。后续审阅会优先提醒如何手动增加可用时间，而不是自动把任务拉回今天。"
+                    if stable
+                    else "你最近有一次没有采用保持滚动边界的建议。Chronos 会先把它作为轻量信号观察，不直接改变排序。"
+                ),
+                "signal": "watch" if stable else "info",
+                "confidence": min(0.85, 0.45 + (capacity_flex_evidence * 0.15)),
+                "evidence_count": capacity_flex_evidence,
+                "source": "planner_review_feedback_v1",
+            }
+        if rollover_boundary_evidence > capacity_flex_evidence and rollover_boundary_evidence > 0:
+            stable = rollover_boundary_evidence >= 2
+            return {
+                "key": "rollover_boundary_preferred" if stable else "rollover_boundary_emerging",
+                "title": "更愿意保护滚动边界" if stable else "可能更愿意保护滚动边界",
+                "message": (
+                    "你最近更常接受保持滚动边界的建议。后续审阅会继续保护主序列，避免把今天变成过载清单。"
+                    if stable
+                    else "你最近有一次采用保持滚动边界的建议。Chronos 会先把它作为轻量信号观察，不直接改变排序。"
+                ),
+                "signal": "positive" if stable else "info",
+                "confidence": min(0.85, 0.45 + (rollover_boundary_evidence * 0.15)),
+                "evidence_count": rollover_boundary_evidence,
+                "source": "planner_review_feedback_v1",
+            }
+        return {
+            "key": "neutral",
+            "title": "暂无稳定偏好",
+            "message": "还没有足够反馈形成稳定偏好，Chronos 暂时只按当前计划上下文审阅。",
+            "signal": "info",
+            "confidence": 0.0,
+            "evidence_count": 0,
+            "source": "planner_review_feedback_v1",
+        }
 
     def _planner_review_suggestion(self, *, planner_review: dict, suggestion_key: str) -> dict | None:
         for suggestion in planner_review.get("suggestions") or []:
@@ -2591,11 +2650,15 @@ class PlanningService:
     def _planner_review(self, *, score_factors: dict) -> dict | None:
         suggestions = score_factors.get("planner_agent_suggestions") or []
         summary = score_factors.get("planner_agent_review_summary")
-        if not summary and not suggestions:
+        feedback_summary = score_factors.get("planner_feedback_summary")
+        if isinstance(feedback_summary, dict) and feedback_summary.get("key") == "neutral":
+            feedback_summary = None
+        if not summary and not suggestions and not feedback_summary:
             return None
         return {
             "summary": summary,
             "suggestions": suggestions[:3],
+            "feedback_summary": feedback_summary,
             "source": "daily_planner_agent_v1",
         }
 

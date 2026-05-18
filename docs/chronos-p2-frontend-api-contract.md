@@ -209,6 +209,15 @@ P2 新增字段：
         "signal": "positive"
       }
     ],
+    "feedback_summary": {
+      "key": "capacity_flexibility_preferred",
+      "title": "更愿意主动调整容量",
+      "message": "你最近更常忽略保持滚动边界的建议。后续审阅会优先提醒如何手动增加可用时间，而不是自动把任务拉回今天。",
+      "signal": "watch",
+      "confidence": 0.75,
+      "evidence_count": 2,
+      "source": "planner_review_feedback_v1"
+    },
     "source": "daily_planner_agent_v1"
   }
 }
@@ -220,6 +229,7 @@ P2 新增字段：
 - 它是 critique / suggestion，不表示系统已修改任务顺序。
 - Daily Planner Agent 会读取只读 `review_context`，包含 `capacity_source`、`manual_available_minutes`、`daily_capacity_minutes`、`selected_estimated_minutes` 和 `rolled_over_estimated_minutes`，用于审阅“今天是否做得出来”。
 - Daily Planner Agent 也会读取只读 feedback context，用于理解用户最近接受或忽略过哪些 planner suggestions；该反馈只影响后续审阅语气和建议，不直接修改计划。
+- `feedback_summary` 是确定性偏好摘要，不来自 LLM 自由判断；当反馈不足或没有稳定偏好时可以为 `null`。
 - 即使读取容量上下文，Daily Planner Agent 仍不能重排、移动 section 或修改任务；Planning Engine v1 仍是排序 source of truth。
 - 当 Daily Planner Agent fallback 或旧计划没有该字段时，`planner_review` 可以为 `null`。
 

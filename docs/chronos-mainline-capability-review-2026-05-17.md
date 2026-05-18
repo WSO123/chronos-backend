@@ -80,7 +80,7 @@ P2 只保留和执行主线强相关的部分：Goals、依赖、洞察、解释
 | Execution Feedback Calibration | L2-L3 | Replan 时会读取 Task 实际投入时间，把 Today 估时校准为剩余工作量，并在 Strategy Detail 解释 | 先不自动改 Task 原估时，避免系统过度自作主张 |
 | Daily Available Time v1 | L2-L3 | 用户可在 replan 时设置今日可用分钟数，Planning Engine 按该容量重新滚动主序列，并在 Strategy Detail 暴露来源 | 只影响 Today 容量，不做日历模块或自动提醒 |
 | Planner Review Capacity Context v1 | L2-L3 | Daily Planner Agent 会读取只读容量上下文，审阅手动可用时间、主序列分钟数和滚动压力 | 只做 Strategy Detail critique / suggestion，不重排、不移动 section、不改任务 |
-| Planner Review Feedback v1 | L2 | 用户可接受或忽略 Strategy Detail 的 planner suggestion，系统以 ActivityEvent 记录并作为后续 Daily Planner 只读上下文 | 不立即 replan，不改任务，不让 LLM 直接学习成隐藏排序器 |
+| Planner Review Feedback v1 | L2-L3 | 用户可接受或忽略 Strategy Detail 的 planner suggestion，系统以 ActivityEvent 记录，并压缩成确定性 `feedback_summary` 进入后续 Daily Planner 只读上下文 | 不立即 replan，不改任务，不让 LLM 直接学习成隐藏排序器 |
 | Planner Personalization v1 | L2-L3 | 通过 TaskPlanningSignal 的 task_type 聚合同类历史任务耗时、中断、延后和完成势能，调整本轮估时、评分和 Strategy Detail 解释 | 不创建长期画像表，不让 LLM 直接排序 |
 | Goal Progress Strategy v1 | L2-L3 | Today 会读取目标完成率、剩余任务数、deadline 和价值等级，把目标当前下一步作为推进目标的保护信号 | 不新增项目管理视图，不把 Goals 做重 |
 | Goal Progress Feedback v1 | L2-L3 | Focus / Today 快速完成 / Daily Report / Goal Detail 会把执行结果转成轻量目标推进反馈，让用户看到今天让哪个 Goal 前进了多少 | 反馈来自确定性事件聚合，不引入新仪表盘或 LLM 排序 |

@@ -173,9 +173,20 @@ class StrategyPlannerSuggestionResponse(BaseModel):
     signal: str
 
 
+class StrategyPlannerFeedbackSummaryResponse(BaseModel):
+    key: str
+    title: str
+    message: str
+    signal: str
+    confidence: float
+    evidence_count: int
+    source: str
+
+
 class StrategyPlannerReviewResponse(BaseModel):
     summary: str | None = None
     suggestions: list[StrategyPlannerSuggestionResponse] = Field(default_factory=list)
+    feedback_summary: StrategyPlannerFeedbackSummaryResponse | None = None
     source: str
 
 

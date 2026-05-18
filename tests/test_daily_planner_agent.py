@@ -196,7 +196,13 @@ class DailyPlannerAgentTests(unittest.TestCase):
             review_context={
                 "capacity": {"daily_capacity_minutes": 60, "capacity_source": "manual_today_override"},
                 "workload": {"selected_estimated_minutes": 60, "rolled_over_estimated_minutes": 60},
-                "user_feedback": {"top_ignored_keys": ["respect_rollover"]},
+                "user_feedback": {
+                    "top_ignored_keys": ["respect_rollover"],
+                    "preference_summary": {
+                        "key": "capacity_flexibility_preferred",
+                        "evidence_count": 2,
+                    },
+                },
             },
         )
 

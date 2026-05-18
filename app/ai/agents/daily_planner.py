@@ -122,7 +122,13 @@ class DailyPlannerAgent:
             rolled_over_minutes = int(workload.get("rolled_over_estimated_minutes") or 0)
             minutes_suffix = f"，约 {rolled_over_minutes} 分钟" if rolled_over_minutes else ""
             ignored_keys = set(user_feedback.get("top_ignored_keys") or [])
-            if "respect_rollover" in ignored_keys:
+            preference_summary = user_feedback.get("preference_summary") or {}
+            preference_key = (
+                preference_summary.get("key")
+                if isinstance(preference_summary, dict)
+                else None
+            )
+            if preference_key in {"capacity_flexibility_preferred", "capacity_flexibility_emerging"} or "respect_rollover" in ignored_keys:
                 suggestions.append(
                     {
                         "key": "adjust_capacity_if_needed",

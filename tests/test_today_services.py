@@ -425,6 +425,14 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(event.event_type, "PLANNER_REVIEW_FEEDBACK_RECORDED")
         self.assertEqual(event.payload["learning_signal"], "planner_review_preference")
         self.assertEqual(event.payload["note"], "今天想多推进一点")
+        planning_service.record_planner_review_feedback(
+            self.db,
+            user_id=self.user.id,
+            plan_date=self.plan_date,
+            suggestion_key="respect_rollover",
+            action="ignored",
+            note="还是想多推进一点",
+        )
 
         planning_service.replan_today(
             self.db,
@@ -436,12 +444,61 @@ class TodayServiceTests(unittest.TestCase):
         planner_job = self.db.get(AIJob, uuid.UUID(updated_strategy["source"]["ai_job_id"]))
         feedback_context = planner_job.job_metadata["user_feedback_context"]
 
-        self.assertEqual(feedback_context["ignored_count"], 1)
+        self.assertEqual(feedback_context["ignored_count"], 2)
         self.assertEqual(feedback_context["top_ignored_keys"], ["respect_rollover"])
+        self.assertEqual(feedback_context["preference_summary"]["key"], "capacity_flexibility_preferred")
+        self.assertEqual(feedback_context["preference_summary"]["evidence_count"], 2)
+        self.assertEqual(
+            updated_strategy["planner_review"]["feedback_summary"]["key"],
+            "capacity_flexibility_preferred",
+        )
         self.assertIn(
             "adjust_capacity_if_needed",
             [suggestion["key"] for suggestion in updated_strategy["planner_review"]["suggestions"]],
         )
+
+    def test_planner_feedback_summary_can_prefer_rollover_boundary(self):
+        for index in range(2):
+            task_service.create_task(
+                self.db,
+                user_id=self.user.id,
+                title=f"Boundary feedback task {index}",
+                estimated_duration_min=60,
+                priority=1 if index == 0 else 5,
+                value_level=ValueLevel.HIGH if index == 0 else ValueLevel.LOW,
+            )
+
+        planning_service.replan_today(
+            self.db,
+            user_id=self.user.id,
+            plan_date=self.plan_date,
+            reason="Short day before boundary feedback",
+            available_minutes=60,
+        )
+        planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        for _ in range(2):
+            planning_service.record_planner_review_feedback(
+                self.db,
+                user_id=self.user.id,
+                plan_date=self.plan_date,
+                suggestion_key="respect_rollover",
+                action="accepted",
+            )
+
+        planning_service.replan_today(
+            self.db,
+            user_id=self.user.id,
+            plan_date=self.plan_date,
+            reason="Replan with boundary preference",
+        )
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        planner_job = self.db.get(AIJob, uuid.UUID(strategy["source"]["ai_job_id"]))
+
+        self.assertEqual(
+            planner_job.job_metadata["user_feedback_context"]["preference_summary"]["key"],
+            "rollover_boundary_preferred",
+        )
+        self.assertEqual(strategy["planner_review"]["feedback_summary"]["key"], "rollover_boundary_preferred")
 
     def test_daily_planner_agent_failure_falls_back_to_planning_engine(self):
         class FailingPlannerAgent:
