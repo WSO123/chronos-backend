@@ -78,6 +78,7 @@ class StrategyExplanationAgentTests(unittest.TestCase):
         template = prompt_registry.get("strategy_explanation")
         self.assertIn("Chronos Strategy Explanation Agent v1", provider.prompt)
         self.assertIn("不要改变任务顺序", provider.prompt)
+        self.assertIn("feedback_summary", provider.prompt)
         self.assertEqual(provider.metadata["prompt"]["key"], "strategy_explanation")
         self.assertEqual(provider.metadata["prompt"]["version"], template.version)
         self.assertEqual(provider.metadata["prompt"]["checksum"], template.checksum)
@@ -85,6 +86,40 @@ class StrategyExplanationAgentTests(unittest.TestCase):
         self.assertEqual(result.prompt_checksum, template.checksum)
         self.assertEqual(result.usage["total_tokens"], 19)
         self.assertEqual(result.response_id, "strategy-explanation-response")
+
+    def test_agent_receives_feedback_summary_context(self):
+        agent = StrategyExplanationAgent()
+        provider = RecordingProvider()
+
+        result = agent.run(
+            strategy_context={
+                "daily_plan_id": "plan-1",
+                "plan_date": "2026-05-17",
+                "summary": "Capacity boundary respected.",
+                "mode": "light",
+                "primary_reason": "Capacity kept realistic.",
+            },
+            factors={"pinned_count": 1, "rolled_over_count": 1},
+            task_rationales=[],
+            feedback_summary={
+                "key": "capacity_flexibility_preferred",
+                "title": "更愿意主动调整容量",
+                "message": "用户最近更常忽略保持滚动边界的建议。",
+                "signal": "watch",
+                "confidence": 0.75,
+                "evidence_count": 2,
+                "source": "planner_review_feedback_v1",
+            },
+            fallback_output={
+                "explanation": ["系统读到你最近更倾向于主动调整容量，但不会自动改变今天计划。"],
+                "confidence": 0.68,
+                "summary": "Capacity boundary respected.",
+            },
+            provider=provider,
+        )
+
+        self.assertEqual(provider.metadata["feedback_summary"]["key"], "capacity_flexibility_preferred")
+        self.assertEqual(result.output.explanation[0], "系统读到你最近更倾向于主动调整容量，但不会自动改变今天计划。")
 
 
 if __name__ == "__main__":

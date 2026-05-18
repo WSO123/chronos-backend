@@ -2938,8 +2938,17 @@ class PlanningService:
             "focus_minutes": plan.focus_minutes,
         }
 
-    def _strategy_explanation(self, *, strategy: StrategySnapshot, factors: dict) -> list[str]:
+    def _strategy_explanation(
+        self,
+        *,
+        strategy: StrategySnapshot,
+        factors: dict,
+        feedback_summary: dict | None = None,
+    ) -> list[str]:
         explanation = [strategy.primary_reason]
+        feedback_line = self._strategy_feedback_explanation_line(feedback_summary=feedback_summary)
+        if feedback_line:
+            explanation.append(feedback_line)
         if factors["over_capacity_minutes"]:
             explanation.append(
                 f"今天受保护任务已超过容量约 {factors['over_capacity_minutes']} 分钟，先完成一个高价值任务再决定是否拉回滚动任务。"
@@ -2980,6 +2989,16 @@ class PlanningService:
             explanation.append("今天会平衡价值、截止时间和任务大小，不把 Today 变成复杂驾驶舱。")
         return explanation[:4]
 
+    def _strategy_feedback_explanation_line(self, *, feedback_summary: dict | None) -> str | None:
+        if not isinstance(feedback_summary, dict):
+            return None
+        key = feedback_summary.get("key")
+        if key in {"capacity_flexibility_preferred", "capacity_flexibility_emerging"}:
+            return "系统读到你最近更倾向于主动调整容量，所以这里只提醒你可以手动增加可用时间，不会自动把滚动任务拉回今天。"
+        if key in {"rollover_boundary_preferred", "rollover_boundary_emerging"}:
+            return "系统读到你最近更愿意保护滚动边界，所以今天会继续解释为什么先守住主序列，而不是把所有任务压回今天。"
+        return None
+
     def _run_strategy_explanation_agent(
         self,
         db: Session,
@@ -2990,7 +3009,14 @@ class PlanningService:
         score_explanation: dict,
         task_rationales: list[dict],
     ) -> dict:
-        fallback_explanation = self._strategy_explanation(strategy=strategy, factors=factors)
+        feedback_summary = strategy.score_factors.get("planner_feedback_summary")
+        if isinstance(feedback_summary, dict) and feedback_summary.get("key") == "neutral":
+            feedback_summary = None
+        fallback_explanation = self._strategy_explanation(
+            strategy=strategy,
+            factors=factors,
+            feedback_summary=feedback_summary,
+        )
         provider = llm_provider_registry.current_provider()
         job = ai_job_service.create_job(
             db,
@@ -3006,6 +3032,7 @@ class PlanningService:
                 "strategy_snapshot_id": str(strategy.id),
                 "prompt_checksum": self.strategy_explanation_agent.prompt_checksum,
                 "fallback_generator": "rule-strategy-explanation-v1",
+                "planner_feedback_summary": feedback_summary,
             },
             commit=False,
         )
@@ -3023,9 +3050,11 @@ class PlanningService:
                     "mode": strategy.mode.value,
                     "primary_reason": strategy.primary_reason,
                     "score_explanation": score_explanation,
+                    "planner_feedback_summary": feedback_summary,
                 },
                 factors=factors,
                 task_rationales=self._strategy_explanation_task_context(task_rationales),
+                feedback_summary=feedback_summary,
                 fallback_output={
                     "explanation": fallback_explanation,
                     "confidence": 0.68,

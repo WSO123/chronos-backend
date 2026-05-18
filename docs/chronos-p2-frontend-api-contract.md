@@ -230,6 +230,7 @@ P2 新增字段：
 - Daily Planner Agent 会读取只读 `review_context`，包含 `capacity_source`、`manual_available_minutes`、`daily_capacity_minutes`、`selected_estimated_minutes` 和 `rolled_over_estimated_minutes`，用于审阅“今天是否做得出来”。
 - Daily Planner Agent 也会读取只读 feedback context，用于理解用户最近接受或忽略过哪些 planner suggestions；该反馈只影响后续审阅语气和建议，不直接修改计划。
 - `feedback_summary` 是确定性偏好摘要，不来自 LLM 自由判断；当反馈不足或没有稳定偏好时可以为 `null`。
+- Strategy Explanation Agent 会读取同一份 `feedback_summary`，在 `explanation[]` 中用中文解释 Chronos 如何尊重该偏好；这仍然是解释层，不表示系统已经改变排序、容量或任务状态。
 - 即使读取容量上下文，Daily Planner Agent 仍不能重排、移动 section 或修改任务；Planning Engine v1 仍是排序 source of truth。
 - 当 Daily Planner Agent fallback 或旧计划没有该字段时，`planner_review` 可以为 `null`。
 

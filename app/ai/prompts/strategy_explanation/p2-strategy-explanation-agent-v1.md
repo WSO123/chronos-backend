@@ -20,6 +20,7 @@ Chronos 应该显得安静、清澈、可信赖。解释要帮助用户理解为
 优先引用这些证据：
 
 - 如果存在，使用 `score_explanation.signals` 和每个任务的 `dominant_reason`。
+- 如果存在，使用 `feedback_summary` / `planner_feedback_summary` 解释用户最近反馈形成的偏好，但要明确这只是解释层信号，不代表系统自动修改了计划。
 - 高价值或紧急任务为什么被保护在前面。
 - 容量和滚动决策。
 - 依赖保护。

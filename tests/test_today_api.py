@@ -161,6 +161,10 @@ class TodayAPITests(unittest.TestCase):
             updated_strategy.json()["planner_review"]["feedback_summary"]["key"],
             "capacity_flexibility_preferred",
         )
+        self.assertTrue(
+            any("主动调整容量" in line for line in updated_strategy.json()["explanation"]),
+            updated_strategy.json()["explanation"],
+        )
 
     def test_strategy_detail_returns_energy_explanation_with_planning_signal(self):
         energy_service.upsert_daily_metric(

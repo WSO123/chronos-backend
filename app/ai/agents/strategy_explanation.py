@@ -40,11 +40,13 @@ class StrategyExplanationAgent:
         strategy_context: dict,
         factors: dict,
         task_rationales: list[dict],
+        feedback_summary: dict | None = None,
         fallback_output: dict,
         provider: LLMProvider | None = None,
     ) -> StrategyExplanationAgentResult:
         resolved_provider = provider or llm_provider_registry.current_provider()
         prompt_template = self.prompts.get(self.prompt_key)
+        resolved_feedback_summary = feedback_summary or None
         generation = resolved_provider.generate_structured(
             prompt=prompt_template.content,
             schema=StrategyExplanationOutput,
@@ -53,6 +55,7 @@ class StrategyExplanationAgent:
                 "strategy": strategy_context,
                 "factors": factors,
                 "task_rationales": task_rationales,
+                "feedback_summary": resolved_feedback_summary,
                 "prompt": {
                     "key": prompt_template.key,
                     "version": prompt_template.version,

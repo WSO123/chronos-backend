@@ -452,9 +452,21 @@ class TodayServiceTests(unittest.TestCase):
             updated_strategy["planner_review"]["feedback_summary"]["key"],
             "capacity_flexibility_preferred",
         )
+        self.assertTrue(
+            any("主动调整容量" in line for line in updated_strategy["explanation"]),
+            updated_strategy["explanation"],
+        )
         self.assertIn(
             "adjust_capacity_if_needed",
             [suggestion["key"] for suggestion in updated_strategy["planner_review"]["suggestions"]],
+        )
+        explanation_job = self.db.get(
+            AIJob,
+            uuid.UUID(updated_strategy["source"]["explanation_ai_job_id"]),
+        )
+        self.assertEqual(
+            explanation_job.job_metadata["planner_feedback_summary"]["key"],
+            "capacity_flexibility_preferred",
         )
 
     def test_planner_feedback_summary_can_prefer_rollover_boundary(self):
@@ -499,6 +511,10 @@ class TodayServiceTests(unittest.TestCase):
             "rollover_boundary_preferred",
         )
         self.assertEqual(strategy["planner_review"]["feedback_summary"]["key"], "rollover_boundary_preferred")
+        self.assertTrue(
+            any("保护滚动边界" in line for line in strategy["explanation"]),
+            strategy["explanation"],
+        )
 
     def test_daily_planner_agent_failure_falls_back_to_planning_engine(self):
         class FailingPlannerAgent:
