@@ -14,7 +14,7 @@ class PlannerEvalPolicyTests(unittest.TestCase):
         policy = load_policy(DEFAULT_POLICY_PATH)
 
         self.assertEqual(policy["evaluator_version"], EVALUATOR_VERSION)
-        self.assertEqual(len(policy["required_scenarios"]), 11)
+        self.assertEqual(len(policy["required_scenarios"]), 12)
         self.assertTrue(policy["exact_scenario_set"])
 
     def test_policy_check_accepts_matching_run(self):

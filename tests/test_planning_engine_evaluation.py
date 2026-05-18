@@ -15,7 +15,7 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
         self.assertEqual(result["run_id"], "test-run")
         self.assertEqual(result["evaluator_version"], EVALUATOR_VERSION)
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["scenario_count"], 11)
+        self.assertEqual(result["scenario_count"], 12)
         self.assertEqual(result["failed_count"], 0)
         self.assertEqual(
             {scenario["name"] for scenario in result["scenarios"]},
@@ -31,6 +31,7 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
                 "overdue_goal_recovery_promotes_next_task",
                 "goal_progress_strategy_closes_near_done_goal",
                 "semantic_history_personalizes_duration",
+                "planner_feedback_preference_explained_without_reordering",
             },
         )
         for scenario in result["scenarios"]:
@@ -58,14 +59,14 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
 
             records = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
 
-        self.assertEqual(len(records), 24)
+        self.assertEqual(len(records), 26)
         self.assertEqual(records[0]["record_type"], "run_summary")
         self.assertEqual(records[0]["run_id"], "jsonl-test-run")
         self.assertEqual(records[0]["status"], "ok")
-        self.assertEqual(records[12]["record_type"], "run_summary")
-        self.assertEqual({record["record_type"] for record in records[1:12]}, {"scenario_result"})
+        self.assertEqual(records[13]["record_type"], "run_summary")
+        self.assertEqual({record["record_type"] for record in records[1:13]}, {"scenario_result"})
         self.assertEqual(
-            {record["scenario_name"] for record in records[1:12]},
+            {record["scenario_name"] for record in records[1:13]},
             {
                 "capacity_rollover",
                 "protected_overload_warning",
@@ -78,6 +79,7 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
                 "overdue_goal_recovery_promotes_next_task",
                 "goal_progress_strategy_closes_near_done_goal",
                 "semantic_history_personalizes_duration",
+                "planner_feedback_preference_explained_without_reordering",
             },
         )
         self.assertEqual(records[1]["details"]["planner_agent_provider"], "mock")
@@ -107,7 +109,7 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
 
         self.assertEqual(payload["run_id"], "cli-test-run")
         self.assertEqual(records[0]["run_id"], "cli-test-run")
-        self.assertEqual(len(records), 12)
+        self.assertEqual(len(records), 13)
 
 
 if __name__ == "__main__":

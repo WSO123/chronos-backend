@@ -16,7 +16,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from app.models.activity_event import ActivityEvent
 from app.models.ai_job import AIJob
-from app.models.enums import DailyPlanItemStatus, EntityType, TaskStatus, ValueLevel
+from app.models.enums import DailyPlanItemSection, DailyPlanItemStatus, EntityType, TaskStatus, ValueLevel
 from app.models.task import Task
 from app.models.task_planning_signal import TaskPlanningSignal
 from app.services.energy_service import energy_service
@@ -28,7 +28,7 @@ from tests.factories import create_user
 
 
 PLAN_DATE = date(2026, 5, 17)
-EVALUATOR_VERSION = "p2-planning-engine-eval-v6"
+EVALUATOR_VERSION = "p2-planning-engine-eval-v7"
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,7 @@ def run_evaluation(*, run_id: str | None = None) -> dict:
         _scenario_overdue_goal_recovery_promotes_next_task,
         _scenario_goal_progress_strategy_closes_near_done_goal,
         _scenario_semantic_history_personalizes_duration,
+        _scenario_planner_feedback_preference_explained_without_reordering,
     ]
     results = [scenario() for scenario in scenarios]
     return {
@@ -754,6 +755,114 @@ def _scenario_semantic_history_personalizes_duration() -> ScenarioResult:
         db.close()
 
 
+def _scenario_planner_feedback_preference_explained_without_reordering() -> ScenarioResult:
+    db = _fresh_db()
+    try:
+        user = create_user(db, name="Planner Eval Feedback Preference")
+        protected_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Protect focused implementation",
+            estimated_duration_min=60,
+            priority=1,
+            value_level=ValueLevel.HIGH,
+        )
+        rolled_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Optional backlog cleanup",
+            estimated_duration_min=60,
+            priority=5,
+            value_level=ValueLevel.LOW,
+        )
+
+        initial_today = planning_service.replan_today(
+            db,
+            user_id=user.id,
+            plan_date=PLAN_DATE,
+            reason="Short day before preference feedback",
+            available_minutes=60,
+        )
+        initial_strategy = planning_service.get_strategy_detail(db, user_id=user.id, plan_date=PLAN_DATE)
+        initial_suggestion_keys = [
+            suggestion["key"] for suggestion in (initial_strategy["planner_review"] or {}).get("suggestions", [])
+        ]
+        for _ in range(2):
+            planning_service.record_planner_review_feedback(
+                db,
+                user_id=user.id,
+                plan_date=PLAN_DATE,
+                suggestion_key="respect_rollover",
+                action="ignored",
+            )
+
+        today = planning_service.replan_today(
+            db,
+            user_id=user.id,
+            plan_date=PLAN_DATE,
+            reason="Replan with feedback preference",
+            available_minutes=60,
+        )
+        strategy = planning_service.get_strategy_detail(db, user_id=user.id, plan_date=PLAN_DATE)
+        rolled = today["sections"]["rolled_over_tasks"]
+        protected_item = _find_item(today, protected_task.id)
+        feedback_summary = ((strategy["planner_review"] or {}).get("feedback_summary") or {})
+        updated_suggestion_keys = [
+            suggestion["key"] for suggestion in (strategy["planner_review"] or {}).get("suggestions", [])
+        ]
+        failures = _check_all(
+            ("initial review includes rollover suggestion", "respect_rollover" in initial_suggestion_keys),
+            ("preference summary is exposed", feedback_summary.get("key") == "capacity_flexibility_preferred"),
+            ("main sequence count is unchanged by preference", today["progress"]["total_count"] == 1),
+            (
+                "protected task stays in main sequence",
+                bool(protected_item)
+                and _section_value(protected_item) != DailyPlanItemSection.ROLLED_OVER.value
+                and protected_item["sort_order"] == 1,
+            ),
+            ("rolled task stays rolled over", bool(rolled) and rolled[0]["task_id"] == rolled_task.id),
+            ("daily capacity is not expanded by preference", strategy["factors"]["daily_capacity_minutes"] == 60),
+            (
+                "manual capacity source is preserved",
+                strategy["factors"]["capacity_source"] == "manual_today_override",
+            ),
+            ("selected minutes remain deterministic", strategy["factors"]["selected_estimated_minutes"] == 60),
+            (
+                "strategy explanation references capacity preference",
+                any("主动调整容量" in line for line in strategy["explanation"]),
+            ),
+            (
+                "review suggests manual capacity adjustment instead of hidden reordering",
+                "adjust_capacity_if_needed" in updated_suggestion_keys,
+            ),
+            (
+                "feedback preference does not keep asking for rollover respect",
+                "respect_rollover" not in updated_suggestion_keys,
+            ),
+        )
+        failures += _explainability_failures(strategy)
+        details = _details(db=db, today=today, strategy=strategy)
+        details.update(
+            {
+                "initial_ordered_titles": [item["title"] for item in _all_items(initial_today)],
+                "initial_rolled_over_titles": [
+                    item["title"] for item in initial_today["sections"]["rolled_over_tasks"]
+                ],
+                "planner_feedback_summary_key": feedback_summary.get("key"),
+                "planner_review_suggestion_keys": updated_suggestion_keys,
+                "strategy_explanation": strategy["explanation"],
+            }
+        )
+        return ScenarioResult(
+            name="planner_feedback_preference_explained_without_reordering",
+            passed=not failures,
+            details=details,
+            failures=failures,
+        )
+    finally:
+        db.close()
+
+
 def _fresh_db():
     reset_database()
     return TestingSessionLocal()
@@ -805,6 +914,10 @@ def _details(*, db, today: dict, strategy: dict) -> dict:
         "score_explanation_signal_keys": [
             signal["key"] for signal in score_explanation.get("signals", []) if signal.get("key")
         ],
+        "planner_feedback_summary_key": (
+            ((strategy.get("planner_review") or {}).get("feedback_summary") or {}).get("key")
+        ),
+        "strategy_explanation": strategy.get("explanation", []),
         "item_signals": _item_signals(strategy.get("task_rationales", [])),
         "risk_keys": [alert["key"] for alert in today["insights_preview"]["risk_alerts"]],
         "capacity_status": strategy["factors"]["capacity_status"],
@@ -832,6 +945,11 @@ def _find_item(today: dict, task_id) -> dict | None:
         if item["task_id"] == task_id:
             return item
     return None
+
+
+def _section_value(item: dict) -> str:
+    section = item["section"]
+    return section.value if hasattr(section, "value") else str(section)
 
 
 def _item_signals(items: list[dict]) -> list[dict]:
