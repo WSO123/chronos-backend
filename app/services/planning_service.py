@@ -235,6 +235,76 @@ class PlanningService:
             "today": today,
         }
 
+    def record_planner_review_feedback(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        plan_date: date | None = None,
+        suggestion_key: str,
+        action: str,
+        note: str | None = None,
+    ) -> dict:
+        if action not in {"accepted", "ignored"}:
+            raise ValidationDomainError("Planner review feedback action must be accepted or ignored")
+        suggestion_key = " ".join(suggestion_key.strip().split())
+        if not suggestion_key:
+            raise ValidationDomainError("Planner review suggestion key is required")
+        note = " ".join(note.strip().split()) if note else None
+        resolved_date = self._resolve_plan_date(db, user_id=user_id, plan_date=plan_date)
+        plan = self._get_active_plan(db, user_id=user_id, plan_date=resolved_date)
+        if plan is None:
+            raise NotFoundError("Daily plan not found")
+
+        strategy = self._current_strategy(db, plan=plan)
+        revision = self._current_revision(db, plan=plan)
+        planner_review = self._planner_review(score_factors=strategy.score_factors)
+        if planner_review is None:
+            raise InvalidStateError("Planner review is not available")
+
+        suggestion = self._planner_review_suggestion(planner_review=planner_review, suggestion_key=suggestion_key)
+        if suggestion is None:
+            raise ValidationDomainError("Planner review suggestion not found")
+
+        event = activity_event_service.add_event(
+            db,
+            user_id=user_id,
+            entity_type=EntityType.DAILY_PLAN,
+            entity_id=plan.id,
+            event_type="PLANNER_REVIEW_FEEDBACK_RECORDED",
+            actor_type=ActorType.USER,
+            related_daily_plan_id=plan.id,
+            payload={
+                "plan_date": resolved_date.isoformat(),
+                "plan_version": plan.current_version,
+                "plan_revision_id": str(revision.id),
+                "strategy_snapshot_id": str(strategy.id),
+                "planner_ai_job_id": strategy.score_factors.get("ai_job_id"),
+                "suggestion_key": suggestion["key"],
+                "suggestion_title": suggestion["title"],
+                "suggestion_signal": suggestion["signal"],
+                "action": action,
+                "note": note,
+                "learning_signal": "planner_review_preference",
+                "applied_to_plan": False,
+                "replan_triggered": False,
+            },
+        )
+        db.commit()
+        db.refresh(event)
+        return {
+            "plan_date": resolved_date,
+            "daily_plan_id": plan.id,
+            "plan_version": plan.current_version,
+            "suggestion_key": suggestion["key"],
+            "action": action,
+            "feedback_event_id": event.id,
+            "learning_signal": "planner_review_preference",
+            "applied_to_plan": False,
+            "replan_triggered": False,
+            "source": "activity_event",
+        }
+
     def describe_task_today_impact(
         self,
         db: Session,
@@ -735,7 +805,10 @@ class PlanningService:
         strategy_payload: dict,
     ) -> dict:
         planner_provider = llm_provider_registry.current_provider()
-        review_context = self._planner_review_context(score_factors=strategy_payload["score_factors"])
+        review_context = self._planner_review_context(
+            score_factors=strategy_payload["score_factors"],
+            feedback_context=self._planner_feedback_context(db, user_id=plan.user_id),
+        )
         job = ai_job_service.create_job(
             db,
             user_id=plan.user_id,
@@ -754,6 +827,7 @@ class PlanningService:
                 "review_context_version": review_context["version"],
                 "capacity_context": review_context["capacity"],
                 "workload_context": review_context["workload"],
+                "user_feedback_context": review_context["user_feedback"],
             },
             commit=False,
         )
@@ -835,7 +909,7 @@ class PlanningService:
         }
         return {"planned_tasks": planned_tasks, "strategy_payload": strategy_payload, "ai_job": job}
 
-    def _planner_review_context(self, *, score_factors: dict) -> dict:
+    def _planner_review_context(self, *, score_factors: dict, feedback_context: dict | None = None) -> dict:
         return {
             "version": "p2-planner-review-context-v1",
             "capacity": {
@@ -865,7 +939,73 @@ class PlanningService:
                 "can_mutate_tasks": False,
                 "output_surface": "strategy_detail_review_only",
             },
+            "user_feedback": feedback_context or {
+                "version": "p2-planner-review-feedback-v1",
+                "recent_count": 0,
+                "accepted_count": 0,
+                "ignored_count": 0,
+                "top_accepted_keys": [],
+                "top_ignored_keys": [],
+                "recent_feedback": [],
+            },
         }
+
+    def _planner_feedback_context(self, db: Session, *, user_id: uuid.UUID) -> dict:
+        stmt = (
+            select(ActivityEvent)
+            .where(
+                ActivityEvent.user_id == user_id,
+                ActivityEvent.event_type == "PLANNER_REVIEW_FEEDBACK_RECORDED",
+            )
+            .order_by(ActivityEvent.occurred_at.desc())
+            .limit(20)
+        )
+        events = list(db.scalars(stmt).all())
+        accepted_by_key: dict[str, int] = {}
+        ignored_by_key: dict[str, int] = {}
+        recent_feedback: list[dict] = []
+
+        for event in events:
+            payload = event.payload or {}
+            suggestion_key = payload.get("suggestion_key")
+            action = payload.get("action")
+            if not suggestion_key or action not in {"accepted", "ignored"}:
+                continue
+            target = accepted_by_key if action == "accepted" else ignored_by_key
+            target[suggestion_key] = target.get(suggestion_key, 0) + 1
+            if len(recent_feedback) < 5:
+                recent_feedback.append(
+                    {
+                        "suggestion_key": suggestion_key,
+                        "action": action,
+                        "suggestion_signal": payload.get("suggestion_signal"),
+                    }
+                )
+
+        return {
+            "version": "p2-planner-review-feedback-v1",
+            "recent_count": len(events),
+            "accepted_count": sum(accepted_by_key.values()),
+            "ignored_count": sum(ignored_by_key.values()),
+            "top_accepted_keys": self._top_feedback_keys(accepted_by_key),
+            "top_ignored_keys": self._top_feedback_keys(ignored_by_key),
+            "recent_feedback": recent_feedback,
+        }
+
+    def _top_feedback_keys(self, counts: dict[str, int]) -> list[str]:
+        return [
+            key
+            for key, _count in sorted(
+                counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:3]
+        ]
+
+    def _planner_review_suggestion(self, *, planner_review: dict, suggestion_key: str) -> dict | None:
+        for suggestion in planner_review.get("suggestions") or []:
+            if suggestion.get("key") == suggestion_key:
+                return suggestion
+        return None
 
     def _planner_usage_metadata(self, usage: object) -> dict:
         if not isinstance(usage, dict):

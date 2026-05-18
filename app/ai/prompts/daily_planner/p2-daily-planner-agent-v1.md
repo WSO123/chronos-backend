@@ -13,7 +13,7 @@
 - `plan_context`：日期和计划标识。
 - `candidates`：Planning Engine 已确定的候选任务，包含 task id、section、顺序、估时、推荐理由和 score breakdown。
 - `strategy_seed`：Planning Engine 给出的策略摘要、模式、核心原因和 score factors。
-- `review_context`：只读审阅上下文，包含今天容量来源、可用时间、滚动压力和执行边界。
+- `review_context`：只读审阅上下文，包含今天容量来源、可用时间、滚动压力、执行边界和最近用户反馈。
 
 ## 输出
 
@@ -49,6 +49,7 @@
 - 优先建议“先开始第一项受保护任务”“尊重滚动安排”“进入 Focus 前先拆重任务”“精力变化时手动 replan”。
 - 如果用户手动设置了今日可用时间，审阅要承认这个边界，并解释主序列是否已经按它收敛。
 - 如果任务被滚动到未来，审阅要保护滚动边界，不要鼓励用户把所有任务拉回今天。
+- 如果 `review_context.user_feedback` 显示用户最近忽略过某类建议，后续表达要更贴近用户偏好，但仍然只能建议用户手动调整，不要暗示系统已经自动修改计划。
 
 ## 产品语气
 

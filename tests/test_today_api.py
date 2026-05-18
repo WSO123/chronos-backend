@@ -95,6 +95,63 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(job_response.json()["latency_ms"], body["factors"]["planner_agent_latency_ms"])
         self.assertEqual(job_response.json()["job_metadata"]["provider_observability_version"], "v1")
 
+    def test_record_planner_review_feedback(self):
+        self.client.post(
+            "/api/v1/tasks",
+            json={
+                "title": "Feedback protected task",
+                "priority": 1,
+                "value_level": "high",
+                "estimated_duration_min": 60,
+            },
+            headers=self.headers,
+        )
+        self.client.post(
+            "/api/v1/tasks",
+            json={
+                "title": "Feedback rolled task",
+                "priority": 5,
+                "value_level": "low",
+                "estimated_duration_min": 60,
+            },
+            headers=self.headers,
+        )
+        self.client.post(
+            "/api/v1/today/replan?plan_date=2026-05-16",
+            json={"reason": "Short day", "available_minutes": 60},
+            headers=self.headers,
+        )
+        strategy_response = self.client.get("/api/v1/today/strategy?plan_date=2026-05-16", headers=self.headers)
+        self.assertIn(
+            "respect_rollover",
+            [suggestion["key"] for suggestion in strategy_response.json()["planner_review"]["suggestions"]],
+        )
+
+        feedback_response = self.client.post(
+            "/api/v1/today/planner-review/feedback?plan_date=2026-05-16",
+            json={"suggestion_key": "respect_rollover", "action": "ignored", "note": "今天想多推进一点"},
+            headers=self.headers,
+        )
+
+        self.assertEqual(feedback_response.status_code, 200)
+        feedback = feedback_response.json()
+        self.assertEqual(feedback["suggestion_key"], "respect_rollover")
+        self.assertEqual(feedback["action"], "ignored")
+        self.assertEqual(feedback["learning_signal"], "planner_review_preference")
+        self.assertEqual(feedback["applied_to_plan"], False)
+        self.assertEqual(feedback["replan_triggered"], False)
+
+        self.client.post(
+            "/api/v1/today/replan?plan_date=2026-05-16",
+            json={"reason": "Use feedback context"},
+            headers=self.headers,
+        )
+        updated_strategy = self.client.get("/api/v1/today/strategy?plan_date=2026-05-16", headers=self.headers)
+        self.assertIn(
+            "adjust_capacity_if_needed",
+            [suggestion["key"] for suggestion in updated_strategy.json()["planner_review"]["suggestions"]],
+        )
+
     def test_strategy_detail_returns_energy_explanation_with_planning_signal(self):
         energy_service.upsert_daily_metric(
             self.db,

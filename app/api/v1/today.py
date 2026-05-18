@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user_id
 from app.core.db import get_db
 from app.schemas.today import (
+    PlannerReviewFeedbackRequest,
+    PlannerReviewFeedbackResponse,
     StrategyDetailResponse,
     TodayItemUpdate,
     TodayPlanningSignalsPrepareResponse,
@@ -50,6 +52,23 @@ def replan_today(
         plan_date=plan_date,
         reason=payload.reason if payload else None,
         available_minutes=payload.available_minutes if payload else None,
+    )
+
+
+@router.post("/planner-review/feedback", response_model=PlannerReviewFeedbackResponse)
+def record_planner_review_feedback(
+    payload: PlannerReviewFeedbackRequest,
+    plan_date: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    return planning_service.record_planner_review_feedback(
+        db,
+        user_id=user_id,
+        plan_date=plan_date,
+        suggestion_key=payload.suggestion_key,
+        action=payload.action,
+        note=payload.note,
     )
 
 

@@ -162,6 +162,48 @@ class DailyPlannerAgentTests(unittest.TestCase):
         self.assertEqual(result.output.suggestions[1].key, "manual_capacity_respected")
         self.assertIn("约 60 分钟", result.output.suggestions[2].message)
 
+    def test_mock_review_adapts_to_ignored_rollover_feedback(self):
+        agent = DailyPlannerAgent()
+
+        result = agent.run(
+            plan_context={"plan_date": "2026-05-17"},
+            candidates=[
+                {
+                    "task_id": "task-1",
+                    "title": "Protected task",
+                    "section": "pinned",
+                    "sort_order": 1,
+                    "recommendation_reason": "Protected high-value task.",
+                    "estimated_duration_min": 60,
+                    "score_breakdown": {"total_score": 90},
+                },
+                {
+                    "task_id": "task-2",
+                    "title": "Rolled task",
+                    "section": "rolled_over",
+                    "sort_order": 2,
+                    "recommendation_reason": "Rolled over by capacity.",
+                    "estimated_duration_min": 60,
+                    "score_breakdown": {"total_score": 40},
+                },
+            ],
+            strategy_seed={
+                "mode": "light",
+                "summary": "Keep today realistic.",
+                "primary_reason": "The sequence respects the user capacity boundary.",
+                "score_factors": {"task_count": 1},
+            },
+            review_context={
+                "capacity": {"daily_capacity_minutes": 60, "capacity_source": "manual_today_override"},
+                "workload": {"selected_estimated_minutes": 60, "rolled_over_estimated_minutes": 60},
+                "user_feedback": {"top_ignored_keys": ["respect_rollover"]},
+            },
+        )
+
+        suggestion_keys = [suggestion.key for suggestion in result.output.suggestions]
+        self.assertIn("adjust_capacity_if_needed", suggestion_keys)
+        self.assertNotIn("respect_rollover", suggestion_keys)
+
     def test_prompt_registry_rejects_unknown_key(self):
         with self.assertRaises(PromptRegistryError):
             prompt_registry.get("unknown_prompt")

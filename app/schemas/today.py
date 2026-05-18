@@ -1,5 +1,6 @@
 from datetime import date, datetime
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -175,6 +176,27 @@ class StrategyPlannerSuggestionResponse(BaseModel):
 class StrategyPlannerReviewResponse(BaseModel):
     summary: str | None = None
     suggestions: list[StrategyPlannerSuggestionResponse] = Field(default_factory=list)
+    source: str
+
+
+class PlannerReviewFeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    suggestion_key: str = Field(min_length=1, max_length=80)
+    action: Literal["accepted", "ignored"]
+    note: str | None = Field(default=None, max_length=300)
+
+
+class PlannerReviewFeedbackResponse(BaseModel):
+    plan_date: date
+    daily_plan_id: uuid.UUID
+    plan_version: int
+    suggestion_key: str
+    action: Literal["accepted", "ignored"]
+    feedback_event_id: uuid.UUID
+    learning_signal: str
+    applied_to_plan: bool
+    replan_triggered: bool
     source: str
 
 

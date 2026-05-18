@@ -384,6 +384,65 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(planner_job.job_metadata["workload_context"]["rolled_over_estimated_minutes"], 60)
         self.assertEqual(strategy["planner_review"]["suggestions"][0]["key"], "manual_capacity_respected")
 
+    def test_planner_review_feedback_is_recorded_and_used_as_review_context(self):
+        for index in range(2):
+            task_service.create_task(
+                self.db,
+                user_id=self.user.id,
+                title=f"Feedback task {index}",
+                estimated_duration_min=60,
+                priority=1 if index == 0 else 5,
+                value_level=ValueLevel.HIGH if index == 0 else ValueLevel.LOW,
+            )
+
+        planning_service.replan_today(
+            self.db,
+            user_id=self.user.id,
+            plan_date=self.plan_date,
+            reason="Short day before feedback",
+            available_minutes=60,
+        )
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        self.assertIn(
+            "respect_rollover",
+            [suggestion["key"] for suggestion in strategy["planner_review"]["suggestions"]],
+        )
+
+        feedback = planning_service.record_planner_review_feedback(
+            self.db,
+            user_id=self.user.id,
+            plan_date=self.plan_date,
+            suggestion_key="respect_rollover",
+            action="ignored",
+            note="今天想多推进一点",
+        )
+
+        self.assertEqual(feedback["suggestion_key"], "respect_rollover")
+        self.assertEqual(feedback["action"], "ignored")
+        self.assertFalse(feedback["applied_to_plan"])
+        self.assertFalse(feedback["replan_triggered"])
+        event = self.db.get(ActivityEvent, feedback["feedback_event_id"])
+        self.assertEqual(event.event_type, "PLANNER_REVIEW_FEEDBACK_RECORDED")
+        self.assertEqual(event.payload["learning_signal"], "planner_review_preference")
+        self.assertEqual(event.payload["note"], "今天想多推进一点")
+
+        planning_service.replan_today(
+            self.db,
+            user_id=self.user.id,
+            plan_date=self.plan_date,
+            reason="Replan with feedback context",
+        )
+        updated_strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        planner_job = self.db.get(AIJob, uuid.UUID(updated_strategy["source"]["ai_job_id"]))
+        feedback_context = planner_job.job_metadata["user_feedback_context"]
+
+        self.assertEqual(feedback_context["ignored_count"], 1)
+        self.assertEqual(feedback_context["top_ignored_keys"], ["respect_rollover"])
+        self.assertIn(
+            "adjust_capacity_if_needed",
+            [suggestion["key"] for suggestion in updated_strategy["planner_review"]["suggestions"]],
+        )
+
     def test_daily_planner_agent_failure_falls_back_to_planning_engine(self):
         class FailingPlannerAgent:
             prompt_version = "test-failing-planner"

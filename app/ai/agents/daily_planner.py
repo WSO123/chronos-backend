@@ -80,10 +80,13 @@ class DailyPlannerAgent:
     def _mock_output(self, *, candidates: list[dict], strategy_seed: dict, review_context: dict) -> dict:
         capacity = review_context.get("capacity") if isinstance(review_context, dict) else {}
         workload = review_context.get("workload") if isinstance(review_context, dict) else {}
+        user_feedback = review_context.get("user_feedback") if isinstance(review_context, dict) else {}
         if not isinstance(capacity, dict):
             capacity = {}
         if not isinstance(workload, dict):
             workload = {}
+        if not isinstance(user_feedback, dict):
+            user_feedback = {}
 
         suggestions: list[dict] = [
             {
@@ -118,14 +121,25 @@ class DailyPlannerAgent:
         if rolled_over_count:
             rolled_over_minutes = int(workload.get("rolled_over_estimated_minutes") or 0)
             minutes_suffix = f"，约 {rolled_over_minutes} 分钟" if rolled_over_minutes else ""
-            suggestions.append(
-                {
-                    "key": "respect_rollover",
-                    "title": "保持滚动边界",
-                    "message": f"{rolled_over_count} 个任务已后移{minutes_suffix}，今天先保护主序列，不急着全部拉回。",
-                    "signal": "watch",
-                }
-            )
+            ignored_keys = set(user_feedback.get("top_ignored_keys") or [])
+            if "respect_rollover" in ignored_keys:
+                suggestions.append(
+                    {
+                        "key": "adjust_capacity_if_needed",
+                        "title": "需要时再加容量",
+                        "message": f"{rolled_over_count} 个任务仍被后移{minutes_suffix}；如果你今天确实想多推进，先手动增加可用时间再重新编排。",
+                        "signal": "watch",
+                    }
+                )
+            else:
+                suggestions.append(
+                    {
+                        "key": "respect_rollover",
+                        "title": "保持滚动边界",
+                        "message": f"{rolled_over_count} 个任务已后移{minutes_suffix}，今天先保护主序列，不急着全部拉回。",
+                        "signal": "watch",
+                    }
+                )
         review_summary = "Planning Engine 的排序可以直接执行，LLM 只补充轻量审阅，不改变任务顺序。"
         if capacity_source == "manual_today_override" and daily_capacity_minutes:
             review_summary = f"Planning Engine 已按你今天 {daily_capacity_minutes} 分钟可用时间收敛主序列，LLM 只补充审阅，不改变任务顺序。"

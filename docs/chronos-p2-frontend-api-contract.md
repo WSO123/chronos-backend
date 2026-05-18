@@ -22,6 +22,7 @@ P2 的原则仍然是：增强目标和洞察，但不让 Today 变成复杂驾�
 | Today Insights Preview | `GET /api/v1/today` -> `insights_preview` | Ready |
 | Strategy Detail | `GET /api/v1/today/strategy` | Ready |
 | Daily Available Time | `POST /api/v1/today/replan` -> `available_minutes` | Ready |
+| Planner Review Feedback | `POST /api/v1/today/planner-review/feedback` | Ready |
 | Task Semantic Planning Signal | `POST /api/v1/tasks/{task_id}/planning-signal` | Ready |
 | Task Priority Adjustment | `PATCH /api/v1/tasks/{task_id}/priority` | Ready |
 | Task Dependencies | `GET/POST/DELETE /api/v1/tasks/{task_id}/dependencies` | Ready |
@@ -218,8 +219,47 @@ P2 新增字段：
 - `planner_review` 只出现在 Strategy Detail，不放入 Today 首屏。
 - 它是 critique / suggestion，不表示系统已修改任务顺序。
 - Daily Planner Agent 会读取只读 `review_context`，包含 `capacity_source`、`manual_available_minutes`、`daily_capacity_minutes`、`selected_estimated_minutes` 和 `rolled_over_estimated_minutes`，用于审阅“今天是否做得出来”。
+- Daily Planner Agent 也会读取只读 feedback context，用于理解用户最近接受或忽略过哪些 planner suggestions；该反馈只影响后续审阅语气和建议，不直接修改计划。
 - 即使读取容量上下文，Daily Planner Agent 仍不能重排、移动 section 或修改任务；Planning Engine v1 仍是排序 source of truth。
 - 当 Daily Planner Agent fallback 或旧计划没有该字段时，`planner_review` 可以为 `null`。
+
+### POST `/api/v1/today/planner-review/feedback`
+
+记录用户对 Strategy Detail 中 `planner_review.suggestions[]` 的轻量反馈。
+
+Request：
+
+```json
+{
+  "suggestion_key": "respect_rollover",
+  "action": "ignored",
+  "note": "今天想多推进一点"
+}
+```
+
+Response：
+
+```json
+{
+  "plan_date": "2026-05-16",
+  "daily_plan_id": "uuid",
+  "plan_version": 2,
+  "suggestion_key": "respect_rollover",
+  "action": "ignored",
+  "feedback_event_id": "uuid",
+  "learning_signal": "planner_review_preference",
+  "applied_to_plan": false,
+  "replan_triggered": false,
+  "source": "activity_event"
+}
+```
+
+前端约束：
+
+- `action` 当前只支持 `accepted` / `ignored`。
+- 只能反馈当前 Strategy Detail 已存在的 suggestion key；不存在时返回领域错误。
+- 记录反馈不会立刻 replan，也不会改变 Task / Goal / DailyPlan 状态。
+- 后续 replan 或 Strategy Detail 生成时，Daily Planner Agent 会把最近反馈作为只读上下文，用于更贴近用户偏好的审阅建议。
 
 `task_rationales[]` 中每个任务会包含 `score_breakdown`：
 
