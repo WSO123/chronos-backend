@@ -735,6 +735,7 @@ class PlanningService:
         strategy_payload: dict,
     ) -> dict:
         planner_provider = llm_provider_registry.current_provider()
+        review_context = self._planner_review_context(score_factors=strategy_payload["score_factors"])
         job = ai_job_service.create_job(
             db,
             user_id=plan.user_id,
@@ -750,6 +751,9 @@ class PlanningService:
                 "candidate_count": len(planned_tasks),
                 "planner_core": "planning-engine-v1",
                 "prompt_checksum": getattr(self.planner_agent, "prompt_checksum", None),
+                "review_context_version": review_context["version"],
+                "capacity_context": review_context["capacity"],
+                "workload_context": review_context["workload"],
             },
             commit=False,
         )
@@ -771,6 +775,7 @@ class PlanningService:
                     "primary_reason": strategy_payload["primary_reason"],
                     "score_factors": strategy_payload["score_factors"],
                 },
+                review_context=review_context,
                 provider=planner_provider,
             )
             job.provider = agent_result.provider
@@ -829,6 +834,38 @@ class PlanningService:
             "planner_agent_suggestions": job.job_metadata.get("suggestions", []),
         }
         return {"planned_tasks": planned_tasks, "strategy_payload": strategy_payload, "ai_job": job}
+
+    def _planner_review_context(self, *, score_factors: dict) -> dict:
+        return {
+            "version": "p2-planner-review-context-v1",
+            "capacity": {
+                "base_capacity_minutes": int(score_factors.get("base_capacity_minutes") or 0),
+                "daily_capacity_minutes": int(score_factors.get("daily_capacity_minutes") or 0),
+                "capacity_source": str(score_factors.get("capacity_source") or "planning_preference"),
+                "manual_available_minutes": score_factors.get("manual_available_minutes"),
+                "energy_capacity_adjusted": bool(score_factors.get("energy_capacity_adjusted") or False),
+                "energy_level": str(score_factors.get("energy_level") or "unknown"),
+                "energy_applied": bool(score_factors.get("energy_applied") or False),
+            },
+            "workload": {
+                "task_count": int(score_factors.get("task_count") or 0),
+                "pinned_count": int(score_factors.get("pinned_count") or 0),
+                "recommended_count": int(score_factors.get("recommended_count") or 0),
+                "low_priority_count": int(score_factors.get("low_priority_count") or 0),
+                "rolled_over_count": int(score_factors.get("rolled_over_count") or 0),
+                "selected_estimated_minutes": int(score_factors.get("selected_estimated_minutes") or 0),
+                "rolled_over_estimated_minutes": int(score_factors.get("rolled_over_estimated_minutes") or 0),
+                "over_capacity_minutes": int(score_factors.get("over_capacity_minutes") or 0),
+                "capacity_status": str(score_factors.get("capacity_status") or "within_capacity"),
+            },
+            "boundaries": {
+                "source_of_truth": "planning-engine-v1",
+                "can_reorder": False,
+                "can_move_sections": False,
+                "can_mutate_tasks": False,
+                "output_surface": "strategy_detail_review_only",
+            },
+        }
 
     def _planner_usage_metadata(self, usage: object) -> dict:
         if not isinstance(usage, dict):
@@ -2186,6 +2223,12 @@ class PlanningService:
         active_tasks = [planned for planned in planned_tasks if planned.section != DailyPlanItemSection.ROLLED_OVER]
         rolled_over_tasks = [planned for planned in planned_tasks if planned.section == DailyPlanItemSection.ROLLED_OVER]
         pinned_count = len([planned for planned in active_tasks if planned.section == DailyPlanItemSection.PINNED])
+        recommended_count = len(
+            [planned for planned in active_tasks if planned.section == DailyPlanItemSection.RECOMMENDED]
+        )
+        low_priority_count = len(
+            [planned for planned in active_tasks if planned.section == DailyPlanItemSection.LOW_PRIORITY]
+        )
         total_minutes = sum(planned.estimated_duration_min for planned in active_tasks)
         rolled_over_minutes = sum(planned.estimated_duration_min for planned in rolled_over_tasks)
         dependency_protected_count = len([planned for planned in active_tasks if planned.unlocks_task])
@@ -2250,6 +2293,9 @@ class PlanningService:
                 "score_factors": {
                     "task_count": 0,
                     "pinned_count": 0,
+                    "recommended_count": 0,
+                    "low_priority_count": 0,
+                    "rolled_over_count": len(rolled_over_tasks),
                     "total_minutes": 0,
                     "base_capacity_minutes": base_capacity_minutes,
                     "daily_capacity_minutes": daily_capacity_minutes,
@@ -2293,6 +2339,9 @@ class PlanningService:
             "score_factors": {
                 "task_count": len(active_tasks),
                 "pinned_count": pinned_count,
+                "recommended_count": recommended_count,
+                "low_priority_count": low_priority_count,
+                "rolled_over_count": len(rolled_over_tasks),
                 "total_minutes": total_minutes,
                 "base_capacity_minutes": base_capacity_minutes,
                 "daily_capacity_minutes": daily_capacity_minutes,

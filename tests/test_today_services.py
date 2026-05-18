@@ -297,6 +297,93 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["planner_review"]["suggestions"][0]["key"], "protect_first_task")
         self.assertNotIn("planner_agent_total_tokens", strategy["factors"])
 
+    def test_daily_planner_agent_receives_capacity_review_context(self):
+        class CapacityReviewPlannerAgent:
+            prompt_version = "test-capacity-review-planner"
+            prompt_checksum = "c" * 64
+
+            def __init__(self):
+                self.review_context = None
+
+            def run(self, **kwargs):
+                self.review_context = kwargs["review_context"]
+                candidates = kwargs["candidates"]
+                strategy_seed = kwargs["strategy_seed"]
+                return SimpleNamespace(
+                    output=DailyPlannerOutput(
+                        mode=strategy_seed["mode"],
+                        strategy_summary=strategy_seed["summary"],
+                        primary_reason=strategy_seed["primary_reason"],
+                        items=[
+                            {
+                                "task_id": candidate["task_id"],
+                                "section": candidate["section"],
+                                "sort_order": candidate["sort_order"],
+                                "recommendation_reason": candidate["recommendation_reason"],
+                            }
+                            for candidate in candidates
+                        ],
+                        review_summary="已按 60 分钟可用时间审阅，排序不需要变更。",
+                        suggestions=[
+                            {
+                                "key": "manual_capacity_respected",
+                                "title": "按可用时间执行",
+                                "message": "主序列已经收敛到 60 分钟，滚动任务保持后移。",
+                                "signal": "positive",
+                            }
+                        ],
+                        confidence=0.88,
+                    ),
+                    provider="test",
+                    model="capacity-review-model",
+                    prompt_version="test-capacity-review-planner",
+                    prompt_checksum="d" * 64,
+                    usage={"input_tokens": 21, "output_tokens": 9, "total_tokens": 30, "cost_usd": None},
+                    response_id="resp-capacity-review",
+                )
+
+        agent = CapacityReviewPlannerAgent()
+        service = PlanningService(planner_agent=agent)
+        for index in range(2):
+            task_service.create_task(
+                self.db,
+                user_id=self.user.id,
+                title=f"Capacity review task {index}",
+                estimated_duration_min=60,
+                priority=1 if index == 0 else 5,
+                value_level=ValueLevel.HIGH if index == 0 else ValueLevel.LOW,
+            )
+
+        today = service.replan_today(
+            self.db,
+            user_id=self.user.id,
+            plan_date=self.plan_date,
+            reason="Short capacity day",
+            available_minutes=60,
+        )
+        strategy = service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        active_today_count = sum(
+            len(today["sections"][section_key])
+            for section_key in ("pinned_tasks", "recommended_tasks", "low_priority_tasks")
+        )
+        self.assertEqual(active_today_count, 1)
+        self.assertEqual(len(today["sections"]["rolled_over_tasks"]), 1)
+        self.assertEqual(agent.review_context["version"], "p2-planner-review-context-v1")
+        self.assertEqual(agent.review_context["capacity"]["capacity_source"], "manual_today_override")
+        self.assertEqual(agent.review_context["capacity"]["daily_capacity_minutes"], 60)
+        self.assertEqual(agent.review_context["workload"]["selected_estimated_minutes"], 60)
+        self.assertEqual(agent.review_context["workload"]["rolled_over_count"], 1)
+        self.assertEqual(agent.review_context["workload"]["rolled_over_estimated_minutes"], 60)
+        self.assertFalse(agent.review_context["boundaries"]["can_reorder"])
+
+        planner_job = self.db.get(AIJob, uuid.UUID(strategy["source"]["ai_job_id"]))
+        self.assertEqual(planner_job.job_metadata["review_context_version"], "p2-planner-review-context-v1")
+        self.assertEqual(planner_job.job_metadata["capacity_context"]["daily_capacity_minutes"], 60)
+        self.assertEqual(planner_job.job_metadata["capacity_context"]["capacity_source"], "manual_today_override")
+        self.assertEqual(planner_job.job_metadata["workload_context"]["rolled_over_estimated_minutes"], 60)
+        self.assertEqual(strategy["planner_review"]["suggestions"][0]["key"], "manual_capacity_respected")
+
     def test_daily_planner_agent_failure_falls_back_to_planning_engine(self):
         class FailingPlannerAgent:
             prompt_version = "test-failing-planner"

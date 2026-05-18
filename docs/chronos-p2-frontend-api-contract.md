@@ -193,12 +193,18 @@ P2 新增字段：
 ```json
 {
   "planner_review": {
-    "summary": "Planning Engine 的排序可以直接执行，LLM 只补充轻量审阅，不改变任务顺序。",
+    "summary": "Planning Engine 已按你今天 60 分钟可用时间收敛主序列，LLM 只补充审阅，不改变任务顺序。",
     "suggestions": [
       {
         "key": "start_with_first_task",
         "title": "先开始第一项",
         "message": "当前排序已经可执行，先从主序列第一项开始，完成后再看下一步。",
+        "signal": "positive"
+      },
+      {
+        "key": "manual_capacity_respected",
+        "title": "按可用时间执行",
+        "message": "你今天设定了 60 分钟可用时间，主序列约 60 分钟，先按这个边界开始。",
         "signal": "positive"
       }
     ],
@@ -211,6 +217,8 @@ P2 新增字段：
 
 - `planner_review` 只出现在 Strategy Detail，不放入 Today 首屏。
 - 它是 critique / suggestion，不表示系统已修改任务顺序。
+- Daily Planner Agent 会读取只读 `review_context`，包含 `capacity_source`、`manual_available_minutes`、`daily_capacity_minutes`、`selected_estimated_minutes` 和 `rolled_over_estimated_minutes`，用于审阅“今天是否做得出来”。
+- 即使读取容量上下文，Daily Planner Agent 仍不能重排、移动 section 或修改任务；Planning Engine v1 仍是排序 source of truth。
 - 当 Daily Planner Agent fallback 或旧计划没有该字段时，`planner_review` 可以为 `null`。
 
 `task_rationales[]` 中每个任务会包含 `score_breakdown`：

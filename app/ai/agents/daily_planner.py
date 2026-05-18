@@ -40,10 +40,12 @@ class DailyPlannerAgent:
         plan_context: dict,
         candidates: list[dict],
         strategy_seed: dict,
+        review_context: dict | None = None,
         provider: LLMProvider | None = None,
     ) -> DailyPlannerAgentResult:
         resolved_provider = provider or llm_provider_registry.current_provider()
         prompt_template = self.prompts.get(self.prompt_key)
+        resolved_review_context = review_context or {}
         generation = resolved_provider.generate_structured(
             prompt=prompt_template.content,
             schema=DailyPlannerOutput,
@@ -52,12 +54,17 @@ class DailyPlannerAgent:
                 "plan_context": plan_context,
                 "candidates": candidates,
                 "strategy_seed": strategy_seed,
+                "review_context": resolved_review_context,
                 "prompt": {
                     "key": prompt_template.key,
                     "version": prompt_template.version,
                     "checksum": prompt_template.checksum,
                 },
-                "mock_output": self._mock_output(candidates=candidates, strategy_seed=strategy_seed),
+                "mock_output": self._mock_output(
+                    candidates=candidates,
+                    strategy_seed=strategy_seed,
+                    review_context=resolved_review_context,
+                ),
             },
         )
         return DailyPlannerAgentResult(
@@ -70,7 +77,14 @@ class DailyPlannerAgent:
             response_id=generation.response_id,
         )
 
-    def _mock_output(self, *, candidates: list[dict], strategy_seed: dict) -> dict:
+    def _mock_output(self, *, candidates: list[dict], strategy_seed: dict, review_context: dict) -> dict:
+        capacity = review_context.get("capacity") if isinstance(review_context, dict) else {}
+        workload = review_context.get("workload") if isinstance(review_context, dict) else {}
+        if not isinstance(capacity, dict):
+            capacity = {}
+        if not isinstance(workload, dict):
+            workload = {}
+
         suggestions: list[dict] = [
             {
                 "key": "start_with_first_task",
@@ -79,16 +93,44 @@ class DailyPlannerAgent:
                 "signal": "positive",
             }
         ]
+        daily_capacity_minutes = int(capacity.get("daily_capacity_minutes") or 0)
+        selected_estimated_minutes = int(workload.get("selected_estimated_minutes") or 0)
+        capacity_source = str(capacity.get("capacity_source") or "")
+        if capacity_source == "manual_today_override" and daily_capacity_minutes:
+            suggestions.append(
+                {
+                    "key": "manual_capacity_respected",
+                    "title": "按可用时间执行",
+                    "message": f"你今天设定了 {daily_capacity_minutes} 分钟可用时间，主序列约 {selected_estimated_minutes} 分钟，先按这个边界开始。",
+                    "signal": "positive",
+                }
+            )
+        elif capacity.get("energy_capacity_adjusted") and daily_capacity_minutes:
+            suggestions.append(
+                {
+                    "key": "energy_capacity_respected",
+                    "title": "保持轻量边界",
+                    "message": f"今天容量已收敛到 {daily_capacity_minutes} 分钟，用来匹配当前精力，先不要把滚动任务拉回。",
+                    "signal": "watch",
+                }
+            )
         rolled_over_count = len([candidate for candidate in candidates if candidate["section"] == "rolled_over"])
         if rolled_over_count:
+            rolled_over_minutes = int(workload.get("rolled_over_estimated_minutes") or 0)
+            minutes_suffix = f"，约 {rolled_over_minutes} 分钟" if rolled_over_minutes else ""
             suggestions.append(
                 {
                     "key": "respect_rollover",
                     "title": "保持滚动边界",
-                    "message": f"{rolled_over_count} 个任务已后移，今天先保护主序列，不急着全部拉回。",
+                    "message": f"{rolled_over_count} 个任务已后移{minutes_suffix}，今天先保护主序列，不急着全部拉回。",
                     "signal": "watch",
                 }
             )
+        review_summary = "Planning Engine 的排序可以直接执行，LLM 只补充轻量审阅，不改变任务顺序。"
+        if capacity_source == "manual_today_override" and daily_capacity_minutes:
+            review_summary = f"Planning Engine 已按你今天 {daily_capacity_minutes} 分钟可用时间收敛主序列，LLM 只补充审阅，不改变任务顺序。"
+        elif capacity.get("energy_capacity_adjusted") and daily_capacity_minutes:
+            review_summary = f"Planning Engine 已按低精力状态把主序列收敛到 {daily_capacity_minutes} 分钟，LLM 只补充审阅，不改变任务顺序。"
         return {
             "mode": strategy_seed["mode"],
             "strategy_summary": strategy_seed["summary"],
@@ -102,7 +144,7 @@ class DailyPlannerAgent:
                 }
                 for candidate in candidates
             ],
-            "review_summary": "Planning Engine 的排序可以直接执行，LLM 只补充轻量审阅，不改变任务顺序。",
+            "review_summary": review_summary,
             "suggestions": suggestions[:3],
             "confidence": 0.72,
         }

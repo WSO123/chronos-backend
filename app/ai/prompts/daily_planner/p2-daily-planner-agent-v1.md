@@ -13,6 +13,7 @@
 - `plan_context`：日期和计划标识。
 - `candidates`：Planning Engine 已确定的候选任务，包含 task id、section、顺序、估时、推荐理由和 score breakdown。
 - `strategy_seed`：Planning Engine 给出的策略摘要、模式、核心原因和 score factors。
+- `review_context`：只读审阅上下文，包含今天容量来源、可用时间、滚动压力和执行边界。
 
 ## 输出
 
@@ -37,6 +38,7 @@
 - 不要用审阅或建议覆盖 deterministic order。
 - 不要忽略依赖、容量或精力约束。
 - 不要把原始分数作为主要用户解释。
+- 如果 `review_context.boundaries` 表示不能重排、不能移动 section、不能改任务，你必须遵守。
 
 审阅 / 建议规则：
 
@@ -45,6 +47,8 @@
 - 如果存在风险，只提出用户可以手动做的最小调整。
 - 建议不能暗示 Chronos 已经修改了计划。
 - 优先建议“先开始第一项受保护任务”“尊重滚动安排”“进入 Focus 前先拆重任务”“精力变化时手动 replan”。
+- 如果用户手动设置了今日可用时间，审阅要承认这个边界，并解释主序列是否已经按它收敛。
+- 如果任务被滚动到未来，审阅要保护滚动边界，不要鼓励用户把所有任务拉回今天。
 
 ## 产品语气
 

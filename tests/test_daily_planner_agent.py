@@ -102,6 +102,66 @@ class DailyPlannerAgentTests(unittest.TestCase):
         self.assertEqual(result.response_id, "recording-response")
         self.assertEqual(provider.metadata["mock_output"]["suggestions"][0]["key"], "start_with_first_task")
 
+    def test_agent_receives_capacity_review_context(self):
+        agent = DailyPlannerAgent()
+        provider = RecordingProvider()
+
+        result = agent.run(
+            plan_context={"plan_date": "2026-05-17"},
+            candidates=[
+                {
+                    "task_id": "task-1",
+                    "title": "Protected task",
+                    "section": "pinned",
+                    "sort_order": 1,
+                    "recommendation_reason": "Protected high-value task.",
+                    "estimated_duration_min": 60,
+                    "score_breakdown": {"total_score": 90},
+                },
+                {
+                    "task_id": "task-2",
+                    "title": "Rolled task",
+                    "section": "rolled_over",
+                    "sort_order": 2,
+                    "recommendation_reason": "Rolled over by capacity.",
+                    "estimated_duration_min": 60,
+                    "score_breakdown": {"total_score": 40},
+                },
+            ],
+            strategy_seed={
+                "mode": "light",
+                "summary": "Keep today realistic.",
+                "primary_reason": "The sequence respects the user capacity boundary.",
+                "score_factors": {"task_count": 1},
+            },
+            review_context={
+                "version": "p2-planner-review-context-v1",
+                "capacity": {
+                    "daily_capacity_minutes": 60,
+                    "capacity_source": "manual_today_override",
+                    "manual_available_minutes": 60,
+                    "energy_capacity_adjusted": False,
+                },
+                "workload": {
+                    "selected_estimated_minutes": 60,
+                    "rolled_over_count": 1,
+                    "rolled_over_estimated_minutes": 60,
+                },
+                "boundaries": {
+                    "source_of_truth": "planning-engine-v1",
+                    "can_reorder": False,
+                    "can_move_sections": False,
+                    "can_mutate_tasks": False,
+                },
+            },
+            provider=provider,
+        )
+
+        self.assertEqual(provider.metadata["review_context"]["capacity"]["capacity_source"], "manual_today_override")
+        self.assertIn("60 分钟可用时间", result.output.review_summary)
+        self.assertEqual(result.output.suggestions[1].key, "manual_capacity_respected")
+        self.assertIn("约 60 分钟", result.output.suggestions[2].message)
+
     def test_prompt_registry_rejects_unknown_key(self):
         with self.assertRaises(PromptRegistryError):
             prompt_registry.get("unknown_prompt")
