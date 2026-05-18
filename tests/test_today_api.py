@@ -140,6 +140,13 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(feedback["learning_signal"], "planner_review_preference")
         self.assertEqual(feedback["applied_to_plan"], False)
         self.assertEqual(feedback["replan_triggered"], False)
+        self.assertEqual(
+            feedback["learning_contract"]["version"],
+            "p2-planner-user-learning-contract-v1",
+        )
+        self.assertFalse(feedback["learning_contract"]["plan_mutation_allowed"])
+        self.assertIn("strategy_explanation", feedback["learning_contract"]["can_affect"])
+        self.assertIn("today_sort_order", feedback["learning_contract"]["cannot_affect"])
         second_feedback_response = self.client.post(
             "/api/v1/today/planner-review/feedback?plan_date=2026-05-16",
             json={"suggestion_key": "respect_rollover", "action": "ignored"},
@@ -161,6 +168,12 @@ class TodayAPITests(unittest.TestCase):
             updated_strategy.json()["planner_review"]["feedback_summary"]["key"],
             "capacity_flexibility_preferred",
         )
+        learning_contract = updated_strategy.json()["planner_review"]["feedback_summary"]["learning_contract"]
+        self.assertEqual(learning_contract["source_of_truth"], "planning-engine-v1")
+        self.assertFalse(learning_contract["plan_mutation_allowed"])
+        self.assertTrue(learning_contract["requires_explicit_user_action"])
+        self.assertIn("planner_review_suggestions", learning_contract["can_affect"])
+        self.assertIn("daily_capacity_minutes", learning_contract["cannot_affect"])
         self.assertTrue(
             any("主动调整容量" in line for line in updated_strategy.json()["explanation"]),
             updated_strategy.json()["explanation"],

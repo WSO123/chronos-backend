@@ -807,12 +807,25 @@ def _scenario_planner_feedback_preference_explained_without_reordering() -> Scen
         rolled = today["sections"]["rolled_over_tasks"]
         protected_item = _find_item(today, protected_task.id)
         feedback_summary = ((strategy["planner_review"] or {}).get("feedback_summary") or {})
+        learning_contract = feedback_summary.get("learning_contract") or {}
         updated_suggestion_keys = [
             suggestion["key"] for suggestion in (strategy["planner_review"] or {}).get("suggestions", [])
         ]
         failures = _check_all(
             ("initial review includes rollover suggestion", "respect_rollover" in initial_suggestion_keys),
             ("preference summary is exposed", feedback_summary.get("key") == "capacity_flexibility_preferred"),
+            (
+                "preference contract forbids plan mutation",
+                learning_contract.get("plan_mutation_allowed") is False,
+            ),
+            (
+                "preference contract allows explanation only",
+                "strategy_explanation" in (learning_contract.get("can_affect") or []),
+            ),
+            (
+                "preference contract blocks hidden ordering changes",
+                "today_sort_order" in (learning_contract.get("cannot_affect") or []),
+            ),
             ("main sequence count is unchanged by preference", today["progress"]["total_count"] == 1),
             (
                 "protected task stays in main sequence",
@@ -849,6 +862,7 @@ def _scenario_planner_feedback_preference_explained_without_reordering() -> Scen
                     item["title"] for item in initial_today["sections"]["rolled_over_tasks"]
                 ],
                 "planner_feedback_summary_key": feedback_summary.get("key"),
+                "planner_feedback_learning_contract": learning_contract,
                 "planner_review_suggestion_keys": updated_suggestion_keys,
                 "strategy_explanation": strategy["explanation"],
             }

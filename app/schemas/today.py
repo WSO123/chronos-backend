@@ -173,6 +173,17 @@ class StrategyPlannerSuggestionResponse(BaseModel):
     signal: str
 
 
+class PlannerUserLearningContractResponse(BaseModel):
+    version: str
+    scope: str
+    source_of_truth: str
+    can_affect: list[str] = Field(default_factory=list)
+    cannot_affect: list[str] = Field(default_factory=list)
+    plan_mutation_allowed: bool
+    requires_explicit_user_action: bool
+    explanation: str
+
+
 class StrategyPlannerFeedbackSummaryResponse(BaseModel):
     key: str
     title: str
@@ -181,6 +192,7 @@ class StrategyPlannerFeedbackSummaryResponse(BaseModel):
     confidence: float
     evidence_count: int
     source: str
+    learning_contract: PlannerUserLearningContractResponse
 
 
 class StrategyPlannerReviewResponse(BaseModel):
@@ -208,6 +220,7 @@ class PlannerReviewFeedbackResponse(BaseModel):
     learning_signal: str
     applied_to_plan: bool
     replan_triggered: bool
+    learning_contract: PlannerUserLearningContractResponse
     source: str
 
 

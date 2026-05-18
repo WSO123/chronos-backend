@@ -302,6 +302,7 @@ class PlanningService:
             "learning_signal": "planner_review_preference",
             "applied_to_plan": False,
             "replan_triggered": False,
+            "learning_contract": self._planner_user_learning_contract(),
             "source": "activity_event",
         }
 
@@ -1034,6 +1035,7 @@ class PlanningService:
                 "confidence": min(0.85, 0.45 + (capacity_flex_evidence * 0.15)),
                 "evidence_count": capacity_flex_evidence,
                 "source": "planner_review_feedback_v1",
+                "learning_contract": self._planner_user_learning_contract(),
             }
         if rollover_boundary_evidence > capacity_flex_evidence and rollover_boundary_evidence > 0:
             stable = rollover_boundary_evidence >= 2
@@ -1049,6 +1051,7 @@ class PlanningService:
                 "confidence": min(0.85, 0.45 + (rollover_boundary_evidence * 0.15)),
                 "evidence_count": rollover_boundary_evidence,
                 "source": "planner_review_feedback_v1",
+                "learning_contract": self._planner_user_learning_contract(),
             }
         return {
             "key": "neutral",
@@ -1058,6 +1061,29 @@ class PlanningService:
             "confidence": 0.0,
             "evidence_count": 0,
             "source": "planner_review_feedback_v1",
+            "learning_contract": self._planner_user_learning_contract(),
+        }
+
+    def _planner_user_learning_contract(self) -> dict:
+        return {
+            "version": "p2-planner-user-learning-contract-v1",
+            "scope": "planner_review_feedback_preference",
+            "source_of_truth": "planning-engine-v1",
+            "can_affect": [
+                "strategy_explanation",
+                "planner_review_suggestions",
+                "daily_planner_review_context",
+            ],
+            "cannot_affect": [
+                "today_sort_order",
+                "today_sections",
+                "daily_capacity_minutes",
+                "task_status",
+                "goal_state",
+            ],
+            "plan_mutation_allowed": False,
+            "requires_explicit_user_action": True,
+            "explanation": "该反馈只用于解释和审阅建议；只有用户明确调整任务、容量或重新编排时才会改变计划。",
         }
 
     def _planner_review_suggestion(self, *, planner_review: dict, suggestion_key: str) -> dict | None:

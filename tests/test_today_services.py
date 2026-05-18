@@ -421,6 +421,13 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(feedback["action"], "ignored")
         self.assertFalse(feedback["applied_to_plan"])
         self.assertFalse(feedback["replan_triggered"])
+        self.assertEqual(
+            feedback["learning_contract"]["version"],
+            "p2-planner-user-learning-contract-v1",
+        )
+        self.assertFalse(feedback["learning_contract"]["plan_mutation_allowed"])
+        self.assertIn("strategy_explanation", feedback["learning_contract"]["can_affect"])
+        self.assertIn("today_sort_order", feedback["learning_contract"]["cannot_affect"])
         event = self.db.get(ActivityEvent, feedback["feedback_event_id"])
         self.assertEqual(event.event_type, "PLANNER_REVIEW_FEEDBACK_RECORDED")
         self.assertEqual(event.payload["learning_signal"], "planner_review_preference")
@@ -452,6 +459,12 @@ class TodayServiceTests(unittest.TestCase):
             updated_strategy["planner_review"]["feedback_summary"]["key"],
             "capacity_flexibility_preferred",
         )
+        feedback_contract = updated_strategy["planner_review"]["feedback_summary"]["learning_contract"]
+        self.assertEqual(feedback_contract["source_of_truth"], "planning-engine-v1")
+        self.assertFalse(feedback_contract["plan_mutation_allowed"])
+        self.assertTrue(feedback_contract["requires_explicit_user_action"])
+        self.assertIn("planner_review_suggestions", feedback_contract["can_affect"])
+        self.assertIn("daily_capacity_minutes", feedback_contract["cannot_affect"])
         self.assertTrue(
             any("主动调整容量" in line for line in updated_strategy["explanation"]),
             updated_strategy["explanation"],
@@ -511,6 +524,13 @@ class TodayServiceTests(unittest.TestCase):
             "rollover_boundary_preferred",
         )
         self.assertEqual(strategy["planner_review"]["feedback_summary"]["key"], "rollover_boundary_preferred")
+        self.assertFalse(
+            strategy["planner_review"]["feedback_summary"]["learning_contract"]["plan_mutation_allowed"]
+        )
+        self.assertIn(
+            "today_sections",
+            strategy["planner_review"]["feedback_summary"]["learning_contract"]["cannot_affect"],
+        )
         self.assertTrue(
             any("保护滚动边界" in line for line in strategy["explanation"]),
             strategy["explanation"],
