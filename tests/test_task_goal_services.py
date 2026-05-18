@@ -193,11 +193,15 @@ class TaskGoalServiceTests(unittest.TestCase):
         self.assertEqual(result["ai_job"]["status"], AIJobStatus.SUCCEEDED)
         self.assertTrue(result["ai_job"]["job_metadata"]["output_applied"])
         self.assertEqual(result["ai_job"]["provider"], "mock")
-        self.assertEqual(result["ai_job"]["prompt_version"], "p2-task-semantic-planning-agent-v1")
+        self.assertEqual(result["ai_job"]["prompt_version"], "p2-task-semantic-planning-agent-v2")
         self.assertEqual(result["planning_signal"]["task_id"], task.id)
         self.assertEqual(result["planning_signal"]["source"], "ai")
+        self.assertEqual(result["planning_signal"]["semantic_schema_version"], "task-semantic-planning-v2")
         self.assertGreaterEqual(result["planning_signal"]["goal_alignment_score"], 0.8)
+        self.assertEqual(result["planning_signal"]["goal_progress_impact"], "large")
+        self.assertTrue(result["planning_signal"]["goal_relevance_reason"])
         self.assertTrue(result["planning_signal"]["minimum_viable_step"])
+        self.assertIsNotNone(result["planning_signal"]["minimum_viable_minutes"])
         self.assertEqual(
             detail["ai_info"]["recommended_duration_min"],
             result["planning_signal"]["estimated_duration_min"],

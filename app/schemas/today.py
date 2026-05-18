@@ -124,6 +124,7 @@ class StrategyDetailFactorsResponse(BaseModel):
     user_adjusted_count: int
     semantic_signal_count: int = 0
     semantic_protected_count: int = 0
+    semantic_goal_impact_count: int = 0
     minimum_viable_progress_count: int = 0
     execution_feedback_count: int = 0
     personalization_signal_count: int = 0

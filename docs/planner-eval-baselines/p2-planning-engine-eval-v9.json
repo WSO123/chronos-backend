@@ -1,6 +1,6 @@
 {
-  "policy_version": "p2-planner-eval-policy-v5",
-  "evaluator_version": "p2-planning-engine-eval-v8",
+  "policy_version": "p2-planner-eval-policy-v6",
+  "evaluator_version": "p2-planning-engine-eval-v9",
   "status": "active",
   "required_run_status": "ok",
   "exact_scenario_set": true,
@@ -14,6 +14,7 @@
     "rolled_over_estimated_minutes",
     "over_capacity_minutes",
     "energy_applied",
+    "semantic_goal_impact_count",
     "planning_objective_applied",
     "planning_objective_version",
     "objective_selected_score",
@@ -42,6 +43,10 @@
     "personalization_sample_count",
     "dependency_score",
     "user_preference_score",
+    "semantic_schema_version",
+    "semantic_goal_progress_impact",
+    "semantic_goal_progress_impact_score",
+    "semantic_minimum_viable_minutes",
     "planning_objective_score",
     "planning_objective_selected",
     "planning_objective_reason_key",
@@ -121,6 +126,12 @@
       "must_pass": true,
       "critical": true,
       "intent": "Semantic task history changes today's duration estimate and explanation without letting LLM directly sort."
+    },
+    {
+      "name": "semantic_coverage_v2_guides_minimum_goal_action",
+      "must_pass": true,
+      "critical": true,
+      "intent": "Semantic Planning v2 exposes goal impact, goal relevance and minimum viable minutes as bounded Planning Engine inputs."
     },
     {
       "name": "planner_feedback_preference_explained_without_reordering",

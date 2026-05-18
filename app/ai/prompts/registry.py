@@ -89,8 +89,8 @@ prompt_registry = PromptRegistry(
         ),
         "task_semantic_planning": PromptSpec(
             key="task_semantic_planning",
-            version="p2-task-semantic-planning-agent-v1",
-            resource_path="task_semantic_planning/p2-task-semantic-planning-agent-v1.md",
+            version="p2-task-semantic-planning-agent-v2",
+            resource_path="task_semantic_planning/p2-task-semantic-planning-agent-v2.md",
         ),
     }
 )

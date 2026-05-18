@@ -1441,13 +1441,21 @@ class PlanningService:
             return {
                 "semantic_signal_applied": False,
                 "semantic_signal_id": None,
+                "semantic_schema_version": None,
                 "semantic_task_type": None,
                 "semantic_complexity": None,
+                "semantic_complexity_reason": None,
                 "semantic_cognitive_load": None,
                 "semantic_energy_fit": None,
                 "semantic_blocking_risk": None,
                 "semantic_estimated_duration_min": None,
+                "semantic_duration_confidence": None,
+                "semantic_duration_reason": None,
+                "semantic_goal_progress_impact": None,
+                "semantic_goal_progress_impact_score": 0,
+                "semantic_goal_relevance_reason": None,
                 "semantic_minimum_viable_step": None,
+                "semantic_minimum_viable_minutes": None,
                 "goal_alignment_signal_score": 0,
                 "semantic_priority_signal_score": 0,
                 "semantic_complexity_score": 0,
@@ -1459,6 +1467,13 @@ class PlanningService:
         goal_alignment_signal_score = int(round(semantic_signal.goal_alignment_score * 14))
         semantic_priority_signal_score = int(round(semantic_signal.semantic_priority_score * 18))
         blocking_risk_score = {"low": 0, "medium": 4, "high": 10}.get(semantic_signal.blocking_risk, 0)
+        goal_progress_impact = str(
+            self._semantic_payload_value(semantic_signal, "goal_progress_impact", default="small")
+        )
+        goal_progress_impact_score = {"none": 0, "small": 3, "medium": 7, "large": 12}.get(
+            goal_progress_impact,
+            3,
+        )
         semantic_complexity_score = self._semantic_complexity_score(task=task, semantic_signal=semantic_signal)
         semantic_energy_fit_score = self._semantic_energy_fit_score(
             semantic_signal=semantic_signal,
@@ -1470,17 +1485,46 @@ class PlanningService:
             + semantic_complexity_score
             + semantic_energy_fit_score
             + blocking_risk_score
+            + goal_progress_impact_score
         )
         return {
             "semantic_signal_applied": True,
             "semantic_signal_id": str(semantic_signal.id),
+            "semantic_schema_version": self._semantic_payload_value(
+                semantic_signal,
+                "semantic_schema_version",
+                default="task-semantic-planning-v1",
+            ),
             "semantic_task_type": semantic_signal.task_type,
             "semantic_complexity": semantic_signal.complexity,
+            "semantic_complexity_reason": self._semantic_payload_value(
+                semantic_signal,
+                "complexity_reason",
+                default=None,
+            ),
             "semantic_cognitive_load": semantic_signal.cognitive_load,
             "semantic_energy_fit": semantic_signal.energy_fit,
             "semantic_blocking_risk": semantic_signal.blocking_risk,
             "semantic_estimated_duration_min": semantic_signal.estimated_duration_min,
+            "semantic_duration_confidence": semantic_signal.duration_confidence,
+            "semantic_duration_reason": self._semantic_payload_value(
+                semantic_signal,
+                "duration_reason",
+                default=None,
+            ),
+            "semantic_goal_progress_impact": goal_progress_impact,
+            "semantic_goal_progress_impact_score": goal_progress_impact_score,
+            "semantic_goal_relevance_reason": self._semantic_payload_value(
+                semantic_signal,
+                "goal_relevance_reason",
+                default=None,
+            ),
             "semantic_minimum_viable_step": semantic_signal.minimum_viable_step,
+            "semantic_minimum_viable_minutes": self._semantic_payload_value(
+                semantic_signal,
+                "minimum_viable_minutes",
+                default=None,
+            ),
             "goal_alignment_signal_score": goal_alignment_signal_score,
             "semantic_priority_signal_score": semantic_priority_signal_score,
             "semantic_complexity_score": semantic_complexity_score,
@@ -1488,6 +1532,11 @@ class PlanningService:
             "blocking_risk_score": blocking_risk_score,
             "semantic_total_score": semantic_total_score,
         }
+
+    def _semantic_payload_value(self, semantic_signal: TaskPlanningSignal, key: str, *, default=None):
+        payload = semantic_signal.raw_payload or {}
+        value = payload.get(key, default)
+        return default if value == "" and default is not None else value
 
     def _semantic_complexity_score(self, *, task: Task, semantic_signal: TaskPlanningSignal) -> int:
         if semantic_signal.complexity == "high":
@@ -1542,10 +1591,17 @@ class PlanningService:
             and heavy_for_today
             and (semantic_protected or high_value_goal or high_value_task)
         ):
-            planned_duration = min(
-                original_duration,
-                max(25, min(45, context.daily_capacity_minutes // 2)),
-            )
+            semantic_minimum_minutes = score_breakdown.get("semantic_minimum_viable_minutes")
+            if semantic_minimum_minutes is not None:
+                planned_duration = min(
+                    original_duration,
+                    max(10, min(int(semantic_minimum_minutes), 60, context.daily_capacity_minutes)),
+                )
+            else:
+                planned_duration = min(
+                    original_duration,
+                    max(25, min(45, context.daily_capacity_minutes // 2)),
+                )
             minimum_viable_applied = planned_duration < original_duration
             minimum_viable_reason = "semantic_minimum_viable_progress" if minimum_viable_applied else None
 
@@ -1729,6 +1785,7 @@ class PlanningService:
         semantic_goal_score = max(0, int(score_breakdown.get("goal_alignment_signal_score") or 0))
         semantic_priority_score = max(0, int(score_breakdown.get("semantic_priority_signal_score") or 0))
         blocking_risk_score = max(0, int(score_breakdown.get("blocking_risk_score") or 0))
+        semantic_goal_impact_score = max(0, int(score_breakdown.get("semantic_goal_progress_impact_score") or 0))
         duration_fit_score = max(0, int(score_breakdown.get("duration_fit_score") or 0))
         energy_fit_score = max(0, int(score_breakdown.get("energy_fit_score") or 0))
         user_preference_score = max(0, int(score_breakdown.get("user_preference_score") or 0))
@@ -1745,7 +1802,12 @@ class PlanningService:
             + high_value_goal_bonus
         )
         execution_fit_component = duration_fit_score + energy_fit_score // 2
-        semantic_component = semantic_goal_score + semantic_priority_score // 2 + blocking_risk_score
+        semantic_component = (
+            semantic_goal_score
+            + semantic_priority_score // 2
+            + blocking_risk_score
+            + semantic_goal_impact_score
+        )
         user_signal_component = user_preference_score + personalization_score // 2
         objective_score = int(
             value_score
@@ -2643,6 +2705,13 @@ class PlanningService:
         semantic_protected_count = len(
             [planned for planned in active_tasks if planned.score_breakdown.get("semantic_total_score", 0) >= 28]
         )
+        semantic_goal_impact_count = len(
+            [
+                planned
+                for planned in active_tasks
+                if planned.score_breakdown.get("semantic_goal_progress_impact") in {"medium", "large"}
+            ]
+        )
         minimum_viable_progress_count = len(
             [planned for planned in active_tasks if planned.score_breakdown.get("minimum_viable_progress_applied")]
         )
@@ -2731,6 +2800,7 @@ class PlanningService:
                     "user_adjusted_count": 0,
                     "semantic_signal_count": 0,
                     "semantic_protected_count": 0,
+                    "semantic_goal_impact_count": 0,
                     "minimum_viable_progress_count": 0,
                     "execution_feedback_count": 0,
                     "personalization_signal_count": 0,
@@ -2783,6 +2853,7 @@ class PlanningService:
                 "user_adjusted_count": user_adjusted_count,
                 "semantic_signal_count": semantic_signal_count,
                 "semantic_protected_count": semantic_protected_count,
+                "semantic_goal_impact_count": semantic_goal_impact_count,
                 "minimum_viable_progress_count": minimum_viable_progress_count,
                 "execution_feedback_count": execution_feedback_count,
                 "personalization_signal_count": personalization_signal_count,
@@ -3033,6 +3104,16 @@ class PlanningService:
                     "score": factors["semantic_signal_count"],
                 }
             )
+        if factors.get("semantic_goal_impact_count"):
+            signals.append(
+                {
+                    "key": "semantic_goal_impact",
+                    "title": "目标推进语义",
+                    "message": f"{factors['semantic_goal_impact_count']} 个任务被语义信号标记为能带来中高目标推进。",
+                    "signal": "positive",
+                    "score": factors["semantic_goal_impact_count"],
+                }
+            )
         if factors["minimum_viable_progress_count"]:
             signals.append(
                 {
@@ -3183,6 +3264,7 @@ class PlanningService:
             "user_adjusted_count": int(score_factors.get("user_adjusted_count", 0) or 0),
             "semantic_signal_count": int(score_factors.get("semantic_signal_count", 0) or 0),
             "semantic_protected_count": int(score_factors.get("semantic_protected_count", 0) or 0),
+            "semantic_goal_impact_count": int(score_factors.get("semantic_goal_impact_count", 0) or 0),
             "minimum_viable_progress_count": int(score_factors.get("minimum_viable_progress_count", 0) or 0),
             "execution_feedback_count": int(score_factors.get("execution_feedback_count", 0) or 0),
             "personalization_signal_count": int(score_factors.get("personalization_signal_count", 0) or 0),
@@ -3233,6 +3315,8 @@ class PlanningService:
             explanation.append(f"{factors['user_adjusted_count']} 个任务读取了你的优先级修正，让 AI 判断保持可校正。")
         if factors["semantic_signal_count"]:
             explanation.append(f"{factors['semantic_signal_count']} 个任务读取了语义规划信号，用来理解目标对齐、复杂度和最小推进动作。")
+        if factors.get("semantic_goal_impact_count"):
+            explanation.append(f"{factors['semantic_goal_impact_count']} 个任务有中高目标推进语义，Planning Engine 会把它们作为 objective 输入，而不是让 LLM 直接排序。")
         if factors["minimum_viable_progress_count"]:
             explanation.append(f"{factors['minimum_viable_progress_count']} 个高价值大任务只安排最小推进动作，避免 Today 变成不可执行清单。")
         if factors["execution_feedback_count"]:
@@ -3556,13 +3640,14 @@ class PlanningService:
             )
 
         if score_breakdown.get("minimum_viable_progress_applied"):
+            planned_minutes = score_breakdown.get("planned_duration_min")
             signals.append(
                 {
                     "key": "minimum_viable_progress",
                     "title": "最小推进动作",
-                    "message": "任务本身偏大，Today 只保护一个今天做得出来的推进切片。",
+                    "message": f"任务本身偏大，Today 只保护约 {planned_minutes} 分钟内做得出来的推进切片。",
                     "signal": "positive",
-                    "score": score_breakdown.get("planned_duration_min"),
+                    "score": planned_minutes,
                 }
             )
 
@@ -3613,9 +3698,14 @@ class PlanningService:
         semantic_total_score = int(score_breakdown.get("semantic_total_score") or 0)
         if score_breakdown.get("semantic_signal_applied") and semantic_total_score > 0:
             minimum_step = score_breakdown.get("semantic_minimum_viable_step")
-            message = "语义信号认为它和目标推进、复杂度或阻塞风险相关，因此会影响今日排序。"
+            goal_reason = score_breakdown.get("semantic_goal_relevance_reason")
+            message = goal_reason or "语义信号认为它和目标推进、复杂度或阻塞风险相关，因此会影响今日排序。"
             if minimum_step:
-                message = f"语义信号建议先推进最小动作：{minimum_step}"
+                minutes = score_breakdown.get("semantic_minimum_viable_minutes")
+                if minutes:
+                    message = f"语义信号建议先用约 {minutes} 分钟推进最小动作：{minimum_step}"
+                else:
+                    message = f"语义信号建议先推进最小动作：{minimum_step}"
             signals.append(
                 {
                     "key": "semantic_planning",

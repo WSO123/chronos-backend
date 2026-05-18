@@ -28,7 +28,7 @@ from tests.factories import create_user
 
 
 PLAN_DATE = date(2026, 5, 17)
-EVALUATOR_VERSION = "p2-planning-engine-eval-v8"
+EVALUATOR_VERSION = "p2-planning-engine-eval-v9"
 
 
 @dataclass(frozen=True)
@@ -54,6 +54,7 @@ def run_evaluation(*, run_id: str | None = None) -> dict:
         _scenario_overdue_goal_recovery_promotes_next_task,
         _scenario_goal_progress_strategy_closes_near_done_goal,
         _scenario_semantic_history_personalizes_duration,
+        _scenario_semantic_coverage_v2_guides_minimum_goal_action,
         _scenario_planner_feedback_preference_explained_without_reordering,
     ]
     results = [scenario() for scenario in scenarios]
@@ -876,6 +877,104 @@ def _scenario_semantic_history_personalizes_duration() -> ScenarioResult:
         db.close()
 
 
+def _scenario_semantic_coverage_v2_guides_minimum_goal_action() -> ScenarioResult:
+    db = _fresh_db()
+    try:
+        user = create_user(db, name="Planner Eval Semantic Coverage")
+        goal = goal_service.create_goal(
+            db,
+            user_id=user.id,
+            title="Make Planning Engine goal-aware",
+            deadline=PLAN_DATE + timedelta(days=14),
+            value_level=ValueLevel.HIGH,
+        )
+        task = task_service.create_task(
+            db,
+            user_id=user.id,
+            goal_id=goal.id,
+            title="Implement semantic planning coverage v2",
+            estimated_duration_min=180,
+            priority=4,
+            value_level=ValueLevel.MEDIUM,
+        )
+        signal = TaskPlanningSignal(
+            user_id=user.id,
+            task_id=task.id,
+            source="ai",
+            task_type="coding",
+            complexity="high",
+            cognitive_load="high",
+            energy_fit="high_energy",
+            blocking_risk="high",
+            estimated_duration_min=160,
+            duration_confidence=0.82,
+            goal_alignment_score=0.96,
+            semantic_priority_score=0.91,
+            breakdown_recommended=True,
+            minimum_viable_step="完成语义字段到 Planning Engine 的最小接入",
+            semantic_summary="该任务直接推进高价值目标，适合先切一个可验证动作。",
+            confidence=0.88,
+            raw_payload={
+                "semantic_schema_version": "task-semantic-planning-v2",
+                "complexity_reason": "需要设计、实现并验证核心编排信号。",
+                "duration_reason": "完整实现偏大，但可以先切出一个 30 分钟的可验证动作。",
+                "goal_progress_impact": "large",
+                "goal_relevance_reason": "该任务直接决定高价值目标是否能进入可用闭环。",
+                "minimum_viable_minutes": 30,
+            },
+        )
+        db.add(signal)
+        db.commit()
+
+        today = planning_service.get_today(db, user_id=user.id, plan_date=PLAN_DATE)
+        strategy = planning_service.get_strategy_detail(db, user_id=user.id, plan_date=PLAN_DATE)
+        item = _find_item(today, task.id)
+        failures = _check_all(
+            (
+                "semantic coverage v2 is preserved",
+                bool(item) and item["score_breakdown"].get("semantic_schema_version") == "task-semantic-planning-v2",
+            ),
+            (
+                "minimum viable minutes drive planned slice",
+                bool(item) and item["estimated_duration_min"] == 30,
+            ),
+            (
+                "large goal impact is scored",
+                bool(item) and item["score_breakdown"].get("semantic_goal_progress_impact_score") == 12,
+            ),
+            (
+                "goal relevance reason is visible",
+                bool(item) and bool(item["score_breakdown"].get("semantic_goal_relevance_reason")),
+            ),
+            (
+                "objective consumes semantic component",
+                bool(item) and item["score_breakdown"].get("planning_objective_semantic_component", 0) >= 40,
+            ),
+            (
+                "strategy exposes semantic goal impact count",
+                strategy["factors"].get("semantic_goal_impact_count") == 1,
+            ),
+            (
+                "semantic planning rationale remains visible",
+                bool(item) and "semantic_planning" in [
+                    signal["key"]
+                    for signal in next(
+                        rationale for rationale in strategy["task_rationales"] if rationale["task_id"] == task.id
+                    )["score_signals"]
+                ],
+            ),
+        )
+        failures += _explainability_failures(strategy)
+        return ScenarioResult(
+            name="semantic_coverage_v2_guides_minimum_goal_action",
+            passed=not failures,
+            details=_details(db=db, today=today, strategy=strategy),
+            failures=failures,
+        )
+    finally:
+        db.close()
+
+
 def _scenario_planner_feedback_preference_explained_without_reordering() -> ScenarioResult:
     db = _fresh_db()
     try:
@@ -1061,6 +1160,7 @@ def _details(*, db, today: dict, strategy: dict) -> dict:
         "rolled_over_estimated_minutes": strategy["factors"]["rolled_over_estimated_minutes"],
         "over_capacity_minutes": strategy["factors"]["over_capacity_minutes"],
         "energy_applied": strategy["factors"]["energy_applied"],
+        "semantic_goal_impact_count": strategy["factors"].get("semantic_goal_impact_count"),
         "planning_objective_applied": strategy["factors"].get("planning_objective_applied"),
         "planning_objective_version": strategy["factors"].get("planning_objective_version"),
         "objective_selected_score": strategy["factors"].get("objective_selected_score"),
@@ -1108,6 +1208,12 @@ def _item_signals(items: list[dict]) -> list[dict]:
             "personalization_sample_count": item["score_breakdown"].get("personalization_sample_count"),
             "dependency_score": item["score_breakdown"].get("dependency_score"),
             "user_preference_score": item["score_breakdown"].get("user_preference_score"),
+            "semantic_schema_version": item["score_breakdown"].get("semantic_schema_version"),
+            "semantic_goal_progress_impact": item["score_breakdown"].get("semantic_goal_progress_impact"),
+            "semantic_goal_progress_impact_score": item["score_breakdown"].get(
+                "semantic_goal_progress_impact_score"
+            ),
+            "semantic_minimum_viable_minutes": item["score_breakdown"].get("semantic_minimum_viable_minutes"),
             "planning_objective_score": item["score_breakdown"].get("planning_objective_score"),
             "planning_objective_selected": item["score_breakdown"].get("planning_objective_selected"),
             "planning_objective_reason_key": item["score_breakdown"].get("planning_objective_reason_key"),

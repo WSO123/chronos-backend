@@ -169,21 +169,36 @@ class TaskPlanningSignalService:
             "task_id": signal.task_id,
             "ai_job_id": signal.ai_job_id,
             "source": signal.source,
+            "semantic_schema_version": self._raw_payload_value(
+                signal,
+                "semantic_schema_version",
+                default="task-semantic-planning-v1",
+            ),
             "task_type": signal.task_type,
             "complexity": signal.complexity,
+            "complexity_reason": self._raw_payload_value(signal, "complexity_reason", default=""),
             "cognitive_load": signal.cognitive_load,
             "energy_fit": signal.energy_fit,
             "blocking_risk": signal.blocking_risk,
             "estimated_duration_min": signal.estimated_duration_min,
             "duration_confidence": signal.duration_confidence,
+            "duration_reason": self._raw_payload_value(signal, "duration_reason", default=""),
             "goal_alignment_score": signal.goal_alignment_score,
+            "goal_progress_impact": self._raw_payload_value(signal, "goal_progress_impact", default="small"),
+            "goal_relevance_reason": self._raw_payload_value(signal, "goal_relevance_reason", default=""),
             "semantic_priority_score": signal.semantic_priority_score,
             "breakdown_recommended": signal.breakdown_recommended,
             "minimum_viable_step": signal.minimum_viable_step,
+            "minimum_viable_minutes": self._raw_payload_value(signal, "minimum_viable_minutes"),
             "semantic_summary": signal.semantic_summary,
             "confidence": signal.confidence,
             "created_at": signal.created_at,
         }
+
+    def _raw_payload_value(self, signal: TaskPlanningSignal, key: str, *, default=None):
+        payload = signal.raw_payload or {}
+        value = payload.get(key, default)
+        return default if value == "" and default is not None else value
 
     def ai_job_summary(self, job: AIJob) -> dict:
         return {
@@ -237,7 +252,13 @@ class TaskPlanningSignalService:
 
     def _clean_output(self, output: TaskSemanticPlanningOutput) -> TaskSemanticPlanningOutput:
         payload = output.model_dump()
+        payload["semantic_schema_version"] = " ".join(payload["semantic_schema_version"].strip().split())[:64]
+        if not payload["semantic_schema_version"]:
+            payload["semantic_schema_version"] = "task-semantic-planning-v2"
         payload["task_type"] = " ".join(payload["task_type"].strip().split())[:64] or "general"
+        payload["complexity_reason"] = " ".join(payload["complexity_reason"].strip().split())[:255]
+        payload["duration_reason"] = " ".join(payload["duration_reason"].strip().split())[:255]
+        payload["goal_relevance_reason"] = " ".join(payload["goal_relevance_reason"].strip().split())[:255]
         if payload["minimum_viable_step"] is not None:
             payload["minimum_viable_step"] = " ".join(payload["minimum_viable_step"].strip().split())[:255] or None
         payload["semantic_summary"] = " ".join(payload["semantic_summary"].strip().split())[:500]
@@ -320,17 +341,27 @@ class TaskPlanningSignalService:
         )
         blocking_risk = self._fallback_blocking_risk(task, dependency_counts=dependencies)
         return {
+            "semantic_schema_version": "task-semantic-planning-v2",
             "task_type": self._fallback_task_type(task),
             "complexity": complexity,
+            "complexity_reason": self._complexity_reason(task, complexity=complexity),
             "cognitive_load": cognitive_load,
             "energy_fit": self._fallback_energy_fit(complexity=complexity, cognitive_load=cognitive_load),
             "blocking_risk": blocking_risk,
             "estimated_duration_min": estimated_duration_min,
             "duration_confidence": 0.78 if task.estimated_duration_min else 0.56,
+            "duration_reason": self._duration_reason(task, estimated_duration_min=estimated_duration_min),
             "goal_alignment_score": goal_alignment_score,
+            "goal_progress_impact": self._goal_progress_impact(task, goal_alignment_score=goal_alignment_score),
+            "goal_relevance_reason": self._goal_relevance_reason(task, goal_alignment_score=goal_alignment_score),
             "semantic_priority_score": semantic_priority_score,
             "breakdown_recommended": estimated_duration_min >= 45 or complexity == "high",
             "minimum_viable_step": self._minimum_viable_step(task),
+            "minimum_viable_minutes": self._minimum_viable_minutes(
+                task,
+                estimated_duration_min=estimated_duration_min,
+                complexity=complexity,
+            ),
             "semantic_summary": self._semantic_summary(
                 task,
                 complexity=complexity,
@@ -379,6 +410,13 @@ class TaskPlanningSignalService:
             return "low"
         return "medium"
 
+    def _complexity_reason(self, task: Task, *, complexity: str) -> str:
+        if complexity == "high":
+            return "任务需要较多判断、产出或系统性推进。"
+        if complexity == "low":
+            return "任务边界清楚，适合作为轻量执行动作。"
+        return "任务需要一定专注，但可以按一个清晰步骤推进。"
+
     def _fallback_cognitive_load(self, task: Task, *, complexity: str) -> str:
         if task.value_level == ValueLevel.HIGH or complexity == "high":
             return "high"
@@ -388,6 +426,11 @@ class TaskPlanningSignalService:
 
     def _fallback_duration(self, *, complexity: str) -> int:
         return {"low": 25, "medium": 35, "high": 60}[complexity]
+
+    def _duration_reason(self, task: Task, *, estimated_duration_min: int) -> str:
+        if task.estimated_duration_min:
+            return "优先尊重用户已有估时，并结合语义复杂度校准。"
+        return f"根据任务复杂度和上下文，给出约 {estimated_duration_min} 分钟的语义估时。"
 
     def _fallback_goal_alignment(self, task: Task) -> float:
         if task.goal is None:
@@ -443,6 +486,28 @@ class TaskPlanningSignalService:
             return "medium"
         return "low"
 
+    def _goal_progress_impact(self, task: Task, *, goal_alignment_score: float) -> str:
+        if task.goal is None:
+            return "small" if task.value_level == ValueLevel.HIGH else "none"
+        if task.goal.value_level == ValueLevel.HIGH and goal_alignment_score >= 0.8:
+            return "large"
+        if goal_alignment_score >= 0.65:
+            return "medium"
+        if goal_alignment_score >= 0.4:
+            return "small"
+        return "none"
+
+    def _goal_relevance_reason(self, task: Task, *, goal_alignment_score: float) -> str:
+        if task.goal is None:
+            if task.value_level == ValueLevel.HIGH:
+                return "任务本身价值较高，但尚未关联到明确目标。"
+            return "任务未关联目标，对长期目标推进影响有限。"
+        if goal_alignment_score >= 0.8:
+            return "任务直接服务于当前高价值目标，是目标推进链路中的关键一步。"
+        if goal_alignment_score >= 0.6:
+            return "任务能支持目标推进，但不是唯一关键路径。"
+        return "任务与目标有弱关联，更适合在容量充足时安排。"
+
     def _fallback_energy_fit(self, *, complexity: str, cognitive_load: str) -> str:
         if complexity == "high" or cognitive_load == "high":
             return "high_energy"
@@ -458,6 +523,15 @@ class TaskPlanningSignalService:
         if incomplete_steps:
             return incomplete_steps[0].title[:255]
         return f"先完成一个可验证的小结果：{task.title}"[:255]
+
+    def _minimum_viable_minutes(self, task: Task, *, estimated_duration_min: int, complexity: str) -> int | None:
+        if estimated_duration_min <= 35 and complexity != "high":
+            return None
+        if task.steps:
+            return min(45, max(15, estimated_duration_min // 3))
+        if complexity == "high":
+            return min(45, max(25, estimated_duration_min // 3))
+        return min(35, max(15, estimated_duration_min // 2))
 
     def _semantic_summary(
         self,

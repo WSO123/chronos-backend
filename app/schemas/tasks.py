@@ -127,17 +127,23 @@ class TaskPlanningSignalResponse(BaseModel):
     task_id: uuid.UUID
     ai_job_id: uuid.UUID | None
     source: str
+    semantic_schema_version: str = "task-semantic-planning-v1"
     task_type: str
     complexity: str
+    complexity_reason: str = ""
     cognitive_load: str
     energy_fit: str
     blocking_risk: str
     estimated_duration_min: int | None
     duration_confidence: float
+    duration_reason: str = ""
     goal_alignment_score: float
+    goal_progress_impact: str = "small"
+    goal_relevance_reason: str = ""
     semantic_priority_score: float
     breakdown_recommended: bool
     minimum_viable_step: str | None
+    minimum_viable_minutes: int | None = None
     semantic_summary: str
     confidence: float
     created_at: datetime

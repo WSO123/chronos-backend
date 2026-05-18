@@ -1223,6 +1223,69 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["factors"]["selected_estimated_minutes"], 125)
         self.assertEqual(strategy["task_rationales"][0]["dominant_factor"], "minimum_viable_progress")
 
+    def test_planning_engine_consumes_semantic_coverage_v2_for_goal_impact_and_minimum_minutes(self):
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="High value semantic coverage goal",
+            value_level=ValueLevel.HIGH,
+        )
+        task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="实现核心编排算法的完整方案",
+            estimated_duration_min=180,
+            priority=4,
+            value_level=ValueLevel.MEDIUM,
+        )
+        signal = TaskPlanningSignal(
+            user_id=self.user.id,
+            task_id=task.id,
+            source="ai",
+            task_type="coding",
+            complexity="high",
+            cognitive_load="high",
+            energy_fit="high_energy",
+            blocking_risk="high",
+            estimated_duration_min=160,
+            duration_confidence=0.82,
+            goal_alignment_score=0.96,
+            semantic_priority_score=0.91,
+            breakdown_recommended=True,
+            minimum_viable_step="完成 objective 选择逻辑的最小可验证版本",
+            semantic_summary="该任务直接推进高价值目标，适合先做一个可验证切片。",
+            confidence=0.88,
+            raw_payload={
+                "semantic_schema_version": "task-semantic-planning-v2",
+                "complexity_reason": "需要设计、实现并验证核心编排逻辑。",
+                "duration_reason": "完整实现偏大，但可以先切出一个 30 分钟的可验证动作。",
+                "goal_progress_impact": "large",
+                "goal_relevance_reason": "该任务直接决定高价值目标是否能进入可用闭环。",
+                "minimum_viable_minutes": 30,
+            },
+        )
+        self.db.add(signal)
+        self.db.commit()
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        item = today["sections"]["pinned_tasks"][0]
+
+        self.assertEqual(item["task_id"], task.id)
+        self.assertEqual(item["estimated_duration_min"], 30)
+        self.assertEqual(item["score_breakdown"]["semantic_schema_version"], "task-semantic-planning-v2")
+        self.assertEqual(item["score_breakdown"]["semantic_minimum_viable_minutes"], 30)
+        self.assertEqual(item["score_breakdown"]["semantic_goal_progress_impact"], "large")
+        self.assertEqual(item["score_breakdown"]["semantic_goal_progress_impact_score"], 12)
+        self.assertIn("高价值目标", item["score_breakdown"]["semantic_goal_relevance_reason"])
+        self.assertTrue(item["score_breakdown"]["minimum_viable_progress_applied"])
+        self.assertGreaterEqual(item["score_breakdown"]["planning_objective_semantic_component"], 40)
+        self.assertEqual(strategy["factors"]["semantic_goal_impact_count"], 1)
+        first_rationale = strategy["task_rationales"][0]
+        semantic_signal = next(signal for signal in first_rationale["score_signals"] if signal["key"] == "semantic_planning")
+        self.assertIn("30", semantic_signal["message"])
+
     def test_planning_engine_uses_personalization_from_semantic_task_history(self):
         history_one = task_service.create_task(
             self.db,
