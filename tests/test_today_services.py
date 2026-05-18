@@ -1367,6 +1367,89 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(current_rationale["dominant_factor"], "personalization_signal")
         self.assertIn("平均比估时多约 25 分钟", current_rationale["dominant_reason"])
 
+    def test_planning_engine_uses_focus_execution_learning_for_semantic_task_type(self):
+        for index, actual_minutes in enumerate([62, 55], start=1):
+            history_task = task_service.create_task(
+                self.db,
+                user_id=self.user.id,
+                title=f"Write historical focus note {index}",
+                estimated_duration_min=30,
+                priority=3,
+                value_level=ValueLevel.MEDIUM,
+            )
+            task_service.complete_task(
+                self.db,
+                task_id=history_task.id,
+                user_id=self.user.id,
+                actual_duration_min_delta=actual_minutes,
+            )
+            self._add_task_signal(history_task, task_type="writing", estimated_duration_min=30)
+            self.db.add(
+                ActivityEvent(
+                    user_id=self.user.id,
+                    entity_type=EntityType.FOCUS_SESSION,
+                    entity_id=uuid.uuid4(),
+                    event_type="EXECUTION_LEARNING_OBSERVED",
+                    related_task_id=history_task.id,
+                    payload={
+                        "version": "p2-execution-learning-v2",
+                        "source": "focus_session",
+                        "outcome": "completed",
+                        "planned_duration_min": 30,
+                        "actual_duration_min": actual_minutes,
+                        "duration_delta_min": actual_minutes - 30,
+                    },
+                )
+            )
+        self.db.commit()
+        current_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Write current focus-calibrated memo",
+            estimated_duration_min=30,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        self._add_task_signal(current_task, task_type="writing", estimated_duration_min=30)
+
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        current_item = next(
+            item
+            for item in [
+                *today["sections"]["pinned_tasks"],
+                *today["sections"]["recommended_tasks"],
+                *today["sections"]["low_priority_tasks"],
+                *today["sections"]["rolled_over_tasks"],
+            ]
+            if item["task_id"] == current_task.id
+        )
+
+        self.assertTrue(current_item["score_breakdown"]["execution_learning_applied"])
+        self.assertEqual(current_item["score_breakdown"]["execution_learning_version"], "p2-execution-learning-v2")
+        self.assertEqual(current_item["score_breakdown"]["execution_learning_signal"], "duration_overrun_risk")
+        self.assertEqual(current_item["score_breakdown"]["execution_learning_focus_sample_count"], 2)
+        self.assertEqual(current_item["score_breakdown"]["execution_learning_focus_overrun_rate"], 1.0)
+        self.assertLess(current_item["score_breakdown"]["execution_learning_score_adjustment"], 0)
+        self.assertLess(
+            current_item["score_breakdown"]["planning_objective_execution_learning_component"],
+            0,
+        )
+        learning_contract = current_item["score_breakdown"]["execution_learning_contract"]
+        self.assertEqual(learning_contract["version"], "p2-execution-learning-contract-v1")
+        self.assertFalse(learning_contract["task_mutation_allowed"])
+        self.assertIn("planning_objective_score", learning_contract["can_affect"])
+        self.assertIn("task_estimated_duration_min", learning_contract["cannot_affect"])
+        self.assertIn("llm_direct_sort_order", learning_contract["cannot_affect"])
+        self.assertEqual(strategy["factors"]["execution_learning_signal_count"], 1)
+        self.assertEqual(strategy["factors"]["execution_learning_friction_risk_count"], 1)
+        self.assertEqual(strategy["factors"]["execution_learning_momentum_count"], 0)
+        current_rationale = next(
+            rationale for rationale in strategy["task_rationales"] if rationale["task_id"] == current_task.id
+        )
+        self.assertEqual(current_rationale["dominant_factor"], "execution_learning")
+        self.assertIn("Focus 平均比计划多约", current_rationale["dominant_reason"])
+
     def test_planning_engine_protects_next_action_for_each_high_value_goal(self):
         launch_goal = goal_service.create_goal(
             self.db,

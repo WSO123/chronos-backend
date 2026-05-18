@@ -28,7 +28,7 @@ from tests.factories import create_user
 
 
 PLAN_DATE = date(2026, 5, 17)
-EVALUATOR_VERSION = "p2-planning-engine-eval-v9"
+EVALUATOR_VERSION = "p2-planning-engine-eval-v10"
 
 
 @dataclass(frozen=True)
@@ -54,6 +54,7 @@ def run_evaluation(*, run_id: str | None = None) -> dict:
         _scenario_overdue_goal_recovery_promotes_next_task,
         _scenario_goal_progress_strategy_closes_near_done_goal,
         _scenario_semantic_history_personalizes_duration,
+        _scenario_execution_learning_calibrates_focus_history,
         _scenario_semantic_coverage_v2_guides_minimum_goal_action,
         _scenario_planner_feedback_preference_explained_without_reordering,
     ]
@@ -877,6 +878,120 @@ def _scenario_semantic_history_personalizes_duration() -> ScenarioResult:
         db.close()
 
 
+def _scenario_execution_learning_calibrates_focus_history() -> ScenarioResult:
+    db = _fresh_db()
+    try:
+        user = create_user(db, name="Planner Eval Execution Learning")
+        for index, actual_minutes in enumerate([64, 58], start=1):
+            history_task = task_service.create_task(
+                db,
+                user_id=user.id,
+                title=f"Write previous focus memo {index}",
+                estimated_duration_min=30,
+                priority=3,
+                value_level=ValueLevel.MEDIUM,
+            )
+            task_service.complete_task(
+                db,
+                task_id=history_task.id,
+                user_id=user.id,
+                actual_duration_min_delta=actual_minutes,
+            )
+            _add_task_signal(db, user_id=user.id, task=history_task, task_type="writing", estimated_duration_min=30)
+            db.add(
+                ActivityEvent(
+                    user_id=user.id,
+                    entity_type=EntityType.FOCUS_SESSION,
+                    entity_id=uuid.uuid4(),
+                    event_type="EXECUTION_LEARNING_OBSERVED",
+                    related_task_id=history_task.id,
+                    payload={
+                        "version": "p2-execution-learning-v2",
+                        "source": "focus_session",
+                        "outcome": "completed",
+                        "planned_duration_min": 30,
+                        "actual_duration_min": actual_minutes,
+                        "duration_delta_min": actual_minutes - 30,
+                    },
+                )
+            )
+        db.commit()
+        current_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Write current focus-calibrated memo",
+            estimated_duration_min=30,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        _add_task_signal(db, user_id=user.id, task=current_task, task_type="writing", estimated_duration_min=30)
+
+        today = planning_service.get_today(db, user_id=user.id, plan_date=PLAN_DATE)
+        strategy = planning_service.get_strategy_detail(db, user_id=user.id, plan_date=PLAN_DATE)
+        current_item = _find_item(today, current_task.id)
+        current_rationale = next(
+            (item for item in strategy["task_rationales"] if item["task_id"] == current_task.id),
+            None,
+        )
+        failures = _check_all(
+            (
+                "execution learning signal is applied",
+                bool(current_item) and current_item["score_breakdown"].get("execution_learning_applied") is True,
+            ),
+            (
+                "execution learning preserves v2 version",
+                bool(current_item)
+                and current_item["score_breakdown"].get("execution_learning_version") == "p2-execution-learning-v2",
+            ),
+            (
+                "focus sample count is preserved",
+                bool(current_item)
+                and current_item["score_breakdown"].get("execution_learning_focus_sample_count") == 2,
+            ),
+            (
+                "focus overrun risk is explicit",
+                bool(current_item)
+                and current_item["score_breakdown"].get("execution_learning_signal") == "duration_overrun_risk",
+            ),
+            (
+                "objective receives execution learning component",
+                bool(current_item)
+                and current_item["score_breakdown"].get("planning_objective_execution_learning_component", 0) < 0,
+            ),
+            (
+                "strategy exposes execution learning count",
+                strategy["factors"].get("execution_learning_signal_count") == 1,
+            ),
+            (
+                "task rationale explains execution learning",
+                bool(current_rationale)
+                and "execution_learning"
+                in [signal["key"] for signal in current_rationale["score_signals"]],
+            ),
+            (
+                "execution learning forbids direct LLM sorting",
+                bool(current_item)
+                and "llm_direct_sort_order"
+                in (
+                    (
+                        current_item["score_breakdown"].get("execution_learning_contract")
+                        or {}
+                    ).get("cannot_affect")
+                    or []
+                ),
+            ),
+        )
+        failures += _explainability_failures(strategy)
+        return ScenarioResult(
+            name="execution_learning_calibrates_focus_history",
+            passed=not failures,
+            details=_details(db=db, today=today, strategy=strategy),
+            failures=failures,
+        )
+    finally:
+        db.close()
+
+
 def _scenario_semantic_coverage_v2_guides_minimum_goal_action() -> ScenarioResult:
     db = _fresh_db()
     try:
@@ -1161,6 +1276,11 @@ def _details(*, db, today: dict, strategy: dict) -> dict:
         "over_capacity_minutes": strategy["factors"]["over_capacity_minutes"],
         "energy_applied": strategy["factors"]["energy_applied"],
         "semantic_goal_impact_count": strategy["factors"].get("semantic_goal_impact_count"),
+        "execution_learning_signal_count": strategy["factors"].get("execution_learning_signal_count"),
+        "execution_learning_friction_risk_count": strategy["factors"].get(
+            "execution_learning_friction_risk_count"
+        ),
+        "execution_learning_momentum_count": strategy["factors"].get("execution_learning_momentum_count"),
         "planning_objective_applied": strategy["factors"].get("planning_objective_applied"),
         "planning_objective_version": strategy["factors"].get("planning_objective_version"),
         "objective_selected_score": strategy["factors"].get("objective_selected_score"),
@@ -1206,6 +1326,14 @@ def _item_signals(items: list[dict]) -> list[dict]:
             "behavior_feedback_score": item["score_breakdown"].get("behavior_feedback_score"),
             "personalization_score": item["score_breakdown"].get("personalization_score"),
             "personalization_sample_count": item["score_breakdown"].get("personalization_sample_count"),
+            "execution_learning_applied": item["score_breakdown"].get("execution_learning_applied"),
+            "execution_learning_signal": item["score_breakdown"].get("execution_learning_signal"),
+            "execution_learning_focus_sample_count": item["score_breakdown"].get(
+                "execution_learning_focus_sample_count"
+            ),
+            "planning_objective_execution_learning_component": item["score_breakdown"].get(
+                "planning_objective_execution_learning_component"
+            ),
             "dependency_score": item["score_breakdown"].get("dependency_score"),
             "user_preference_score": item["score_breakdown"].get("user_preference_score"),
             "semantic_schema_version": item["score_breakdown"].get("semantic_schema_version"),

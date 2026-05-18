@@ -130,6 +130,9 @@ P2 新增字段：
   "minimum_viable_progress_count": 1,
   "execution_feedback_count": 1,
   "personalization_signal_count": 1,
+  "execution_learning_signal_count": 1,
+  "execution_learning_friction_risk_count": 1,
+  "execution_learning_momentum_count": 0,
   "energy_level": "unknown",
   "energy_applied": false,
   "planner_agent_latency_ms": 12,
@@ -150,6 +153,9 @@ P2 新增字段：
 - `minimum_viable_progress_count` 表示有多少大任务在 Today 中只保护“今天做得出来的最小推进动作”。
 - `execution_feedback_count` 表示有多少任务读取了真实执行时间，并用它校准今日剩余估时。
 - `personalization_signal_count` 表示有多少任务读取了同类任务历史执行画像，用于调整估时和排序力度；它来自确定性聚合，不是 LLM 直接排序。
+- `execution_learning_signal_count` 表示有多少任务读取了历史 Focus 结果，用于识别同类任务的执行阻力或完成势能。
+- `execution_learning_friction_risk_count` 表示其中多少任务存在中断、延后或超时风险；这只影响本轮 planning objective 和解释，不会修改 Task 本体。
+- `execution_learning_momentum_count` 表示其中多少任务有稳定完成势能；这会帮助 Today 保留顺手推进机会。
 - `base_capacity_minutes` 是用户偏好或手动输入形成的基础容量。
 - `daily_capacity_minutes` 是 Planning Engine 的当日容量参考，不是严格日历时间块。
 - `capacity_source` 当前可能是 `planning_preference`、`manual_today_override` 或 `energy_adjusted`。
@@ -332,6 +338,7 @@ Response：
 - `goal_progress_*` 字段来自 Goal 下任务的确定性聚合，用于解释系统如何保护“更接近目标完成”的下一步；它不新增 Goal 页面复杂度。
 - `semantic_*` 字段来自 TaskPlanningSignal，只表示 Planning Engine 读取到语义信号；它不是 LLM 直接改排序。
 - `personalization_*` 字段来自同类 TaskPlanningSignal 历史任务的执行结果，用于解释“系统如何逐渐理解这个用户的真实执行节奏”；它不直接修改 Task 本体。
+- `execution_learning_*` 字段来自确认过的 Focus 结果和同类任务历史，用于解释“系统如何从真实执行中学习”；它可影响本轮估时、`planning_objective_score` 和解释，但不能修改 Task 原始估时、状态、Goal 状态或让 LLM 直接排序。
 - `base_estimated_duration_min` 是任务原始 / 语义估时，`personalized_estimated_duration_min` 是结合个人历史执行画像后的本轮估时，`remaining_estimated_duration_min` 是结合 Focus 实际投入后的剩余估时，`original_estimated_duration_min` 是最小推进切片前的本轮估时。
 - `capacity_source=manual_today_override` 时，说明本轮 Today 是按用户手动设置的 `available_minutes` 编排；这只影响今日容量，不会修改 Task 原始估时。
 - 当 `minimum_viable_progress_applied=true` 时，Today item 代表“今日最小推进切片”，不是整个 Task；完成该 item 后后端会记录 Task partial progress，Task 仍保持 active。

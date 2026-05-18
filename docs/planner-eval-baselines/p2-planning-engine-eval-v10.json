@@ -1,6 +1,6 @@
 {
-  "policy_version": "p2-planner-eval-policy-v6",
-  "evaluator_version": "p2-planning-engine-eval-v9",
+  "policy_version": "p2-planner-eval-policy-v7",
+  "evaluator_version": "p2-planning-engine-eval-v10",
   "status": "active",
   "required_run_status": "ok",
   "exact_scenario_set": true,
@@ -15,6 +15,7 @@
     "over_capacity_minutes",
     "energy_applied",
     "semantic_goal_impact_count",
+    "execution_learning_signal_count",
     "planning_objective_applied",
     "planning_objective_version",
     "objective_selected_score",
@@ -41,6 +42,9 @@
     "behavior_feedback_score",
     "personalization_score",
     "personalization_sample_count",
+    "execution_learning_applied",
+    "execution_learning_signal",
+    "execution_learning_focus_sample_count",
     "dependency_score",
     "user_preference_score",
     "semantic_schema_version",
@@ -50,6 +54,7 @@
     "planning_objective_score",
     "planning_objective_selected",
     "planning_objective_reason_key",
+    "planning_objective_execution_learning_component",
     "dominant_factor",
     "dominant_reason",
     "score_signal_keys"
@@ -126,6 +131,12 @@
       "must_pass": true,
       "critical": true,
       "intent": "Semantic task history changes today's duration estimate and explanation without letting LLM directly sort."
+    },
+    {
+      "name": "execution_learning_calibrates_focus_history",
+      "must_pass": true,
+      "critical": true,
+      "intent": "Confirmed Focus results become bounded planning calibration signals without mutating task estimates or letting LLM reorder."
     },
     {
       "name": "semantic_coverage_v2_guides_minimum_goal_action",

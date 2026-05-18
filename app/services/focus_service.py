@@ -149,6 +149,13 @@ class FocusService:
             event_type="FOCUS_SESSION_COMPLETED",
             actual_duration_min=actual_minutes,
         )
+        self._add_execution_learning_event(
+            db,
+            session=session,
+            user_id=user_id,
+            outcome="completed" if progress_delta is None else "partial_progress",
+            actual_duration_min=actual_minutes,
+        )
         db.commit()
         db.refresh(session)
         session.goal_progress_feedback = goal_progress_feedback
@@ -181,6 +188,14 @@ class FocusService:
             session=session,
             user_id=user_id,
             event_type="FOCUS_SESSION_INTERRUPTED",
+            actual_duration_min=actual_minutes,
+            payload={"interruption_reason": interruption_reason},
+        )
+        self._add_execution_learning_event(
+            db,
+            session=session,
+            user_id=user_id,
+            outcome="interrupted",
             actual_duration_min=actual_minutes,
             payload={"interruption_reason": interruption_reason},
         )
@@ -224,6 +239,14 @@ class FocusService:
             session=session,
             user_id=user_id,
             event_type="FOCUS_SESSION_POSTPONED",
+            actual_duration_min=actual_minutes,
+            payload={"interruption_reason": interruption_reason},
+        )
+        self._add_execution_learning_event(
+            db,
+            session=session,
+            user_id=user_id,
+            outcome="postponed",
             actual_duration_min=actual_minutes,
             payload={"interruption_reason": interruption_reason},
         )
@@ -349,6 +372,65 @@ class FocusService:
             related_focus_session_id=session.id,
             payload=event_payload,
         )
+
+    def _add_execution_learning_event(
+        self,
+        db: Session,
+        *,
+        session: FocusSession,
+        user_id: uuid.UUID,
+        outcome: str,
+        actual_duration_min: int,
+        payload: dict | None = None,
+    ) -> None:
+        planned_minutes = session.planned_duration_min
+        event_payload = {
+            "version": "p2-execution-learning-v2",
+            "source": "focus_session",
+            "outcome": outcome,
+            "planned_duration_min": planned_minutes,
+            "actual_duration_min": actual_duration_min,
+            "duration_delta_min": (
+                actual_duration_min - planned_minutes if planned_minutes is not None else None
+            ),
+            "learning_contract": self._execution_learning_contract(),
+        }
+        if payload:
+            event_payload.update(payload)
+        activity_event_service.add_event(
+            db,
+            user_id=user_id,
+            entity_type=EntityType.FOCUS_SESSION,
+            entity_id=session.id,
+            event_type="EXECUTION_LEARNING_OBSERVED",
+            actor_type=ActorType.SYSTEM,
+            related_task_id=session.task_id,
+            related_daily_plan_id=session.daily_plan_id,
+            related_focus_session_id=session.id,
+            payload=event_payload,
+        )
+
+    def _execution_learning_contract(self) -> dict:
+        return {
+            "version": "p2-execution-learning-contract-v1",
+            "scope": "focus_result_to_planning_calibration",
+            "source_of_truth": "planning-engine-v1",
+            "can_affect": [
+                "today_item_estimated_duration_min",
+                "planning_objective_score",
+                "strategy_explanation",
+                "task_rationale_score_signals",
+            ],
+            "cannot_affect": [
+                "task_estimated_duration_min",
+                "task_status",
+                "goal_state",
+                "llm_direct_sort_order",
+            ],
+            "task_mutation_allowed": False,
+            "requires_confirmed_focus_result": True,
+            "explanation": "Focus 执行结果只用于后续计划校准和解释，不会覆盖任务原始估时或让 LLM 直接排序。",
+        }
 
 
 focus_service = FocusService()

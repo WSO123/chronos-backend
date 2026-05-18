@@ -14,7 +14,7 @@ class PlannerEvalPolicyTests(unittest.TestCase):
         policy = load_policy(DEFAULT_POLICY_PATH)
 
         self.assertEqual(policy["evaluator_version"], EVALUATOR_VERSION)
-        self.assertEqual(len(policy["required_scenarios"]), 14)
+        self.assertEqual(len(policy["required_scenarios"]), 15)
         self.assertTrue(policy["exact_scenario_set"])
 
     def test_policy_check_accepts_matching_run(self):
@@ -106,6 +106,7 @@ def _policy(*scenario_names: str) -> dict:
             "score_explanation_summary",
             "score_explanation_signal_keys",
             "semantic_goal_impact_count",
+            "execution_learning_signal_count",
             "planning_objective_applied",
             "planning_objective_version",
             "objective_selected_score",
@@ -123,6 +124,9 @@ def _policy(*scenario_names: str) -> dict:
             "behavior_feedback_score",
             "personalization_score",
             "personalization_sample_count",
+            "execution_learning_applied",
+            "execution_learning_signal",
+            "execution_learning_focus_sample_count",
             "dependency_score",
             "user_preference_score",
             "semantic_schema_version",
@@ -132,6 +136,7 @@ def _policy(*scenario_names: str) -> dict:
             "planning_objective_score",
             "planning_objective_selected",
             "planning_objective_reason_key",
+            "planning_objective_execution_learning_component",
             "dominant_factor",
             "dominant_reason",
             "score_signal_keys",
@@ -170,6 +175,7 @@ def _scenario(name: str, *, passed: bool = True) -> dict:
             "over_capacity_minutes": 0,
             "energy_applied": False,
             "semantic_goal_impact_count": 0,
+            "execution_learning_signal_count": 0,
             "planning_objective_applied": True,
             "planning_objective_version": "p2-planning-objective-v2",
             "objective_selected_score": 30,
@@ -195,6 +201,9 @@ def _scenario(name: str, *, passed: bool = True) -> dict:
                     "behavior_feedback_score": 0,
                     "personalization_score": 0,
                     "personalization_sample_count": 0,
+                    "execution_learning_applied": False,
+                    "execution_learning_signal": "insufficient_focus_history",
+                    "execution_learning_focus_sample_count": 0,
                     "dependency_score": 0,
                     "user_preference_score": 0,
                     "semantic_schema_version": None,
@@ -204,6 +213,7 @@ def _scenario(name: str, *, passed: bool = True) -> dict:
                     "planning_objective_score": 30,
                     "planning_objective_selected": True,
                     "planning_objective_reason_key": "balanced_capacity_fit",
+                    "planning_objective_execution_learning_component": 0,
                     "dominant_factor": "value",
                     "dominant_reason": "任务价值较高。",
                     "score_signal_keys": ["value"],

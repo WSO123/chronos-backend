@@ -57,10 +57,18 @@ class FocusServiceTests(unittest.TestCase):
         self.assertEqual(refreshed_today["sections"]["recommended_tasks"][0]["item_status"], DailyPlanItemStatus.COMPLETED)
         self.assertIn("FOCUS_SESSION_STARTED", {event.event_type for event in events})
         self.assertIn("FOCUS_SESSION_COMPLETED", {event.event_type for event in events})
+        self.assertIn("EXECUTION_LEARNING_OBSERVED", {event.event_type for event in events})
         self.assertIn("TASK_COMPLETED", {event.event_type for event in events})
         completed_event = next(event for event in events if event.event_type == "FOCUS_SESSION_COMPLETED")
         self.assertEqual(completed_event.payload["planned_duration_min"], 25)
         self.assertEqual(completed_event.payload["duration_delta_min"], -7)
+        learning_event = next(event for event in events if event.event_type == "EXECUTION_LEARNING_OBSERVED")
+        self.assertEqual(learning_event.payload["version"], "p2-execution-learning-v2")
+        self.assertEqual(learning_event.payload["outcome"], "completed")
+        self.assertEqual(learning_event.payload["planned_duration_min"], 25)
+        self.assertEqual(learning_event.payload["actual_duration_min"], 18)
+        self.assertFalse(learning_event.payload["learning_contract"]["task_mutation_allowed"])
+        self.assertIn("llm_direct_sort_order", learning_event.payload["learning_contract"]["cannot_affect"])
 
     def test_start_focus_without_item_auto_links_current_today_item(self):
         task = task_service.create_task(self.db, user_id=self.user.id, title="Auto link Today item")

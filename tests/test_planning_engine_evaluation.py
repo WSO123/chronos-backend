@@ -15,7 +15,7 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
         self.assertEqual(result["run_id"], "test-run")
         self.assertEqual(result["evaluator_version"], EVALUATOR_VERSION)
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["scenario_count"], 14)
+        self.assertEqual(result["scenario_count"], 15)
         self.assertEqual(result["failed_count"], 0)
         self.assertEqual(
             {scenario["name"] for scenario in result["scenarios"]},
@@ -32,6 +32,7 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
                 "overdue_goal_recovery_promotes_next_task",
                 "goal_progress_strategy_closes_near_done_goal",
                 "semantic_history_personalizes_duration",
+                "execution_learning_calibrates_focus_history",
                 "semantic_coverage_v2_guides_minimum_goal_action",
                 "planner_feedback_preference_explained_without_reordering",
             },
@@ -54,6 +55,8 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
                 self.assertIn("planning_objective_selected", item_signal)
                 self.assertIn("planning_objective_reason_key", item_signal)
                 self.assertIn("semantic_goal_progress_impact_score", item_signal)
+                self.assertIn("execution_learning_applied", item_signal)
+                self.assertIn("planning_objective_execution_learning_component", item_signal)
 
     def test_write_jsonl_result_outputs_summary_and_scenario_records(self):
         result = run_evaluation(run_id="jsonl-test-run")
@@ -65,14 +68,14 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
 
             records = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
 
-        self.assertEqual(len(records), 30)
+        self.assertEqual(len(records), 32)
         self.assertEqual(records[0]["record_type"], "run_summary")
         self.assertEqual(records[0]["run_id"], "jsonl-test-run")
         self.assertEqual(records[0]["status"], "ok")
-        self.assertEqual(records[15]["record_type"], "run_summary")
-        self.assertEqual({record["record_type"] for record in records[1:15]}, {"scenario_result"})
+        self.assertEqual(records[16]["record_type"], "run_summary")
+        self.assertEqual({record["record_type"] for record in records[1:16]}, {"scenario_result"})
         self.assertEqual(
-            {record["scenario_name"] for record in records[1:15]},
+            {record["scenario_name"] for record in records[1:16]},
             {
                 "capacity_rollover",
                 "capacity_objective_protects_goal_progress",
@@ -86,6 +89,7 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
                 "overdue_goal_recovery_promotes_next_task",
                 "goal_progress_strategy_closes_near_done_goal",
                 "semantic_history_personalizes_duration",
+                "execution_learning_calibrates_focus_history",
                 "semantic_coverage_v2_guides_minimum_goal_action",
                 "planner_feedback_preference_explained_without_reordering",
             },
@@ -98,6 +102,7 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
         self.assertIn("planning_objective_version", records[1]["details"])
         self.assertIn("planning_objective_score", records[1]["details"]["item_signals"][0])
         self.assertIn("semantic_goal_impact_count", records[1]["details"])
+        self.assertIn("execution_learning_signal_count", records[1]["details"])
 
     def test_cli_can_write_jsonl_output(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -120,7 +125,7 @@ class PlanningEngineEvaluationTests(unittest.TestCase):
 
         self.assertEqual(payload["run_id"], "cli-test-run")
         self.assertEqual(records[0]["run_id"], "cli-test-run")
-        self.assertEqual(len(records), 15)
+        self.assertEqual(len(records), 16)
 
 
 if __name__ == "__main__":

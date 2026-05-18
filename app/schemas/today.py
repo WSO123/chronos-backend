@@ -128,6 +128,9 @@ class StrategyDetailFactorsResponse(BaseModel):
     minimum_viable_progress_count: int = 0
     execution_feedback_count: int = 0
     personalization_signal_count: int = 0
+    execution_learning_signal_count: int = 0
+    execution_learning_friction_risk_count: int = 0
+    execution_learning_momentum_count: int = 0
     energy_level: str
     energy_applied: bool
     planner_agent_latency_ms: int | None = None

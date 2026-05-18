@@ -1790,6 +1790,10 @@ class PlanningService:
         energy_fit_score = max(0, int(score_breakdown.get("energy_fit_score") or 0))
         user_preference_score = max(0, int(score_breakdown.get("user_preference_score") or 0))
         personalization_score = max(0, int(score_breakdown.get("personalization_score") or 0))
+        execution_learning_adjustment = max(
+            -12,
+            min(8, int(score_breakdown.get("execution_learning_score_adjustment") or 0)),
+        )
         high_value_goal_bonus = 0
         if planned.task.goal is not None and planned.task.goal.value_level == ValueLevel.HIGH:
             high_value_goal_bonus = 18
@@ -1809,6 +1813,7 @@ class PlanningService:
             + semantic_goal_impact_score
         )
         user_signal_component = user_preference_score + personalization_score // 2
+        execution_learning_component = execution_learning_adjustment
         objective_score = int(
             value_score
             + priority_score
@@ -1819,6 +1824,7 @@ class PlanningService:
             + semantic_component
             + execution_fit_component
             + user_signal_component
+            + execution_learning_component
             + minimum_viable_bonus
         )
         capacity_cost = max(1, int(planned.estimated_duration_min))
@@ -1835,6 +1841,10 @@ class PlanningService:
             reason_key = "deadline_pressure"
         elif semantic_component > 0:
             reason_key = "semantic_goal_fit"
+        elif execution_learning_component > 0:
+            reason_key = "execution_momentum"
+        elif execution_learning_component < 0:
+            reason_key = "execution_friction"
 
         return {
             "planning_objective_applied": True,
@@ -1847,6 +1857,7 @@ class PlanningService:
             "planning_objective_semantic_component": semantic_component,
             "planning_objective_execution_fit_component": execution_fit_component,
             "planning_objective_user_signal_component": user_signal_component,
+            "planning_objective_execution_learning_component": execution_learning_component,
             "planning_objective_minimum_viable_bonus": minimum_viable_bonus,
             "planning_objective_high_value_goal_bonus": high_value_goal_bonus,
             "planning_objective_selected": False,
@@ -2288,6 +2299,21 @@ class PlanningService:
             elif event.event_type == "FOCUS_SESSION_INTERRUPTED":
                 counts["interrupted"] += 1
 
+        learning_events = list(
+            db.scalars(
+                select(ActivityEvent).where(
+                    ActivityEvent.user_id == user_id,
+                    ActivityEvent.related_task_id.in_(history_task_ids),
+                    ActivityEvent.event_type == "EXECUTION_LEARNING_OBSERVED",
+                )
+            ).all()
+        )
+        learning_events_by_task_id: dict[uuid.UUID, list[ActivityEvent]] = {}
+        for event in learning_events:
+            if event.related_task_id is None:
+                continue
+            learning_events_by_task_id.setdefault(event.related_task_id, []).append(event)
+
         stats_by_type: dict[str, dict] = {}
         for task in history_tasks:
             signal = latest_signal_by_task_id.get(task.id)
@@ -2312,6 +2338,11 @@ class PlanningService:
                 stats["actual_total_min"] += actual_minutes
                 if actual_minutes >= int(base_estimate * 1.25):
                     stats["overrun_count"] += 1
+            self._apply_execution_learning_events(
+                stats=stats,
+                events=learning_events_by_task_id.get(task.id, []),
+                fallback_planned_minutes=base_estimate,
+            )
 
         return {
             task_id: self._personalization_profile_for_signal(
@@ -2320,6 +2351,42 @@ class PlanningService:
             )
             for task_id, signal in semantic_by_task_id.items()
         }
+
+    def _apply_execution_learning_events(
+        self,
+        *,
+        stats: dict,
+        events: list[ActivityEvent],
+        fallback_planned_minutes: int,
+    ) -> None:
+        for event in events:
+            payload = event.payload or {}
+            if payload.get("version") != "p2-execution-learning-v2":
+                continue
+            outcome = str(payload.get("outcome") or "")
+            planned_minutes = self._positive_int(payload.get("planned_duration_min")) or fallback_planned_minutes
+            actual_minutes = self._positive_int(payload.get("actual_duration_min")) or 0
+            if actual_minutes <= 0:
+                continue
+            stats["focus_sample_count"] += 1
+            stats["focus_planned_total_min"] += max(0, planned_minutes)
+            stats["focus_actual_total_min"] += actual_minutes
+            stats["focus_duration_delta_total_min"] += actual_minutes - max(0, planned_minutes)
+            if planned_minutes > 0 and actual_minutes >= int(planned_minutes * 1.25):
+                stats["focus_overrun_count"] += 1
+            if outcome in {"completed", "partial_progress"}:
+                stats["focus_productive_count"] += 1
+            elif outcome == "interrupted":
+                stats["focus_interrupted_count"] += 1
+            elif outcome == "postponed":
+                stats["focus_postponed_count"] += 1
+
+    def _positive_int(self, value: object) -> int | None:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
 
     def _empty_personalization_stats(self) -> dict:
         return {
@@ -2331,6 +2398,14 @@ class PlanningService:
             "overrun_count": 0,
             "estimated_total_min": 0,
             "actual_total_min": 0,
+            "focus_sample_count": 0,
+            "focus_productive_count": 0,
+            "focus_interrupted_count": 0,
+            "focus_postponed_count": 0,
+            "focus_overrun_count": 0,
+            "focus_planned_total_min": 0,
+            "focus_actual_total_min": 0,
+            "focus_duration_delta_total_min": 0,
         }
 
     def _personalization_profile_for_signal(
@@ -2350,14 +2425,52 @@ class PlanningService:
         completion_rate = stats["completed_count"] / stats["sample_count"] if stats["sample_count"] else 0.0
         friction_count = stats["postponed_count"] + stats["interrupted_count"]
         friction_rate = friction_count / stats["sample_count"] if stats["sample_count"] else 0.0
+        focus_sample_count = int(stats.get("focus_sample_count") or 0)
+        focus_productive_count = int(stats.get("focus_productive_count") or 0)
+        focus_interrupted_count = int(stats.get("focus_interrupted_count") or 0)
+        focus_postponed_count = int(stats.get("focus_postponed_count") or 0)
+        focus_overrun_count = int(stats.get("focus_overrun_count") or 0)
+        focus_productive_rate = focus_productive_count / focus_sample_count if focus_sample_count else 0.0
+        focus_interruption_rate = focus_interrupted_count / focus_sample_count if focus_sample_count else 0.0
+        focus_postponement_rate = focus_postponed_count / focus_sample_count if focus_sample_count else 0.0
+        focus_overrun_rate = focus_overrun_count / focus_sample_count if focus_sample_count else 0.0
         overrun_risk = stats["overrun_count"] >= 2 or duration_multiplier >= 1.25
-        interruption_risk = stats["interrupted_count"] >= 2 or friction_rate >= 0.5
-        postponement_risk = stats["postponed_count"] >= 2
+        interruption_risk = (
+            stats["interrupted_count"] >= 2
+            or friction_rate >= 0.5
+            or (focus_sample_count >= 2 and focus_interruption_rate >= 0.5)
+        )
+        postponement_risk = (
+            stats["postponed_count"] >= 2
+            or (focus_sample_count >= 2 and focus_postponement_rate >= 0.5)
+        )
+        focus_overrun_risk = focus_sample_count >= 2 and focus_overrun_rate >= 0.5
+        overrun_risk = overrun_risk or focus_overrun_risk
         completion_momentum = (
             completion_rate >= 0.75
+            and (focus_sample_count == 0 or focus_productive_rate >= 0.67)
             and not overrun_risk
             and not interruption_risk
             and not postponement_risk
+        )
+        execution_learning_adjustment = self._execution_learning_adjustment(
+            overrun_risk=overrun_risk,
+            interruption_risk=interruption_risk,
+            postponement_risk=postponement_risk,
+            completion_momentum=completion_momentum,
+            focus_sample_count=focus_sample_count,
+        )
+        execution_learning_signal = self._execution_learning_signal(
+            overrun_risk=overrun_risk,
+            interruption_risk=interruption_risk,
+            postponement_risk=postponement_risk,
+            completion_momentum=completion_momentum,
+            focus_sample_count=focus_sample_count,
+        )
+        execution_learning_confidence = self._execution_learning_confidence(
+            sample_count=stats["sample_count"],
+            duration_sample_count=stats["duration_sample_count"],
+            focus_sample_count=focus_sample_count,
         )
         score = 0
         if overrun_risk:
@@ -2368,6 +2481,7 @@ class PlanningService:
             score -= 4
         if completion_momentum:
             score += 4
+        score += execution_learning_adjustment
 
         return {
             "applied": True,
@@ -2389,6 +2503,19 @@ class PlanningService:
             "interruption_risk": interruption_risk,
             "postponement_risk": postponement_risk,
             "completion_momentum": completion_momentum,
+            "execution_learning_applied": focus_sample_count > 0,
+            "execution_learning_version": "p2-execution-learning-v2",
+            "execution_learning_source": "focus_and_task_history",
+            "execution_learning_signal": execution_learning_signal,
+            "execution_learning_confidence": execution_learning_confidence,
+            "execution_learning_focus_sample_count": focus_sample_count,
+            "execution_learning_focus_productive_rate": round(focus_productive_rate, 2),
+            "execution_learning_focus_interruption_rate": round(focus_interruption_rate, 2),
+            "execution_learning_focus_postponement_rate": round(focus_postponement_rate, 2),
+            "execution_learning_focus_overrun_rate": round(focus_overrun_rate, 2),
+            "execution_learning_average_focus_delta_min": self._average_focus_delta_min(stats=stats),
+            "execution_learning_score_adjustment": execution_learning_adjustment,
+            "execution_learning_contract": self._execution_learning_contract(),
             "score": int(score),
         }
 
@@ -2399,6 +2526,69 @@ class PlanningService:
         actual_total = int(stats.get("actual_total_min") or 0)
         estimated_total = int(stats.get("estimated_total_min") or 0)
         return int(round((actual_total - estimated_total) / sample_count))
+
+    def _average_focus_delta_min(self, *, stats: dict) -> int:
+        sample_count = int(stats.get("focus_sample_count") or 0)
+        if sample_count <= 0:
+            return 0
+        return int(round(int(stats.get("focus_duration_delta_total_min") or 0) / sample_count))
+
+    def _execution_learning_adjustment(
+        self,
+        *,
+        overrun_risk: bool,
+        interruption_risk: bool,
+        postponement_risk: bool,
+        completion_momentum: bool,
+        focus_sample_count: int,
+    ) -> int:
+        if focus_sample_count <= 0:
+            return 0
+        adjustment = 0
+        if overrun_risk:
+            adjustment -= 3
+        if interruption_risk:
+            adjustment -= 4
+        if postponement_risk:
+            adjustment -= 3
+        if completion_momentum:
+            adjustment += 5
+        return adjustment
+
+    def _execution_learning_signal(
+        self,
+        *,
+        overrun_risk: bool,
+        interruption_risk: bool,
+        postponement_risk: bool,
+        completion_momentum: bool,
+        focus_sample_count: int,
+    ) -> str:
+        if focus_sample_count <= 0:
+            return "insufficient_focus_history"
+        if interruption_risk:
+            return "interruption_risk"
+        if postponement_risk:
+            return "postponement_risk"
+        if overrun_risk:
+            return "duration_overrun_risk"
+        if completion_momentum:
+            return "completion_momentum"
+        return "steady_execution_pattern"
+
+    def _execution_learning_confidence(
+        self,
+        *,
+        sample_count: int,
+        duration_sample_count: int,
+        focus_sample_count: int,
+    ) -> float:
+        if focus_sample_count <= 0:
+            return 0.0
+        confidence = 0.35 + min(focus_sample_count, 6) * 0.06
+        confidence += min(sample_count, 5) * 0.04
+        confidence += min(duration_sample_count, 4) * 0.03
+        return round(min(0.88, confidence), 2)
 
     def _semantic_estimate_feedback_contract(self) -> dict:
         return {
@@ -2419,6 +2609,28 @@ class PlanningService:
             "task_mutation_allowed": False,
             "requires_confirmed_execution_history": True,
             "explanation": "同类任务真实执行时长只用于校准本次编排估时和解释，不会覆盖任务原始估时或让 LLM 直接排序。",
+        }
+
+    def _execution_learning_contract(self) -> dict:
+        return {
+            "version": "p2-execution-learning-contract-v1",
+            "scope": "focus_history_to_planning_calibration",
+            "source_of_truth": "planning-engine-v1",
+            "can_affect": [
+                "today_item_estimated_duration_min",
+                "planning_objective_score",
+                "strategy_explanation",
+                "task_rationale_score_signals",
+            ],
+            "cannot_affect": [
+                "task_estimated_duration_min",
+                "task_status",
+                "goal_state",
+                "llm_direct_sort_order",
+            ],
+            "task_mutation_allowed": False,
+            "requires_confirmed_focus_result": True,
+            "explanation": "Focus 历史只用于后续计划校准和解释，不会覆盖任务原始估时、目标状态或让 LLM 直接排序。",
         }
 
     def _empty_personalization_profile(self, *, task_type: str | None) -> dict:
@@ -2442,6 +2654,19 @@ class PlanningService:
             "interruption_risk": False,
             "postponement_risk": False,
             "completion_momentum": False,
+            "execution_learning_applied": False,
+            "execution_learning_version": "p2-execution-learning-v2",
+            "execution_learning_source": None,
+            "execution_learning_signal": "insufficient_focus_history",
+            "execution_learning_confidence": 0.0,
+            "execution_learning_focus_sample_count": 0,
+            "execution_learning_focus_productive_rate": 0.0,
+            "execution_learning_focus_interruption_rate": 0.0,
+            "execution_learning_focus_postponement_rate": 0.0,
+            "execution_learning_focus_overrun_rate": 0.0,
+            "execution_learning_average_focus_delta_min": 0,
+            "execution_learning_score_adjustment": 0,
+            "execution_learning_contract": None,
             "score": 0,
         }
 
@@ -2457,7 +2682,7 @@ class PlanningService:
     def _personalization_score_breakdown(self, personalization: dict) -> dict:
         return {
             "personalization_applied": bool(personalization.get("applied")),
-            "personalization_version": "planning-personalization-v1",
+            "personalization_version": "planning-personalization-v2",
             "personalization_task_type": personalization.get("task_type"),
             "personalization_sample_count": int(personalization.get("sample_count") or 0),
             "personalization_duration_sample_count": int(personalization.get("duration_sample_count") or 0),
@@ -2481,6 +2706,35 @@ class PlanningService:
             "personalization_interruption_risk": bool(personalization.get("interruption_risk")),
             "personalization_postponement_risk": bool(personalization.get("postponement_risk")),
             "personalization_completion_momentum": bool(personalization.get("completion_momentum")),
+            "execution_learning_applied": bool(personalization.get("execution_learning_applied")),
+            "execution_learning_version": str(
+                personalization.get("execution_learning_version") or "p2-execution-learning-v2"
+            ),
+            "execution_learning_source": personalization.get("execution_learning_source"),
+            "execution_learning_signal": personalization.get("execution_learning_signal"),
+            "execution_learning_confidence": float(personalization.get("execution_learning_confidence") or 0.0),
+            "execution_learning_focus_sample_count": int(
+                personalization.get("execution_learning_focus_sample_count") or 0
+            ),
+            "execution_learning_focus_productive_rate": float(
+                personalization.get("execution_learning_focus_productive_rate") or 0.0
+            ),
+            "execution_learning_focus_interruption_rate": float(
+                personalization.get("execution_learning_focus_interruption_rate") or 0.0
+            ),
+            "execution_learning_focus_postponement_rate": float(
+                personalization.get("execution_learning_focus_postponement_rate") or 0.0
+            ),
+            "execution_learning_focus_overrun_rate": float(
+                personalization.get("execution_learning_focus_overrun_rate") or 0.0
+            ),
+            "execution_learning_average_focus_delta_min": int(
+                personalization.get("execution_learning_average_focus_delta_min") or 0
+            ),
+            "execution_learning_score_adjustment": int(
+                personalization.get("execution_learning_score_adjustment") or 0
+            ),
+            "execution_learning_contract": personalization.get("execution_learning_contract"),
         }
 
     def _goal_next_action_task_ids(
@@ -2631,6 +2885,12 @@ class PlanningService:
             return self._goal_progress_reason(score_breakdown=score_breakdown)
         if task.id in goal_next_action_task_ids:
             return "这是关联目标当前最适合推进的下一步，系统会保护它进入今日主序列。"
+        if score_breakdown.get("execution_learning_applied"):
+            signal = score_breakdown.get("execution_learning_signal")
+            if signal == "completion_momentum":
+                return "系统读取了你过去同类 Focus 的完成势能，因此保留这个顺手推进的机会。"
+            if signal in {"interruption_risk", "postponement_risk", "duration_overrun_risk"}:
+                return "系统读取了你过去同类 Focus 的执行阻力，因此按更保守的节奏安排。"
         if score_breakdown.get("personalization_applied") and score_breakdown.get("personalization_score", 0) < 0:
             return "系统读取了你过去同类任务的执行阻力，因此按更保守的节奏安排。"
         if score_breakdown.get("personalization_applied") and score_breakdown.get("personalization_score", 0) > 0:
@@ -2721,6 +2981,24 @@ class PlanningService:
         personalization_signal_count = len(
             [planned for planned in active_tasks if planned.score_breakdown.get("personalization_applied")]
         )
+        execution_learning_signal_count = len(
+            [planned for planned in active_tasks if planned.score_breakdown.get("execution_learning_applied")]
+        )
+        execution_learning_friction_risk_count = len(
+            [
+                planned
+                for planned in active_tasks
+                if planned.score_breakdown.get("execution_learning_signal")
+                in {"interruption_risk", "postponement_risk", "duration_overrun_risk"}
+            ]
+        )
+        execution_learning_momentum_count = len(
+            [
+                planned
+                for planned in active_tasks
+                if planned.score_breakdown.get("execution_learning_signal") == "completion_momentum"
+            ]
+        )
         goal_progress_signal_count = len(
             [planned for planned in active_tasks if planned.score_breakdown.get("goal_progress_applied")]
         )
@@ -2804,6 +3082,9 @@ class PlanningService:
                     "minimum_viable_progress_count": 0,
                     "execution_feedback_count": 0,
                     "personalization_signal_count": 0,
+                    "execution_learning_signal_count": 0,
+                    "execution_learning_friction_risk_count": 0,
+                    "execution_learning_momentum_count": 0,
                     "goal_progress_signal_count": 0,
                     "planning_objective_applied": False,
                     "planning_objective_version": "p2-planning-objective-v2",
@@ -2857,6 +3138,9 @@ class PlanningService:
                 "minimum_viable_progress_count": minimum_viable_progress_count,
                 "execution_feedback_count": execution_feedback_count,
                 "personalization_signal_count": personalization_signal_count,
+                "execution_learning_signal_count": execution_learning_signal_count,
+                "execution_learning_friction_risk_count": execution_learning_friction_risk_count,
+                "execution_learning_momentum_count": execution_learning_momentum_count,
                 "goal_progress_signal_count": goal_progress_signal_count,
                 "planning_objective_applied": planning_objective_applied,
                 "planning_objective_version": "p2-planning-objective-v2",
@@ -3144,6 +3428,21 @@ class PlanningService:
                     "score": factors["personalization_signal_count"],
                 }
             )
+        if factors.get("execution_learning_signal_count"):
+            friction_count = factors.get("execution_learning_friction_risk_count", 0)
+            momentum_count = factors.get("execution_learning_momentum_count", 0)
+            signals.append(
+                {
+                    "key": "execution_learning",
+                    "title": "执行学习回流",
+                    "message": (
+                        f"{factors['execution_learning_signal_count']} 个任务读取了 Focus 历史，"
+                        f"其中 {friction_count} 个有执行阻力、{momentum_count} 个有完成势能。"
+                    ),
+                    "signal": "watch" if friction_count else "positive",
+                    "score": factors["execution_learning_signal_count"],
+                }
+            )
         if factors["energy_applied"]:
             signals.append(
                 {
@@ -3268,6 +3567,13 @@ class PlanningService:
             "minimum_viable_progress_count": int(score_factors.get("minimum_viable_progress_count", 0) or 0),
             "execution_feedback_count": int(score_factors.get("execution_feedback_count", 0) or 0),
             "personalization_signal_count": int(score_factors.get("personalization_signal_count", 0) or 0),
+            "execution_learning_signal_count": int(score_factors.get("execution_learning_signal_count", 0) or 0),
+            "execution_learning_friction_risk_count": int(
+                score_factors.get("execution_learning_friction_risk_count", 0) or 0
+            ),
+            "execution_learning_momentum_count": int(
+                score_factors.get("execution_learning_momentum_count", 0) or 0
+            ),
             "energy_level": str(score_factors.get("energy_level") or "unknown"),
             "energy_applied": bool(score_factors.get("energy_applied") or False),
             "planner_agent_latency_ms": score_factors.get("planner_agent_latency_ms"),
@@ -3323,6 +3629,10 @@ class PlanningService:
             explanation.append(f"{factors['execution_feedback_count']} 个任务读取了真实执行时间，用来校准下一轮剩余估时。")
         if factors.get("personalization_signal_count"):
             explanation.append(f"{factors['personalization_signal_count']} 个任务读取了你的同类任务历史表现，用来让 Today 更贴近你的真实执行节奏。")
+        if factors.get("execution_learning_signal_count"):
+            explanation.append(
+                f"{factors['execution_learning_signal_count']} 个任务读取了 Focus 结果，执行阻力会让计划更保守，完成势能会保留顺手推进的机会。"
+            )
         if strategy.mode == PlanningPreference.LIGHT:
             explanation.append("今天保持轻量，让第一个动作更容易开始。")
         elif strategy.mode == PlanningPreference.SPRINT:
@@ -3666,6 +3976,36 @@ class PlanningService:
                     "message": message,
                     "signal": "info",
                     "score": score_breakdown.get("remaining_estimated_duration_min"),
+                }
+            )
+
+        if score_breakdown.get("execution_learning_applied"):
+            task_type = score_breakdown.get("personalization_task_type") or "同类"
+            learning_signal = score_breakdown.get("execution_learning_signal")
+            confidence = float(score_breakdown.get("execution_learning_confidence") or 0.0)
+            if learning_signal == "interruption_risk":
+                message = f"你过去的 {task_type} 类任务在 Focus 中更容易中断，Today 会按更保守的节奏安排。"
+                signal = "watch"
+            elif learning_signal == "postponement_risk":
+                message = f"你过去的 {task_type} 类任务更容易在执行中延后，系统会减少它抢占主序列的力度。"
+                signal = "watch"
+            elif learning_signal == "duration_overrun_risk":
+                delta = int(score_breakdown.get("execution_learning_average_focus_delta_min") or 0)
+                message = f"你过去的 {task_type} 类 Focus 平均比计划多约 {delta} 分钟，Today 会预留更真实的执行成本。"
+                signal = "watch"
+            elif learning_signal == "completion_momentum":
+                message = f"你过去的 {task_type} 类 Focus 完成势能较好，Today 会保留这个顺手推进的机会。"
+                signal = "positive"
+            else:
+                message = f"Today 读取了你过去 {task_type} 类 Focus 结果，用来校准执行节奏。"
+                signal = "info"
+            signals.append(
+                {
+                    "key": "execution_learning",
+                    "title": "执行学习回流",
+                    "message": message,
+                    "signal": signal,
+                    "score": int(round(confidence * 100)),
                 }
             )
 
