@@ -1204,15 +1204,29 @@ class TodayServiceTests(unittest.TestCase):
         self.assertTrue(current_item["score_breakdown"]["personalization_applied"])
         self.assertEqual(current_item["score_breakdown"]["personalization_task_type"], "writing")
         self.assertEqual(current_item["score_breakdown"]["personalization_sample_count"], 2)
+        self.assertEqual(current_item["score_breakdown"]["personalization_estimated_total_min"], 60)
+        self.assertEqual(current_item["score_breakdown"]["personalization_actual_total_min"], 110)
+        self.assertEqual(current_item["score_breakdown"]["personalization_average_estimate_delta_min"], 25)
         self.assertGreater(current_item["score_breakdown"]["personalization_duration_multiplier"], 1.2)
         self.assertGreater(current_item["score_breakdown"]["personalized_estimated_duration_min"], 30)
         self.assertLess(current_item["score_breakdown"]["personalization_score"], 0)
+        self.assertTrue(current_item["score_breakdown"]["semantic_estimate_feedback_applied"])
+        self.assertEqual(
+            current_item["score_breakdown"]["semantic_estimate_feedback_source"],
+            "semantic_task_history",
+        )
+        estimate_contract = current_item["score_breakdown"]["semantic_estimate_feedback_contract"]
+        self.assertEqual(estimate_contract["version"], "p2-task-semantic-estimate-feedback-v1")
+        self.assertFalse(estimate_contract["task_mutation_allowed"])
+        self.assertIn("today_item_estimated_duration_min", estimate_contract["can_affect"])
+        self.assertIn("task_estimated_duration_min", estimate_contract["cannot_affect"])
+        self.assertIn("llm_direct_sort_order", estimate_contract["cannot_affect"])
         self.assertEqual(strategy["factors"]["personalization_signal_count"], 1)
         current_rationale = next(
             rationale for rationale in strategy["task_rationales"] if rationale["task_id"] == current_task.id
         )
         self.assertEqual(current_rationale["dominant_factor"], "personalization_signal")
-        self.assertIn("更保守", current_rationale["dominant_reason"])
+        self.assertIn("平均比估时多约 25 分钟", current_rationale["dominant_reason"])
 
     def test_planning_engine_protects_next_action_for_each_high_value_goal(self):
         launch_goal = goal_service.create_goal(

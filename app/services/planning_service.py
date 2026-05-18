@@ -2185,17 +2185,51 @@ class PlanningService:
             "task_type": signal.task_type,
             "sample_count": stats["sample_count"],
             "duration_sample_count": stats["duration_sample_count"],
+            "estimated_total_min": stats["estimated_total_min"],
+            "actual_total_min": stats["actual_total_min"],
+            "average_estimate_delta_min": self._average_estimate_delta_min(stats=stats),
             "completed_count": stats["completed_count"],
             "completion_rate": round(completion_rate, 2),
             "postponed_count": stats["postponed_count"],
             "interrupted_count": stats["interrupted_count"],
             "overrun_count": stats["overrun_count"],
             "duration_multiplier": round(duration_multiplier, 2),
+            "estimate_feedback_source": "semantic_task_history",
+            "estimate_feedback_contract": self._semantic_estimate_feedback_contract(),
             "overrun_risk": overrun_risk,
             "interruption_risk": interruption_risk,
             "postponement_risk": postponement_risk,
             "completion_momentum": completion_momentum,
             "score": int(score),
+        }
+
+    def _average_estimate_delta_min(self, *, stats: dict) -> int:
+        sample_count = int(stats.get("duration_sample_count") or 0)
+        if sample_count <= 0:
+            return 0
+        actual_total = int(stats.get("actual_total_min") or 0)
+        estimated_total = int(stats.get("estimated_total_min") or 0)
+        return int(round((actual_total - estimated_total) / sample_count))
+
+    def _semantic_estimate_feedback_contract(self) -> dict:
+        return {
+            "version": "p2-task-semantic-estimate-feedback-v1",
+            "scope": "semantic_task_type_duration_estimate",
+            "source_of_truth": "planning-engine-v1",
+            "can_affect": [
+                "today_item_estimated_duration_min",
+                "strategy_explanation",
+                "task_rationale_score_signals",
+            ],
+            "cannot_affect": [
+                "task_estimated_duration_min",
+                "task_status",
+                "goal_state",
+                "llm_direct_sort_order",
+            ],
+            "task_mutation_allowed": False,
+            "requires_confirmed_execution_history": True,
+            "explanation": "同类任务真实执行时长只用于校准本次编排估时和解释，不会覆盖任务原始估时或让 LLM 直接排序。",
         }
 
     def _empty_personalization_profile(self, *, task_type: str | None) -> dict:
@@ -2204,12 +2238,17 @@ class PlanningService:
             "task_type": task_type,
             "sample_count": 0,
             "duration_sample_count": 0,
+            "estimated_total_min": 0,
+            "actual_total_min": 0,
+            "average_estimate_delta_min": 0,
             "completed_count": 0,
             "completion_rate": 0.0,
             "postponed_count": 0,
             "interrupted_count": 0,
             "overrun_count": 0,
             "duration_multiplier": 1.0,
+            "estimate_feedback_source": None,
+            "estimate_feedback_contract": None,
             "overrun_risk": False,
             "interruption_risk": False,
             "postponement_risk": False,
@@ -2233,12 +2272,22 @@ class PlanningService:
             "personalization_task_type": personalization.get("task_type"),
             "personalization_sample_count": int(personalization.get("sample_count") or 0),
             "personalization_duration_sample_count": int(personalization.get("duration_sample_count") or 0),
+            "personalization_estimated_total_min": int(personalization.get("estimated_total_min") or 0),
+            "personalization_actual_total_min": int(personalization.get("actual_total_min") or 0),
+            "personalization_average_estimate_delta_min": int(
+                personalization.get("average_estimate_delta_min") or 0
+            ),
             "personalization_completed_count": int(personalization.get("completed_count") or 0),
             "personalization_completion_rate": float(personalization.get("completion_rate") or 0.0),
             "personalization_postponed_count": int(personalization.get("postponed_count") or 0),
             "personalization_interrupted_count": int(personalization.get("interrupted_count") or 0),
             "personalization_overrun_count": int(personalization.get("overrun_count") or 0),
             "personalization_duration_multiplier": float(personalization.get("duration_multiplier") or 1.0),
+            "semantic_estimate_feedback_applied": bool(
+                personalization.get("applied") and personalization.get("duration_sample_count", 0) >= 2
+            ),
+            "semantic_estimate_feedback_source": personalization.get("estimate_feedback_source"),
+            "semantic_estimate_feedback_contract": personalization.get("estimate_feedback_contract"),
             "personalization_overrun_risk": bool(personalization.get("overrun_risk")),
             "personalization_interruption_risk": bool(personalization.get("interruption_risk")),
             "personalization_postponement_risk": bool(personalization.get("postponement_risk")),
@@ -3355,8 +3404,9 @@ class PlanningService:
         if score_breakdown.get("personalization_applied"):
             task_type = score_breakdown.get("personalization_task_type") or "同类"
             multiplier = float(score_breakdown.get("personalization_duration_multiplier") or 1.0)
+            average_delta = int(score_breakdown.get("personalization_average_estimate_delta_min") or 0)
             if score_breakdown.get("personalization_overrun_risk"):
-                message = f"你过去的 {task_type} 类任务常超出估时，Today 已按更保守的时长安排。"
+                message = f"你过去的 {task_type} 类任务平均比估时多约 {average_delta} 分钟，Today 已按更保守的时长安排。"
                 signal = "watch"
             elif score_breakdown.get("personalization_interruption_risk") or score_breakdown.get("personalization_postponement_risk"):
                 message = f"你过去的 {task_type} 类任务更容易中断或延后，排序会降低它抢占主序列的力度。"

@@ -725,6 +725,29 @@ def _scenario_semantic_history_personalizes_duration() -> ScenarioResult:
                 bool(current_item) and current_item["score_breakdown"].get("personalization_applied") is True,
             ),
             (
+                "semantic estimate feedback is explicit",
+                bool(current_item)
+                and current_item["score_breakdown"].get("semantic_estimate_feedback_applied") is True,
+            ),
+            (
+                "semantic estimate feedback preserves source",
+                bool(current_item)
+                and current_item["score_breakdown"].get("semantic_estimate_feedback_source")
+                == "semantic_task_history",
+            ),
+            (
+                "semantic estimate feedback forbids task estimate mutation",
+                bool(current_item)
+                and "task_estimated_duration_min"
+                in (
+                    (
+                        current_item["score_breakdown"].get("semantic_estimate_feedback_contract")
+                        or {}
+                    ).get("cannot_affect")
+                    or []
+                ),
+            ),
+            (
                 "history sample count is preserved",
                 bool(current_item) and current_item["score_breakdown"].get("personalization_sample_count") == 2,
             ),
