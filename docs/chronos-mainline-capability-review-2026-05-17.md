@@ -78,6 +78,7 @@ P2 只保留和执行主线强相关的部分：Goals、依赖、洞察、解释
 | Task Semantic Planning Signal | L2-L3 | 能把任务语义、目标对齐、复杂度、语义估时和最小推进动作写入可追踪信号，并被 Today 评分读取 | 后续需要补自动刷新策略 |
 | Minimum Viable Progress | L3 | 大任务带有语义信号时，Today 可只安排今日最小推进切片；完成切片记录部分进度，不覆盖 Task 原估时或误完成 Task | 后续可继续优化切片大小学习策略 |
 | Execution Feedback Calibration | L2-L3 | Replan 时会读取 Task 实际投入时间，把 Today 估时校准为剩余工作量，并在 Strategy Detail 解释 | 先不自动改 Task 原估时，避免系统过度自作主张 |
+| Daily Available Time v1 | L2-L3 | 用户可在 replan 时设置今日可用分钟数，Planning Engine 按该容量重新滚动主序列，并在 Strategy Detail 暴露来源 | 只影响 Today 容量，不做日历模块或自动提醒 |
 | Planner Personalization v1 | L2-L3 | 通过 TaskPlanningSignal 的 task_type 聚合同类历史任务耗时、中断、延后和完成势能，调整本轮估时、评分和 Strategy Detail 解释 | 不创建长期画像表，不让 LLM 直接排序 |
 | Goal Progress Strategy v1 | L2-L3 | Today 会读取目标完成率、剩余任务数、deadline 和价值等级，把目标当前下一步作为推进目标的保护信号 | 不新增项目管理视图，不把 Goals 做重 |
 | Goal Progress Feedback v1 | L2-L3 | Focus / Today 快速完成 / Daily Report / Goal Detail 会把执行结果转成轻量目标推进反馈，让用户看到今天让哪个 Goal 前进了多少 | 反馈来自确定性事件聚合，不引入新仪表盘或 LLM 排序 |

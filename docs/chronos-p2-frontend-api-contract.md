@@ -21,6 +21,7 @@ P2 的原则仍然是：增强目标和洞察，但不让 Today 变成复杂驾�
 | --- | --- | --- |
 | Today Insights Preview | `GET /api/v1/today` -> `insights_preview` | Ready |
 | Strategy Detail | `GET /api/v1/today/strategy` | Ready |
+| Daily Available Time | `POST /api/v1/today/replan` -> `available_minutes` | Ready |
 | Task Semantic Planning Signal | `POST /api/v1/tasks/{task_id}/planning-signal` | Ready |
 | Task Priority Adjustment | `PATCH /api/v1/tasks/{task_id}/priority` | Ready |
 | Task Dependencies | `GET/POST/DELETE /api/v1/tasks/{task_id}/dependencies` | Ready |
@@ -110,7 +111,11 @@ P2 新增字段：
   "low_priority_count": 1,
   "rolled_over_count": 0,
   "total_estimated_minutes": 95,
+  "base_capacity_minutes": 150,
   "daily_capacity_minutes": 150,
+  "capacity_source": "planning_preference",
+  "manual_available_minutes": null,
+  "energy_capacity_adjusted": false,
   "selected_estimated_minutes": 95,
   "rolled_over_estimated_minutes": 0,
   "over_capacity_minutes": 0,
@@ -144,7 +149,11 @@ P2 新增字段：
 - `minimum_viable_progress_count` 表示有多少大任务在 Today 中只保护“今天做得出来的最小推进动作”。
 - `execution_feedback_count` 表示有多少任务读取了真实执行时间，并用它校准今日剩余估时。
 - `personalization_signal_count` 表示有多少任务读取了同类任务历史执行画像，用于调整估时和排序力度；它来自确定性聚合，不是 LLM 直接排序。
+- `base_capacity_minutes` 是用户偏好或手动输入形成的基础容量。
 - `daily_capacity_minutes` 是 Planning Engine 的当日容量参考，不是严格日历时间块。
+- `capacity_source` 当前可能是 `planning_preference`、`manual_today_override` 或 `energy_adjusted`。
+- `manual_available_minutes` 表示用户本次手动设置的今日可用时间；为空时使用 Planning Preference 默认容量。
+- `energy_capacity_adjusted=true` 表示低精力把默认容量收敛到更轻的范围；如果用户手动设置了可用时间，手动输入优先。
 - `selected_estimated_minutes` 是今天主执行序列的估时总量。
 - `rolled_over_estimated_minutes` 是被滚动到未来、保留可见但不计入主执行序列的估时。
 - `over_capacity_minutes` 表示主执行序列超出当日容量参考的分钟数；只有受保护任务总量过重时才会大于 0。
@@ -237,7 +246,10 @@ P2 新增字段：
     "original_estimated_duration_min": 150,
     "planned_duration_min": 45,
     "minimum_viable_progress_applied": true,
+    "base_capacity_minutes": 150,
     "daily_capacity_minutes": 150,
+    "capacity_source": "planning_preference",
+    "manual_available_minutes": null,
     "selected_for_today": true
   },
   "dominant_factor": "deadline_soon",
@@ -262,9 +274,31 @@ P2 新增字段：
 - `semantic_*` 字段来自 TaskPlanningSignal，只表示 Planning Engine 读取到语义信号；它不是 LLM 直接改排序。
 - `personalization_*` 字段来自同类 TaskPlanningSignal 历史任务的执行结果，用于解释“系统如何逐渐理解这个用户的真实执行节奏”；它不直接修改 Task 本体。
 - `base_estimated_duration_min` 是任务原始 / 语义估时，`personalized_estimated_duration_min` 是结合个人历史执行画像后的本轮估时，`remaining_estimated_duration_min` 是结合 Focus 实际投入后的剩余估时，`original_estimated_duration_min` 是最小推进切片前的本轮估时。
+- `capacity_source=manual_today_override` 时，说明本轮 Today 是按用户手动设置的 `available_minutes` 编排；这只影响今日容量，不会修改 Task 原始估时。
 - 当 `minimum_viable_progress_applied=true` 时，Today item 代表“今日最小推进切片”，不是整个 Task；完成该 item 后后端会记录 Task partial progress，Task 仍保持 active。
 - `selected_for_today=false` 且 `rollover_reason=capacity` 表示任务被系统滚动到未来，不代表任务被用户手动延后；此时 `item_status` 仍可为 `planned`，前端应以 `section=rolled_over` 判断展示位置。
 - 若 `capacity_status=overloaded`，Today 可在 Insights Preview 展示一条轻量风险提示，但不要展示完整容量面板。
+
+### POST `/api/v1/today/replan`
+
+用于显式重新编排 Today。P2 可传入今日手动可用时间：
+
+```json
+{
+  "reason": "下午只有一小时能专注",
+  "available_minutes": 60
+}
+```
+
+Response：`TodayResponse`。
+
+说明：
+
+- `available_minutes` 范围为 15-720，表示用户今天愿意交给 Chronos 编排的可用执行时间。
+- 传入后，本日当前 plan revision 的 `capacity_source` 会变为 `manual_today_override`。
+- 同一个 active Today 后续再次 replan 且未传 `available_minutes` 时，会沿用当前手动可用时间，避免用户设置被新任务或 signal refresh 冲掉。
+- 手动可用时间优先于 Energy 对容量的收敛；Energy 仍可作为任务排序与解释信号，但不会覆盖用户明确输入。
+- 这是用户控制入口，不是日历时间块，不会自动创建 Reminder，也不会让 LLM 接管排序。
 
 ### POST `/api/v1/today/planning-signals`
 

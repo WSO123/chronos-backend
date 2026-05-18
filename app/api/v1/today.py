@@ -49,6 +49,7 @@ def replan_today(
         user_id=user_id,
         plan_date=plan_date,
         reason=payload.reason if payload else None,
+        available_minutes=payload.available_minutes if payload else None,
     )
 
 

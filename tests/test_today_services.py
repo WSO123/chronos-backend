@@ -515,6 +515,65 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["factors"]["over_capacity_minutes"], 0)
         self.assertEqual(strategy["factors"]["capacity_status"], "within_capacity")
 
+    def test_replan_uses_manual_available_minutes_and_preserves_it(self):
+        for index in range(3):
+            task_service.create_task(
+                self.db,
+                user_id=self.user.id,
+                title=f"Manual capacity task {index}",
+                estimated_duration_min=60,
+                priority=3,
+                value_level=ValueLevel.MEDIUM,
+            )
+        today = planning_service.get_today(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        replanned = planning_service.replan_today(
+            self.db,
+            user_id=self.user.id,
+            plan_date=self.plan_date,
+            reason="Only one focused hour today",
+            available_minutes=60,
+        )
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Later task should respect the same manual capacity",
+            estimated_duration_min=45,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        second_replan = planning_service.replan_today(
+            self.db,
+            user_id=self.user.id,
+            plan_date=self.plan_date,
+            reason="Keep the same available time",
+        )
+        second_strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+        events = (
+            self.db.query(ActivityEvent)
+            .filter(ActivityEvent.user_id == self.user.id, ActivityEvent.event_type == "DAILY_PLAN_REPLANNED")
+            .order_by(ActivityEvent.occurred_at.asc())
+            .all()
+        )
+
+        self.assertEqual(today["plan_version"], 1)
+        self.assertEqual(replanned["plan_version"], 2)
+        self.assertEqual(strategy["factors"]["daily_capacity_minutes"], 60)
+        self.assertEqual(strategy["factors"]["base_capacity_minutes"], 60)
+        self.assertEqual(strategy["factors"]["capacity_source"], "manual_today_override")
+        self.assertEqual(strategy["factors"]["manual_available_minutes"], 60)
+        self.assertEqual(strategy["factors"]["selected_estimated_minutes"], 60)
+        self.assertEqual(len(replanned["sections"]["rolled_over_tasks"]), 2)
+        self.assertEqual(
+            replanned["sections"]["recommended_tasks"][0]["score_breakdown"]["capacity_source"],
+            "manual_today_override",
+        )
+        self.assertEqual(second_replan["plan_version"], 3)
+        self.assertEqual(second_strategy["factors"]["daily_capacity_minutes"], 60)
+        self.assertEqual(second_strategy["factors"]["manual_available_minutes"], 60)
+        self.assertEqual(events[-1].payload["manual_available_minutes"], 60)
+
     def test_planning_engine_warns_when_protected_work_exceeds_capacity(self):
         for index in range(3):
             task_service.create_task(
@@ -696,6 +755,39 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(strategy["factors"]["daily_capacity_minutes"], 90)
         self.assertEqual(strategy["factors"]["energy_level"], "low")
         self.assertEqual(strategy["energy"]["applied_to_plan"], True)
+
+    def test_manual_available_minutes_overrides_low_energy_capacity_cap(self):
+        energy_service.upsert_daily_metric(
+            self.db,
+            user_id=self.user.id,
+            payload={"metric_date": self.plan_date, "energy_score": 35},
+        )
+        for index in range(2):
+            task_service.create_task(
+                self.db,
+                user_id=self.user.id,
+                title=f"Manual energy capacity task {index}",
+                estimated_duration_min=60,
+                priority=3,
+                value_level=ValueLevel.MEDIUM,
+            )
+
+        today = planning_service.replan_today(
+            self.db,
+            user_id=self.user.id,
+            plan_date=self.plan_date,
+            reason="I still have two focused hours",
+            available_minutes=120,
+        )
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        self.assertEqual(today["progress"]["total_count"], 2)
+        self.assertEqual(strategy["factors"]["daily_capacity_minutes"], 120)
+        self.assertEqual(strategy["factors"]["capacity_source"], "manual_today_override")
+        self.assertEqual(strategy["factors"]["manual_available_minutes"], 120)
+        self.assertEqual(strategy["factors"]["energy_level"], "low")
+        self.assertEqual(strategy["factors"]["energy_applied"], True)
+        self.assertEqual(strategy["factors"]["energy_capacity_adjusted"], False)
 
     def test_planning_engine_uses_semantic_signal_to_protect_goal_progress(self):
         goal = goal_service.create_goal(

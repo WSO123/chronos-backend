@@ -245,6 +245,42 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(refreshed_today.json()["progress"]["completion_rate"], 1.0)
         self.assertEqual(old_item_response.status_code, 404)
 
+    def test_replan_accepts_manual_available_minutes(self):
+        for index in range(2):
+            self.client.post(
+                "/api/v1/tasks",
+                json={
+                    "title": f"Manual API capacity task {index}",
+                    "estimated_duration_min": 60,
+                    "priority": 3,
+                    "value_level": "medium",
+                },
+                headers=self.headers,
+            )
+        self.client.get("/api/v1/today?plan_date=2026-05-16", headers=self.headers)
+
+        replan_response = self.client.post(
+            "/api/v1/today/replan?plan_date=2026-05-16",
+            json={"reason": "Short day", "available_minutes": 60},
+            headers=self.headers,
+        )
+        strategy_response = self.client.get("/api/v1/today/strategy?plan_date=2026-05-16", headers=self.headers)
+        invalid_response = self.client.post(
+            "/api/v1/today/replan?plan_date=2026-05-16",
+            json={"available_minutes": 5},
+            headers=self.headers,
+        )
+
+        self.assertEqual(replan_response.status_code, 200)
+        self.assertEqual(replan_response.json()["plan_version"], 2)
+        self.assertEqual(strategy_response.status_code, 200)
+        factors = strategy_response.json()["factors"]
+        self.assertEqual(factors["daily_capacity_minutes"], 60)
+        self.assertEqual(factors["capacity_source"], "manual_today_override")
+        self.assertEqual(factors["manual_available_minutes"], 60)
+        self.assertEqual(factors["selected_estimated_minutes"], 60)
+        self.assertEqual(invalid_response.status_code, 422)
+
     def test_complete_today_item_returns_goal_progress_feedback(self):
         goal_response = self.client.post(
             "/api/v1/goals",

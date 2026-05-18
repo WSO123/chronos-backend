@@ -102,7 +102,11 @@ class StrategyDetailFactorsResponse(BaseModel):
     low_priority_count: int
     rolled_over_count: int
     total_estimated_minutes: int
+    base_capacity_minutes: int = 0
     daily_capacity_minutes: int
+    capacity_source: str = "planning_preference"
+    manual_available_minutes: int | None = None
+    energy_capacity_adjusted: bool = False
     selected_estimated_minutes: int
     rolled_over_estimated_minutes: int
     over_capacity_minutes: int
@@ -201,6 +205,7 @@ class TodayReplanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str | None = Field(default=None, max_length=500)
+    available_minutes: int | None = Field(default=None, ge=15, le=720)
 
 
 class TodayPlanningSignalsPrepareResponse(BaseModel):

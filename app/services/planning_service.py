@@ -46,7 +46,7 @@ from app.models.user import User, UserSettings
 from app.services.activity_event_service import activity_event_service
 from app.services.ai_job_service import ai_job_service
 from app.services.energy_service import energy_service
-from app.services.errors import InvalidStateError, NotFoundError
+from app.services.errors import InvalidStateError, NotFoundError, ValidationDomainError
 from app.services.task_service import task_service
 from app.services.task_planning_signal_service import task_planning_signal_service
 
@@ -74,6 +74,9 @@ class PlanningContext:
     ai_strategy_preference: AIStrategyPreference
     base_capacity_minutes: int
     daily_capacity_minutes: int
+    capacity_source: str
+    manual_available_minutes: int | None
+    energy_capacity_adjusted: bool
     energy_has_data: bool
     energy_score: int | None
     energy_level: str
@@ -129,7 +132,9 @@ class PlanningService:
         user_id: uuid.UUID,
         plan_date: date | None = None,
         reason: str | None = None,
+        available_minutes: int | None = None,
     ) -> dict:
+        available_minutes = self._validated_available_minutes(available_minutes)
         resolved_date = self._resolve_plan_date(db, user_id=user_id, plan_date=plan_date)
         plan = self._get_active_plan(db, user_id=user_id, plan_date=resolved_date)
         if plan is None:
@@ -139,13 +144,20 @@ class PlanningService:
                 plan_date=resolved_date,
                 trigger=PlanRevisionTrigger.INITIAL,
                 reason=reason or "Initial Today plan",
+                available_minutes=available_minutes,
             )
         else:
+            effective_available_minutes = (
+                available_minutes
+                if available_minutes is not None
+                else self._current_manual_available_minutes(db, plan=plan)
+            )
             self._create_revision(
                 db,
                 plan=plan,
                 trigger=PlanRevisionTrigger.REPLAN,
                 reason=reason or "User requested Today replan",
+                available_minutes=effective_available_minutes,
             )
             activity_event_service.add_event(
                 db,
@@ -155,7 +167,10 @@ class PlanningService:
                 event_type="DAILY_PLAN_REPLANNED",
                 actor_type=ActorType.USER,
                 related_daily_plan_id=plan.id,
-                payload={"version": plan.current_version},
+                payload={
+                    "version": plan.current_version,
+                    "manual_available_minutes": effective_available_minutes,
+                },
             )
             db.commit()
         return self._build_today_response(db, plan=plan)
@@ -511,6 +526,7 @@ class PlanningService:
         plan_date: date,
         trigger: PlanRevisionTrigger,
         reason: str,
+        available_minutes: int | None = None,
     ) -> DailyPlan:
         plan = DailyPlan(
             user_id=user_id,
@@ -524,7 +540,13 @@ class PlanningService:
         )
         db.add(plan)
         db.flush()
-        self._create_revision(db, plan=plan, trigger=trigger, reason=reason)
+        self._create_revision(
+            db,
+            plan=plan,
+            trigger=trigger,
+            reason=reason,
+            available_minutes=available_minutes,
+        )
         activity_event_service.add_event(
             db,
             user_id=user_id,
@@ -533,7 +555,11 @@ class PlanningService:
             event_type="DAILY_PLAN_CREATED",
             actor_type=ActorType.SYSTEM,
             related_daily_plan_id=plan.id,
-            payload={"plan_date": plan_date.isoformat(), "version": plan.current_version},
+            payload={
+                "plan_date": plan_date.isoformat(),
+                "version": plan.current_version,
+                "manual_available_minutes": available_minutes,
+            },
         )
         db.commit()
         db.refresh(plan)
@@ -546,9 +572,15 @@ class PlanningService:
         plan: DailyPlan,
         trigger: PlanRevisionTrigger,
         reason: str,
+        available_minutes: int | None = None,
     ) -> PlanRevision:
         version = 1 if trigger == PlanRevisionTrigger.INITIAL else plan.current_version + 1
-        remaining_tasks = self._planned_tasks(db, user_id=plan.user_id, plan_date=plan.plan_date)
+        remaining_tasks = self._planned_tasks(
+            db,
+            user_id=plan.user_id,
+            plan_date=plan.plan_date,
+            available_minutes=available_minutes,
+        )
         completed_carryovers = self._completed_carryover_tasks(db, plan=plan)
         completed_task_ids = {planned.task.id for planned in completed_carryovers}
         planned_tasks = [
@@ -563,13 +595,20 @@ class PlanningService:
             diff_payload={
                 "task_ids": [str(planned.task.id) for planned in planned_tasks],
                 "completed_carryover_task_ids": [str(planned.task.id) for planned in completed_carryovers],
+                "manual_available_minutes": available_minutes,
             },
         )
         db.add(revision)
         db.flush()
 
         strategy_tasks = [planned for planned in planned_tasks if planned.contributes_to_strategy]
-        strategy_payload = self._strategy_for(strategy_tasks)
+        context = self._planning_context(
+            db,
+            user_id=plan.user_id,
+            plan_date=plan.plan_date,
+            available_minutes=available_minutes,
+        )
+        strategy_payload = self._strategy_for(strategy_tasks, context=context)
         planner_result = self._run_daily_planner_agent(
             db,
             plan=plan,
@@ -622,7 +661,14 @@ class PlanningService:
         db.flush()
         return revision
 
-    def _planned_tasks(self, db: Session, *, user_id: uuid.UUID, plan_date: date) -> list[PlannedTask]:
+    def _planned_tasks(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        plan_date: date,
+        available_minutes: int | None = None,
+    ) -> list[PlannedTask]:
         stmt = (
             select(Task)
             .options(selectinload(Task.goal))
@@ -632,7 +678,12 @@ class PlanningService:
             )
         )
         tasks = list(db.scalars(stmt).all())
-        context = self._planning_context(db, user_id=user_id, plan_date=plan_date)
+        context = self._planning_context(
+            db,
+            user_id=user_id,
+            plan_date=plan_date,
+            available_minutes=available_minutes,
+        )
         signals = self._planning_signals(db, user_id=user_id, tasks=tasks, plan_date=plan_date)
         scored_tasks: list[PlannedTask] = []
         for task in tasks:
@@ -888,11 +939,18 @@ class PlanningService:
                 cleaned_suggestions.append(item)
         return cleaned_suggestions
 
-    def _planning_context(self, db: Session, *, user_id: uuid.UUID, plan_date: date) -> PlanningContext:
+    def _planning_context(
+        self,
+        db: Session,
+        *,
+        user_id: uuid.UUID,
+        plan_date: date,
+        available_minutes: int | None = None,
+    ) -> PlanningContext:
         settings = self._settings_for(db, user_id=user_id)
         planning_preference = settings.planning_preference if settings else PlanningPreference.NORMAL
         ai_strategy_preference = settings.ai_strategy_preference if settings else AIStrategyPreference.BALANCED
-        base_capacity = {
+        preference_capacity = {
             PlanningPreference.LIGHT: 90,
             PlanningPreference.NORMAL: 150,
             PlanningPreference.SPRINT: 210,
@@ -903,9 +961,16 @@ class PlanningService:
         task_match = dashboard["task_match"]
         energy_has_data = bool(dashboard["trends"][0]["has_data"])
         energy_level = summary["energy_level"]
+        manual_available_minutes = available_minutes if available_minutes is not None else None
+        base_capacity = manual_available_minutes or preference_capacity
         daily_capacity = base_capacity
-        if energy_has_data and energy_level == "low":
+        capacity_source = "manual_today_override" if manual_available_minutes is not None else "planning_preference"
+        energy_capacity_adjusted = False
+        if manual_available_minutes is None and energy_has_data and energy_level == "low":
             daily_capacity = min(base_capacity, 90)
+            energy_capacity_adjusted = daily_capacity != base_capacity
+            if energy_capacity_adjusted:
+                capacity_source = "energy_adjusted"
 
         return PlanningContext(
             plan_date=plan_date,
@@ -913,6 +978,9 @@ class PlanningService:
             ai_strategy_preference=ai_strategy_preference,
             base_capacity_minutes=base_capacity,
             daily_capacity_minutes=daily_capacity,
+            capacity_source=capacity_source,
+            manual_available_minutes=manual_available_minutes,
+            energy_capacity_adjusted=energy_capacity_adjusted,
             energy_has_data=energy_has_data,
             energy_score=summary["energy_score"],
             energy_level=energy_level,
@@ -922,6 +990,27 @@ class PlanningService:
     def _settings_for(self, db: Session, *, user_id: uuid.UUID) -> UserSettings | None:
         stmt = select(UserSettings).where(UserSettings.user_id == user_id)
         return db.scalars(stmt).first()
+
+    def _validated_available_minutes(self, available_minutes: int | None) -> int | None:
+        if available_minutes is None:
+            return None
+        minutes = int(available_minutes)
+        if minutes < 15 or minutes > 720:
+            raise ValidationDomainError("available_minutes must be between 15 and 720")
+        return minutes
+
+    def _current_manual_available_minutes(self, db: Session, *, plan: DailyPlan) -> int | None:
+        try:
+            strategy = self._current_strategy(db, plan=plan)
+        except InvalidStateError:
+            return None
+        score_factors = strategy.score_factors or {}
+        if score_factors.get("capacity_source") != "manual_today_override":
+            return None
+        minutes = score_factors.get("manual_available_minutes")
+        if minutes is None:
+            return None
+        return int(minutes)
 
     def _score_breakdown_for(self, task: Task, *, context: PlanningContext, signals: dict) -> dict:
         semantic_signal = signals["semantic_by_task_id"].get(task.id)
@@ -1019,7 +1108,12 @@ class PlanningService:
             **semantic_scores,
             **duration_estimate,
             "user_estimated_duration_min": task.estimated_duration_min,
+            "planning_preference": context.planning_preference.value,
+            "base_capacity_minutes": int(context.base_capacity_minutes),
             "daily_capacity_minutes": int(context.daily_capacity_minutes),
+            "capacity_source": context.capacity_source,
+            "manual_available_minutes": context.manual_available_minutes,
+            "energy_capacity_adjusted": context.energy_capacity_adjusted,
             "energy_level": context.energy_level,
             "energy_applied": context.energy_has_data,
             "behavior": behavior,
@@ -2088,7 +2182,7 @@ class PlanningService:
             planned.task.created_at,
         )
 
-    def _strategy_for(self, planned_tasks: list[PlannedTask]) -> dict:
+    def _strategy_for(self, planned_tasks: list[PlannedTask], *, context: PlanningContext | None = None) -> dict:
         active_tasks = [planned for planned in planned_tasks if planned.section != DailyPlanItemSection.ROLLED_OVER]
         rolled_over_tasks = [planned for planned in planned_tasks if planned.section == DailyPlanItemSection.ROLLED_OVER]
         pinned_count = len([planned for planned in active_tasks if planned.section == DailyPlanItemSection.PINNED])
@@ -2118,9 +2212,30 @@ class PlanningService:
             [planned for planned in active_tasks if planned.score_breakdown.get("goal_progress_applied")]
         )
         first_breakdown = planned_tasks[0].score_breakdown if planned_tasks else {}
-        daily_capacity_minutes = int(first_breakdown.get("daily_capacity_minutes") or 0)
-        energy_level = str(first_breakdown.get("energy_level") or "unknown")
-        energy_applied = bool(first_breakdown.get("energy_applied") or False)
+        base_capacity_minutes = int(
+            first_breakdown.get("base_capacity_minutes")
+            or (context.base_capacity_minutes if context else 0)
+        )
+        daily_capacity_minutes = int(
+            first_breakdown.get("daily_capacity_minutes")
+            or (context.daily_capacity_minutes if context else 0)
+        )
+        capacity_source = str(
+            first_breakdown.get("capacity_source")
+            or (context.capacity_source if context else "planning_preference")
+        )
+        manual_available_minutes = (
+            first_breakdown.get("manual_available_minutes")
+            if first_breakdown
+            else (context.manual_available_minutes if context else None)
+        )
+        energy_capacity_adjusted = bool(
+            first_breakdown.get("energy_capacity_adjusted")
+            if first_breakdown
+            else (context.energy_capacity_adjusted if context else False)
+        )
+        energy_level = str(first_breakdown.get("energy_level") or (context.energy_level if context else "unknown"))
+        energy_applied = bool(first_breakdown.get("energy_applied") or (context.energy_has_data if context else False))
         over_capacity_minutes = self._over_capacity_minutes(
             selected_minutes=total_minutes,
             daily_capacity_minutes=daily_capacity_minutes,
@@ -2136,7 +2251,11 @@ class PlanningService:
                     "task_count": 0,
                     "pinned_count": 0,
                     "total_minutes": 0,
+                    "base_capacity_minutes": base_capacity_minutes,
                     "daily_capacity_minutes": daily_capacity_minutes,
+                    "capacity_source": capacity_source,
+                    "manual_available_minutes": manual_available_minutes,
+                    "energy_capacity_adjusted": energy_capacity_adjusted,
                     "selected_estimated_minutes": 0,
                     "rolled_over_estimated_minutes": rolled_over_minutes,
                     "over_capacity_minutes": 0,
@@ -2175,7 +2294,11 @@ class PlanningService:
                 "task_count": len(active_tasks),
                 "pinned_count": pinned_count,
                 "total_minutes": total_minutes,
+                "base_capacity_minutes": base_capacity_minutes,
                 "daily_capacity_minutes": daily_capacity_minutes,
+                "capacity_source": capacity_source,
+                "manual_available_minutes": manual_available_minutes,
+                "energy_capacity_adjusted": energy_capacity_adjusted,
                 "selected_estimated_minutes": total_minutes,
                 "rolled_over_estimated_minutes": rolled_over_minutes,
                 "over_capacity_minutes": over_capacity_minutes,
@@ -2309,14 +2432,29 @@ class PlanningService:
                 f"已超过今日容量参考 {capacity} 分钟，因此优先解释风险和高价值保护。"
             )
         elif capacity:
+            capacity_label = (
+                "你手动设置的可用时间"
+                if factors.get("capacity_source") == "manual_today_override"
+                else "容量参考"
+            )
             summary = (
                 f"Planning Engine 将 {factors['task_count']} 个主序列任务压在约 {selected_minutes} 分钟内，"
-                f"容量参考为 {capacity} 分钟。"
+                f"{capacity_label}为 {capacity} 分钟。"
             )
         else:
             summary = f"Planning Engine 用价值、截止时间、依赖和任务大小为 {factors['task_count']} 个任务生成执行顺序。"
 
         signals: list[dict] = []
+        if factors.get("capacity_source") == "manual_today_override":
+            signals.append(
+                {
+                    "key": "manual_available_time",
+                    "title": "按你的可用时间安排",
+                    "message": f"今天可用时间按你设置的 {capacity} 分钟计算，系统会把低优先级事项滚动到未来。",
+                    "signal": "positive",
+                    "score": capacity,
+                }
+            )
         if factors["over_capacity_minutes"]:
             signals.append(
                 {
@@ -2522,7 +2660,11 @@ class PlanningService:
             ),
             "rolled_over_count": len([item for item in items if item.section == DailyPlanItemSection.ROLLED_OVER]),
             "total_estimated_minutes": int(score_factors.get("total_minutes", plan.total_estimated_minutes) or 0),
+            "base_capacity_minutes": int(score_factors.get("base_capacity_minutes", daily_capacity_minutes) or 0),
             "daily_capacity_minutes": daily_capacity_minutes,
+            "capacity_source": str(score_factors.get("capacity_source") or "planning_preference"),
+            "manual_available_minutes": score_factors.get("manual_available_minutes"),
+            "energy_capacity_adjusted": bool(score_factors.get("energy_capacity_adjusted") or False),
             "selected_estimated_minutes": selected_estimated_minutes,
             "rolled_over_estimated_minutes": int(score_factors.get("rolled_over_estimated_minutes", 0) or 0),
             "over_capacity_minutes": over_capacity_minutes,
@@ -2555,6 +2697,10 @@ class PlanningService:
         if factors["rolled_over_count"]:
             explanation.append(f"{factors['rolled_over_count']} 个任务被滚动到未来，避免挤占今天的主执行序列。")
         if factors["daily_capacity_minutes"]:
+            if factors.get("capacity_source") == "manual_today_override":
+                explanation.append(f"今天按你手动设置的 {factors['daily_capacity_minutes']} 分钟可用时间来安排主序列。")
+            elif factors.get("energy_capacity_adjusted"):
+                explanation.append(f"今天容量从 {factors['base_capacity_minutes']} 分钟收敛到 {factors['daily_capacity_minutes']} 分钟，用来匹配偏低精力。")
             explanation.append(
                 f"今天主序列约 {factors['selected_estimated_minutes']} 分钟，容量参考为 {factors['daily_capacity_minutes']} 分钟。"
             )
