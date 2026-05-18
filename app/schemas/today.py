@@ -115,6 +115,12 @@ class StrategyDetailFactorsResponse(BaseModel):
     dependency_protected_count: int
     goal_next_action_count: int = 0
     goal_progress_signal_count: int = 0
+    planning_objective_applied: bool = False
+    planning_objective_version: str = "p2-planning-objective-v2"
+    objective_selected_score: int = 0
+    objective_rolled_over_score: int = 0
+    objective_high_value_goal_selected_count: int = 0
+    objective_capacity_utilization: float = 0.0
     user_adjusted_count: int
     semantic_signal_count: int = 0
     semantic_protected_count: int = 0

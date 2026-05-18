@@ -14,7 +14,7 @@ class PlannerEvalPolicyTests(unittest.TestCase):
         policy = load_policy(DEFAULT_POLICY_PATH)
 
         self.assertEqual(policy["evaluator_version"], EVALUATOR_VERSION)
-        self.assertEqual(len(policy["required_scenarios"]), 12)
+        self.assertEqual(len(policy["required_scenarios"]), 13)
         self.assertTrue(policy["exact_scenario_set"])
 
     def test_policy_check_accepts_matching_run(self):
@@ -105,6 +105,9 @@ def _policy(*scenario_names: str) -> dict:
             "planner_agent_provider",
             "score_explanation_summary",
             "score_explanation_signal_keys",
+            "planning_objective_applied",
+            "planning_objective_version",
+            "objective_selected_score",
             "item_signals",
         ],
         "required_item_signal_fields": [
@@ -121,6 +124,9 @@ def _policy(*scenario_names: str) -> dict:
             "personalization_sample_count",
             "dependency_score",
             "user_preference_score",
+            "planning_objective_score",
+            "planning_objective_selected",
+            "planning_objective_reason_key",
             "dominant_factor",
             "dominant_reason",
             "score_signal_keys",
@@ -158,6 +164,9 @@ def _scenario(name: str, *, passed: bool = True) -> dict:
             "rolled_over_estimated_minutes": 0,
             "over_capacity_minutes": 0,
             "energy_applied": False,
+            "planning_objective_applied": True,
+            "planning_objective_version": "p2-planning-objective-v2",
+            "objective_selected_score": 30,
             "planner_agent_status": "succeeded",
             "planner_agent_provider": "mock",
             "planner_agent_model": "structured-mock-v1",
@@ -182,6 +191,9 @@ def _scenario(name: str, *, passed: bool = True) -> dict:
                     "personalization_sample_count": 0,
                     "dependency_score": 0,
                     "user_preference_score": 0,
+                    "planning_objective_score": 30,
+                    "planning_objective_selected": True,
+                    "planning_objective_reason_key": "balanced_capacity_fit",
                     "dominant_factor": "value",
                     "dominant_reason": "任务价值较高。",
                     "score_signal_keys": ["value"],

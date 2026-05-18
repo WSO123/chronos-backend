@@ -813,6 +813,82 @@ class TodayServiceTests(unittest.TestCase):
         self.assertEqual(second_strategy["factors"]["manual_available_minutes"], 60)
         self.assertEqual(events[-1].payload["manual_available_minutes"], 60)
 
+    def test_planning_objective_uses_remaining_capacity_for_high_value_goal_progress(self):
+        goal = goal_service.create_goal(
+            self.db,
+            user_id=self.user.id,
+            title="Ship P2 execution loop",
+            deadline=self.plan_date + timedelta(days=21),
+            value_level=ValueLevel.HIGH,
+        )
+        first_goal_step = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Stabilize Today planning core",
+            estimated_duration_min=45,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        followup_goal_step = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            goal_id=goal.id,
+            title="Connect goal progress to next planning step",
+            estimated_duration_min=45,
+            priority=4,
+            value_level=ValueLevel.MEDIUM,
+        )
+        admin_task = task_service.create_task(
+            self.db,
+            user_id=self.user.id,
+            title="Clear ordinary admin backlog",
+            estimated_duration_min=45,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+
+        today = planning_service.replan_today(
+            self.db,
+            user_id=self.user.id,
+            plan_date=self.plan_date,
+            reason="Short day for objective test",
+            available_minutes=90,
+        )
+        strategy = planning_service.get_strategy_detail(self.db, user_id=self.user.id, plan_date=self.plan_date)
+
+        pinned_ids = [item["task_id"] for item in today["sections"]["pinned_tasks"]]
+        low_priority_ids = [item["task_id"] for item in today["sections"]["low_priority_tasks"]]
+        rolled_ids = [item["task_id"] for item in today["sections"]["rolled_over_tasks"]]
+        followup_item = next(
+            item for item in today["sections"]["low_priority_tasks"] if item["task_id"] == followup_goal_step.id
+        )
+        rolled_admin = next(item for item in today["sections"]["rolled_over_tasks"] if item["task_id"] == admin_task.id)
+
+        self.assertIn(first_goal_step.id, pinned_ids)
+        self.assertIn(followup_goal_step.id, low_priority_ids)
+        self.assertIn(admin_task.id, rolled_ids)
+        self.assertTrue(followup_item["score_breakdown"]["planning_objective_selected"])
+        self.assertEqual(
+            followup_item["score_breakdown"]["planning_objective_reason_key"],
+            "high_value_goal_progress",
+        )
+        self.assertFalse(rolled_admin["score_breakdown"]["planning_objective_selected"])
+        self.assertEqual(rolled_admin["score_breakdown"]["rollover_reason"], "capacity")
+        self.assertEqual(strategy["factors"]["daily_capacity_minutes"], 90)
+        self.assertEqual(strategy["factors"]["selected_estimated_minutes"], 90)
+        self.assertTrue(strategy["factors"]["planning_objective_applied"])
+        self.assertEqual(strategy["factors"]["planning_objective_version"], "p2-planning-objective-v2")
+        self.assertEqual(strategy["factors"]["objective_high_value_goal_selected_count"], 2)
+        self.assertGreater(
+            followup_item["score_breakdown"]["planning_objective_score"],
+            rolled_admin["score_breakdown"]["planning_objective_score"],
+        )
+        self.assertIn(
+            "planning_objective",
+            [signal["key"] for signal in strategy["score_explanation"]["signals"]],
+        )
+
     def test_planning_engine_warns_when_protected_work_exceeds_capacity(self):
         for index in range(3):
             task_service.create_task(

@@ -1,6 +1,6 @@
 {
-  "policy_version": "p2-planner-eval-policy-v4",
-  "evaluator_version": "p2-planning-engine-eval-v7",
+  "policy_version": "p2-planner-eval-policy-v5",
+  "evaluator_version": "p2-planning-engine-eval-v8",
   "status": "active",
   "required_run_status": "ok",
   "exact_scenario_set": true,
@@ -14,6 +14,10 @@
     "rolled_over_estimated_minutes",
     "over_capacity_minutes",
     "energy_applied",
+    "planning_objective_applied",
+    "planning_objective_version",
+    "objective_selected_score",
+    "objective_rolled_over_score",
     "planner_agent_status",
     "planner_agent_provider",
     "planner_agent_model",
@@ -38,6 +42,9 @@
     "personalization_sample_count",
     "dependency_score",
     "user_preference_score",
+    "planning_objective_score",
+    "planning_objective_selected",
+    "planning_objective_reason_key",
     "dominant_factor",
     "dominant_reason",
     "score_signal_keys"
@@ -48,6 +55,12 @@
       "must_pass": true,
       "critical": true,
       "intent": "Non-protected work rolls forward when today's realistic capacity is full."
+    },
+    {
+      "name": "capacity_objective_protects_goal_progress",
+      "must_pass": true,
+      "critical": true,
+      "intent": "Remaining capacity is optimized for high-value goal progress instead of the next ordinary task in list order."
     },
     {
       "name": "protected_overload_warning",

@@ -28,7 +28,7 @@ from tests.factories import create_user
 
 
 PLAN_DATE = date(2026, 5, 17)
-EVALUATOR_VERSION = "p2-planning-engine-eval-v7"
+EVALUATOR_VERSION = "p2-planning-engine-eval-v8"
 
 
 @dataclass(frozen=True)
@@ -43,6 +43,7 @@ def run_evaluation(*, run_id: str | None = None) -> dict:
     resolved_run_id = run_id or str(uuid.uuid4())
     scenarios: list[Callable[[], ScenarioResult]] = [
         _scenario_capacity_rollover,
+        _scenario_capacity_objective_protects_goal_progress,
         _scenario_protected_overload_warning,
         _scenario_low_energy_lightens_plan,
         _scenario_high_energy_prioritizes_deep_work_without_expansion,
@@ -106,6 +107,103 @@ def _scenario_capacity_rollover() -> ScenarioResult:
         failures += _explainability_failures(strategy)
         return ScenarioResult(
             name="capacity_rollover",
+            passed=not failures,
+            details=_details(db=db, today=today, strategy=strategy),
+            failures=failures,
+        )
+    finally:
+        db.close()
+
+
+def _scenario_capacity_objective_protects_goal_progress() -> ScenarioResult:
+    db = _fresh_db()
+    try:
+        user = create_user(db, name="Planner Eval Objective")
+        goal = goal_service.create_goal(
+            db,
+            user_id=user.id,
+            title="Ship P2 execution loop",
+            deadline=PLAN_DATE + timedelta(days=21),
+            value_level=ValueLevel.HIGH,
+        )
+        first_goal_step = task_service.create_task(
+            db,
+            user_id=user.id,
+            goal_id=goal.id,
+            title="Stabilize Today planning core",
+            estimated_duration_min=45,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+        followup_goal_step = task_service.create_task(
+            db,
+            user_id=user.id,
+            goal_id=goal.id,
+            title="Connect goal progress to next planning step",
+            estimated_duration_min=45,
+            priority=4,
+            value_level=ValueLevel.MEDIUM,
+        )
+        admin_task = task_service.create_task(
+            db,
+            user_id=user.id,
+            title="Clear ordinary admin backlog",
+            estimated_duration_min=45,
+            priority=3,
+            value_level=ValueLevel.MEDIUM,
+        )
+
+        today = planning_service.replan_today(
+            db,
+            user_id=user.id,
+            plan_date=PLAN_DATE,
+            reason="Evaluate objective under short capacity",
+            available_minutes=90,
+        )
+        strategy = planning_service.get_strategy_detail(db, user_id=user.id, plan_date=PLAN_DATE)
+        followup_item = _find_item(today, followup_goal_step.id)
+        admin_item = _find_item(today, admin_task.id)
+        failures = _check_all(
+            ("first goal step is protected", first_goal_step.id in [item["task_id"] for item in today["sections"]["pinned_tasks"]]),
+            (
+                "followup high-value goal step enters remaining capacity",
+                bool(followup_item) and _section_value(followup_item) == DailyPlanItemSection.LOW_PRIORITY.value,
+            ),
+            (
+                "ordinary admin task rolls over",
+                bool(admin_item) and _section_value(admin_item) == DailyPlanItemSection.ROLLED_OVER.value,
+            ),
+            (
+                "objective selected the goal followup",
+                bool(followup_item) and followup_item["score_breakdown"].get("planning_objective_selected") is True,
+            ),
+            (
+                "objective rejected ordinary admin task",
+                bool(admin_item) and admin_item["score_breakdown"].get("planning_objective_selected") is False,
+            ),
+            (
+                "selected minutes equals manual capacity",
+                strategy["factors"]["selected_estimated_minutes"] == 90,
+            ),
+            (
+                "objective is exposed in Strategy Detail",
+                strategy["factors"].get("planning_objective_version") == "p2-planning-objective-v2",
+            ),
+            (
+                "objective explanation signal is visible",
+                "planning_objective" in [signal["key"] for signal in strategy["score_explanation"]["signals"]],
+            ),
+            (
+                "goal objective score beats admin objective score",
+                bool(followup_item)
+                and bool(admin_item)
+                and followup_item["score_breakdown"].get("planning_objective_score", 0)
+                > admin_item["score_breakdown"].get("planning_objective_score", 0),
+            ),
+        )
+        failures += _explainability_failures(strategy)
+        return ScenarioResult(
+            name="capacity_objective_protects_goal_progress",
             passed=not failures,
             details=_details(db=db, today=today, strategy=strategy),
             failures=failures,
@@ -963,6 +1061,10 @@ def _details(*, db, today: dict, strategy: dict) -> dict:
         "rolled_over_estimated_minutes": strategy["factors"]["rolled_over_estimated_minutes"],
         "over_capacity_minutes": strategy["factors"]["over_capacity_minutes"],
         "energy_applied": strategy["factors"]["energy_applied"],
+        "planning_objective_applied": strategy["factors"].get("planning_objective_applied"),
+        "planning_objective_version": strategy["factors"].get("planning_objective_version"),
+        "objective_selected_score": strategy["factors"].get("objective_selected_score"),
+        "objective_rolled_over_score": strategy["factors"].get("objective_rolled_over_score"),
         **planner_trace,
     }
 
@@ -1006,6 +1108,9 @@ def _item_signals(items: list[dict]) -> list[dict]:
             "personalization_sample_count": item["score_breakdown"].get("personalization_sample_count"),
             "dependency_score": item["score_breakdown"].get("dependency_score"),
             "user_preference_score": item["score_breakdown"].get("user_preference_score"),
+            "planning_objective_score": item["score_breakdown"].get("planning_objective_score"),
+            "planning_objective_selected": item["score_breakdown"].get("planning_objective_selected"),
+            "planning_objective_reason_key": item["score_breakdown"].get("planning_objective_reason_key"),
             "dominant_factor": item.get("dominant_factor"),
             "dominant_reason": item.get("dominant_reason"),
             "score_signal_keys": [signal["key"] for signal in item.get("score_signals", []) if signal.get("key")],

@@ -8,9 +8,9 @@ Planner eval 是 Chronos AI 编排能力的离线质量尺子。它不替代单�
 
 当前 golden baseline：
 
-- Policy manifest: [p2-planning-engine-eval-v7.json](./p2-planning-engine-eval-v7.json)
-- Evaluator version: `p2-planning-engine-eval-v7`
-- Required scenario count: `12`
+- Policy manifest: [p2-planning-engine-eval-v8.json](./p2-planning-engine-eval-v8.json)
+- Evaluator version: `p2-planning-engine-eval-v8`
+- Required scenario count: `13`
 - Check script: `scripts/check_planner_eval_policy.py`
 
 ---

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
 from math import ceil
@@ -1629,44 +1629,171 @@ class PlanningService:
         return 4
 
     def _apply_capacity(self, planned_tasks: list[PlannedTask], *, context: PlanningContext) -> list[PlannedTask]:
+        planned_tasks = [self._with_planning_objective(planned) for planned in planned_tasks]
         selected_minutes = 0
         result: list[PlannedTask] = []
+        optional_tasks: list[PlannedTask] = []
         for planned in planned_tasks:
             if planned.task.status == TaskStatus.POSTPONED:
                 result.append(self._roll_over(planned, reason="postponed"))
                 continue
 
             protected = planned.section == DailyPlanItemSection.PINNED
-            fits_capacity = selected_minutes + planned.estimated_duration_min <= context.daily_capacity_minutes
-            if protected or fits_capacity:
+            if protected:
                 selected_minutes += planned.estimated_duration_min
-                score_breakdown = dict(planned.score_breakdown)
-                score_breakdown["selected_for_today"] = True
-                score_breakdown["capacity_remaining_after_minutes"] = max(
-                    context.daily_capacity_minutes - selected_minutes,
-                    0,
-                )
-                result.append(
-                    PlannedTask(
-                        task=planned.task,
-                        section=planned.section,
-                        recommendation_reason=planned.recommendation_reason,
-                        estimated_duration_min=planned.estimated_duration_min,
-                        score=planned.score,
-                        score_breakdown=score_breakdown,
-                        dependency_depth=planned.dependency_depth,
-                        unlocks_task=planned.unlocks_task,
-                        blocked_by_dependency=planned.blocked_by_dependency,
-                        priority_adjusted=planned.priority_adjusted,
-                    )
-                )
+                result.append(self._select_for_today(planned, selected_minutes=selected_minutes, context=context))
+                continue
+
+            optional_tasks.append(planned)
+
+        selected_optional_ids = self._select_optional_tasks_by_objective(
+            optional_tasks,
+            capacity_minutes=max(context.daily_capacity_minutes - selected_minutes, 0),
+        )
+        for planned in optional_tasks:
+            if planned.task.id in selected_optional_ids:
+                selected_minutes += planned.estimated_duration_min
+                result.append(self._select_for_today(planned, selected_minutes=selected_minutes, context=context))
                 continue
             result.append(self._roll_over(planned, reason="capacity"))
-        return result
+        return sorted(result, key=self._planned_sort_key)
+
+    def _select_for_today(
+        self,
+        planned: PlannedTask,
+        *,
+        selected_minutes: int,
+        context: PlanningContext,
+    ) -> PlannedTask:
+        score_breakdown = dict(planned.score_breakdown)
+        score_breakdown["selected_for_today"] = True
+        score_breakdown["planning_objective_selected"] = True
+        score_breakdown["capacity_remaining_after_minutes"] = max(
+            context.daily_capacity_minutes - selected_minutes,
+            0,
+        )
+        return replace(planned, score_breakdown=score_breakdown)
+
+    def _select_optional_tasks_by_objective(
+        self,
+        planned_tasks: list[PlannedTask],
+        *,
+        capacity_minutes: int,
+    ) -> set[uuid.UUID]:
+        if capacity_minutes <= 0 or not planned_tasks:
+            return set()
+
+        states: dict[int, tuple[tuple[int, int], tuple[uuid.UUID, ...]]] = {0: ((0, 0), ())}
+        for planned in planned_tasks:
+            cost = max(1, int(planned.estimated_duration_min))
+            objective_score = int(planned.score_breakdown.get("planning_objective_score") or 0)
+            if cost > capacity_minutes:
+                continue
+            for used_minutes, (state_score, task_ids) in list(states.items()):
+                next_minutes = used_minutes + cost
+                if next_minutes > capacity_minutes:
+                    continue
+                next_score = (state_score[0] + objective_score, state_score[1] + int(planned.score))
+                current = states.get(next_minutes)
+                if current is None or next_score > current[0]:
+                    states[next_minutes] = (next_score, task_ids + (planned.task.id,))
+
+        best_minutes, best_state = max(
+            states.items(),
+            key=lambda item: (
+                item[1][0][0],
+                item[1][0][1],
+                item[0],
+                -len(item[1][1]),
+            ),
+        )
+        if best_minutes <= 0:
+            return set()
+        return set(best_state[1])
+
+    def _with_planning_objective(self, planned: PlannedTask) -> PlannedTask:
+        score_breakdown = dict(planned.score_breakdown)
+        score_breakdown.update(self._planning_objective_for(planned))
+        return replace(planned, score_breakdown=score_breakdown)
+
+    def _planning_objective_for(self, planned: PlannedTask) -> dict:
+        score_breakdown = planned.score_breakdown
+        value_score = int(score_breakdown.get("value_score") or 0)
+        priority_score = int(score_breakdown.get("priority_score") or 0)
+        urgency_score = max(0, int(score_breakdown.get("urgency_score") or 0))
+        goal_urgency_score = max(0, int(score_breakdown.get("goal_urgency_score") or 0))
+        goal_value_score = int(score_breakdown.get("goal_value_score") or 0)
+        goal_next_action_score = int(score_breakdown.get("goal_next_action_score") or 0)
+        goal_progress_score = int(score_breakdown.get("goal_progress_score") or 0)
+        dependency_score = max(0, int(score_breakdown.get("dependency_score") or 0))
+        semantic_goal_score = max(0, int(score_breakdown.get("goal_alignment_signal_score") or 0))
+        semantic_priority_score = max(0, int(score_breakdown.get("semantic_priority_signal_score") or 0))
+        blocking_risk_score = max(0, int(score_breakdown.get("blocking_risk_score") or 0))
+        duration_fit_score = max(0, int(score_breakdown.get("duration_fit_score") or 0))
+        energy_fit_score = max(0, int(score_breakdown.get("energy_fit_score") or 0))
+        user_preference_score = max(0, int(score_breakdown.get("user_preference_score") or 0))
+        personalization_score = max(0, int(score_breakdown.get("personalization_score") or 0))
+        high_value_goal_bonus = 0
+        if planned.task.goal is not None and planned.task.goal.value_level == ValueLevel.HIGH:
+            high_value_goal_bonus = 18
+        minimum_viable_bonus = 12 if score_breakdown.get("minimum_viable_progress_applied") else 0
+
+        goal_progress_component = (
+            goal_value_score * 2
+            + goal_next_action_score * 2
+            + goal_progress_score * 2
+            + high_value_goal_bonus
+        )
+        execution_fit_component = duration_fit_score + energy_fit_score // 2
+        semantic_component = semantic_goal_score + semantic_priority_score // 2 + blocking_risk_score
+        user_signal_component = user_preference_score + personalization_score // 2
+        objective_score = int(
+            value_score
+            + priority_score
+            + urgency_score
+            + goal_urgency_score
+            + dependency_score
+            + goal_progress_component
+            + semantic_component
+            + execution_fit_component
+            + user_signal_component
+            + minimum_viable_bonus
+        )
+        capacity_cost = max(1, int(planned.estimated_duration_min))
+        reason_key = "balanced_capacity_fit"
+        if goal_progress_score > 0:
+            reason_key = "goal_progress_maximization"
+        elif goal_next_action_score > 0:
+            reason_key = "goal_next_action_protection"
+        elif high_value_goal_bonus > 0:
+            reason_key = "high_value_goal_progress"
+        elif planned.task.value_level == ValueLevel.HIGH:
+            reason_key = "high_value_task"
+        elif urgency_score or goal_urgency_score:
+            reason_key = "deadline_pressure"
+        elif semantic_component > 0:
+            reason_key = "semantic_goal_fit"
+
+        return {
+            "planning_objective_applied": True,
+            "planning_objective_version": "p2-planning-objective-v2",
+            "planning_objective_score": max(0, objective_score),
+            "planning_objective_efficiency": round(max(0, objective_score) / capacity_cost, 3),
+            "planning_objective_capacity_cost_min": capacity_cost,
+            "planning_objective_reason_key": reason_key,
+            "planning_objective_goal_progress_component": goal_progress_component,
+            "planning_objective_semantic_component": semantic_component,
+            "planning_objective_execution_fit_component": execution_fit_component,
+            "planning_objective_user_signal_component": user_signal_component,
+            "planning_objective_minimum_viable_bonus": minimum_viable_bonus,
+            "planning_objective_high_value_goal_bonus": high_value_goal_bonus,
+            "planning_objective_selected": False,
+        }
 
     def _roll_over(self, planned: PlannedTask, *, reason: str) -> PlannedTask:
         score_breakdown = dict(planned.score_breakdown)
         score_breakdown["selected_for_today"] = False
+        score_breakdown["planning_objective_selected"] = False
         score_breakdown["rollover_reason"] = reason
         if reason == "capacity":
             recommendation_reason = "Rolled forward because today's capacity is already protected for higher-value work."
@@ -2528,6 +2655,22 @@ class PlanningService:
         goal_progress_signal_count = len(
             [planned for planned in active_tasks if planned.score_breakdown.get("goal_progress_applied")]
         )
+        planning_objective_applied = any(
+            planned.score_breakdown.get("planning_objective_applied") for planned in planned_tasks
+        )
+        objective_selected_score = sum(
+            int(planned.score_breakdown.get("planning_objective_score") or 0) for planned in active_tasks
+        )
+        objective_rolled_over_score = sum(
+            int(planned.score_breakdown.get("planning_objective_score") or 0) for planned in rolled_over_tasks
+        )
+        objective_high_value_goal_selected_count = len(
+            [
+                planned
+                for planned in active_tasks
+                if int(planned.score_breakdown.get("planning_objective_high_value_goal_bonus") or 0) > 0
+            ]
+        )
         first_breakdown = planned_tasks[0].score_breakdown if planned_tasks else {}
         base_capacity_minutes = int(
             first_breakdown.get("base_capacity_minutes")
@@ -2553,6 +2696,9 @@ class PlanningService:
         )
         energy_level = str(first_breakdown.get("energy_level") or (context.energy_level if context else "unknown"))
         energy_applied = bool(first_breakdown.get("energy_applied") or (context.energy_has_data if context else False))
+        objective_capacity_utilization = (
+            round(total_minutes / daily_capacity_minutes, 2) if daily_capacity_minutes > 0 else 0.0
+        )
         over_capacity_minutes = self._over_capacity_minutes(
             selected_minutes=total_minutes,
             daily_capacity_minutes=daily_capacity_minutes,
@@ -2589,6 +2735,12 @@ class PlanningService:
                     "execution_feedback_count": 0,
                     "personalization_signal_count": 0,
                     "goal_progress_signal_count": 0,
+                    "planning_objective_applied": False,
+                    "planning_objective_version": "p2-planning-objective-v2",
+                    "objective_selected_score": 0,
+                    "objective_rolled_over_score": 0,
+                    "objective_high_value_goal_selected_count": 0,
+                    "objective_capacity_utilization": 0.0,
                     "energy_level": energy_level,
                     "energy_applied": energy_applied,
                 },
@@ -2635,6 +2787,12 @@ class PlanningService:
                 "execution_feedback_count": execution_feedback_count,
                 "personalization_signal_count": personalization_signal_count,
                 "goal_progress_signal_count": goal_progress_signal_count,
+                "planning_objective_applied": planning_objective_applied,
+                "planning_objective_version": "p2-planning-objective-v2",
+                "objective_selected_score": objective_selected_score,
+                "objective_rolled_over_score": objective_rolled_over_score,
+                "objective_high_value_goal_selected_count": objective_high_value_goal_selected_count,
+                "objective_capacity_utilization": objective_capacity_utilization,
                 "energy_level": energy_level,
                 "energy_applied": energy_applied,
                 "average_score": round(
@@ -2800,6 +2958,19 @@ class PlanningService:
                     "message": f"{factors['rolled_over_count']} 个任务被滚动到未来，避免今天的主序列变得不可执行。",
                     "signal": "watch",
                     "score": factors["rolled_over_count"],
+                }
+            )
+        if factors.get("planning_objective_applied"):
+            signals.append(
+                {
+                    "key": "planning_objective",
+                    "title": "目标推进最大化",
+                    "message": (
+                        f"在今日容量内优先选择能推进高价值目标的任务，"
+                        f"主序列推进收益为 {factors.get('objective_selected_score', 0)}。"
+                    ),
+                    "signal": "positive",
+                    "score": factors.get("objective_selected_score"),
                 }
             )
         if factors["pinned_count"]:
@@ -2999,6 +3170,16 @@ class PlanningService:
             "dependency_protected_count": int(score_factors.get("dependency_protected_count", 0) or 0),
             "goal_next_action_count": int(score_factors.get("goal_next_action_count", 0) or 0),
             "goal_progress_signal_count": int(score_factors.get("goal_progress_signal_count", 0) or 0),
+            "planning_objective_applied": bool(score_factors.get("planning_objective_applied") or False),
+            "planning_objective_version": str(
+                score_factors.get("planning_objective_version") or "p2-planning-objective-v2"
+            ),
+            "objective_selected_score": int(score_factors.get("objective_selected_score", 0) or 0),
+            "objective_rolled_over_score": int(score_factors.get("objective_rolled_over_score", 0) or 0),
+            "objective_high_value_goal_selected_count": int(
+                score_factors.get("objective_high_value_goal_selected_count", 0) or 0
+            ),
+            "objective_capacity_utilization": float(score_factors.get("objective_capacity_utilization", 0.0) or 0.0),
             "user_adjusted_count": int(score_factors.get("user_adjusted_count", 0) or 0),
             "semantic_signal_count": int(score_factors.get("semantic_signal_count", 0) or 0),
             "semantic_protected_count": int(score_factors.get("semantic_protected_count", 0) or 0),
@@ -3032,6 +3213,8 @@ class PlanningService:
             explanation.append(f"{factors['pinned_count']} 个任务被保护在前面，因为它们更重要或更紧急。")
         if factors["rolled_over_count"]:
             explanation.append(f"{factors['rolled_over_count']} 个任务被滚动到未来，避免挤占今天的主执行序列。")
+        if factors.get("planning_objective_applied"):
+            explanation.append("容量选择会优先保留能推进高价值目标、目标收口或下一步行动的任务。")
         if factors["daily_capacity_minutes"]:
             if factors.get("capacity_source") == "manual_today_override":
                 explanation.append(f"今天按你手动设置的 {factors['daily_capacity_minutes']} 分钟可用时间来安排主序列。")
