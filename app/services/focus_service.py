@@ -114,7 +114,7 @@ class FocusService:
         session.actual_duration_min = actual_minutes
         progress_delta = self._minimum_viable_progress_delta(db, session=session, user_id=user_id)
         if progress_delta is None:
-            task_service.complete_task(
+            updated_task = task_service.complete_task(
                 db,
                 task_id=session.task_id,
                 user_id=user_id,
@@ -124,7 +124,7 @@ class FocusService:
                 commit=False,
             )
         else:
-            task_service.record_partial_progress(
+            updated_task = task_service.record_partial_progress(
                 db,
                 task_id=session.task_id,
                 user_id=user_id,
@@ -134,6 +134,7 @@ class FocusService:
                 actual_duration_min_delta=actual_minutes,
                 commit=False,
             )
+        goal_progress_feedback = getattr(updated_task, "goal_progress_feedback", None)
         self._sync_daily_plan_item(
             db,
             session=session,
@@ -150,6 +151,7 @@ class FocusService:
         )
         db.commit()
         db.refresh(session)
+        session.goal_progress_feedback = goal_progress_feedback
         return session
 
     def interrupt_session(

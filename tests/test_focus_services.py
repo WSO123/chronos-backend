@@ -132,9 +132,20 @@ class FocusServiceTests(unittest.TestCase):
         self.assertEqual(refreshed_today["progress"]["completed_count"], 1)
         self.assertEqual(refreshed_today["progress"]["focus_minutes"], 40)
         self.assertEqual(refreshed_today["sections"]["pinned_tasks"][0]["item_status"], DailyPlanItemStatus.COMPLETED)
+        self.assertIsNotNone(completed.goal_progress_feedback)
+        self.assertEqual(completed.goal_progress_feedback["goal_id"], goal.id)
+        self.assertEqual(completed.goal_progress_feedback["task_id"], task.id)
+        self.assertEqual(completed.goal_progress_feedback["impact_type"], "partial_progress")
+        self.assertEqual(completed.goal_progress_feedback["progress_before"], 0.0)
+        self.assertEqual(completed.goal_progress_feedback["progress_after"], 0.25)
+        self.assertEqual(completed.goal_progress_feedback["progress_delta"], 0.25)
+        self.assertEqual(completed.goal_progress_feedback["focus_minutes"], 40)
         event_types = {event.event_type for event in events}
         self.assertIn("TASK_PARTIAL_PROGRESS_RECORDED", event_types)
         self.assertNotIn("TASK_COMPLETED", event_types)
+        partial_event = next(event for event in events if event.event_type == "TASK_PARTIAL_PROGRESS_RECORDED")
+        self.assertEqual(partial_event.payload["goal_id"], str(goal.id))
+        self.assertEqual(partial_event.payload["goal_progress_delta"], 0.25)
 
     def test_interrupt_focus_returns_task_to_active_and_keeps_item_planned(self):
         task = task_service.create_task(self.db, user_id=self.user.id, title="Interruptible task")

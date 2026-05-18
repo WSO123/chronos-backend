@@ -245,6 +245,42 @@ class TodayAPITests(unittest.TestCase):
         self.assertEqual(refreshed_today.json()["progress"]["completion_rate"], 1.0)
         self.assertEqual(old_item_response.status_code, 404)
 
+    def test_complete_today_item_returns_goal_progress_feedback(self):
+        goal_response = self.client.post(
+            "/api/v1/goals",
+            json={"title": "推进核心目标", "value_level": "high"},
+            headers=self.headers,
+        )
+        self.assertEqual(goal_response.status_code, 201)
+        task_response = self.client.post(
+            "/api/v1/tasks",
+            json={
+                "title": "完成目标关键任务",
+                "goal_id": goal_response.json()["id"],
+                "priority": 1,
+                "value_level": "high",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(task_response.status_code, 201)
+        today_response = self.client.get("/api/v1/today?plan_date=2026-05-16", headers=self.headers)
+        item_id = today_response.json()["sections"]["pinned_tasks"][0]["daily_plan_item_id"]
+
+        response = self.client.patch(
+            f"/api/v1/today/items/{item_id}",
+            json={"status": "completed"},
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["item_status"], "completed")
+        self.assertEqual(body["goal_progress_feedback"]["goal_id"], goal_response.json()["id"])
+        self.assertEqual(body["goal_progress_feedback"]["task_id"], task_response.json()["id"])
+        self.assertEqual(body["goal_progress_feedback"]["progress_before"], 0.0)
+        self.assertEqual(body["goal_progress_feedback"]["progress_after"], 1.0)
+        self.assertEqual(body["goal_progress_feedback"]["progress_delta"], 1.0)
+
     def test_user_id_isolation_for_today_item(self):
         self.client.post("/api/v1/tasks", json={"title": "Private today task"}, headers=self.headers)
         today_response = self.client.get("/api/v1/today?plan_date=2026-05-16", headers=self.headers)

@@ -80,6 +80,7 @@ P2 只保留和执行主线强相关的部分：Goals、依赖、洞察、解释
 | Execution Feedback Calibration | L2-L3 | Replan 时会读取 Task 实际投入时间，把 Today 估时校准为剩余工作量，并在 Strategy Detail 解释 | 先不自动改 Task 原估时，避免系统过度自作主张 |
 | Planner Personalization v1 | L2-L3 | 通过 TaskPlanningSignal 的 task_type 聚合同类历史任务耗时、中断、延后和完成势能，调整本轮估时、评分和 Strategy Detail 解释 | 不创建长期画像表，不让 LLM 直接排序 |
 | Goal Progress Strategy v1 | L2-L3 | Today 会读取目标完成率、剩余任务数、deadline 和价值等级，把目标当前下一步作为推进目标的保护信号 | 不新增项目管理视图，不把 Goals 做重 |
+| Goal Progress Feedback v1 | L2-L3 | Focus / Today 快速完成 / Daily Report / Goal Detail 会把执行结果转成轻量目标推进反馈，让用户看到今天让哪个 Goal 前进了多少 | 反馈来自确定性事件聚合，不引入新仪表盘或 LLM 排序 |
 | Insights / Weekly / Monthly | L2 | 作为复盘与趋势入口可用 | 不能替代 Today 的每日执行决策 |
 
 ---

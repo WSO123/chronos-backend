@@ -158,6 +158,11 @@ class ReportAndMeServiceTests(unittest.TestCase):
         self.assertEqual(metrics.focus_minutes, 40)
         self.assertEqual(report.completed_task_count, 0)
         self.assertEqual(report.completion_rate, 1.0)
+        self.assertEqual(report.goal_progress_feedback["advanced_goal_count"], 1)
+        self.assertEqual(report.goal_progress_feedback["total_progress_delta"], 0.25)
+        self.assertEqual(report.goal_progress_feedback["items"][0]["goal_id"], goal.id)
+        self.assertEqual(report.goal_progress_feedback["items"][0]["progress_delta"], 0.25)
+        self.assertEqual(report.goal_progress_feedback["items"][0]["focus_minutes"], 40)
 
     def test_monthly_report_aggregates_daily_and_weekly_trends(self):
         goal = goal_service.create_goal(

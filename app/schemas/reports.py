@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from app.models.enums import ValueLevel
 from app.schemas.common import TimestampedResponse
+from app.schemas.goal_feedback import DailyGoalProgressFeedbackResponse
 
 
 class DailyReportResponse(TimestampedResponse):
@@ -20,6 +21,7 @@ class DailyReportResponse(TimestampedResponse):
     ai_suggestions: list[str]
     generated_from_plan_version: int | None
     refreshed_at: datetime
+    goal_progress_feedback: DailyGoalProgressFeedbackResponse
 
 
 class WeeklyReportDailyTrendResponse(BaseModel):

@@ -18,6 +18,7 @@ from app.models.enums import (
     ValueLevel,
 )
 from app.schemas.common import ORMModel, TimestampedResponse
+from app.schemas.goal_feedback import GoalProgressFeedbackItemResponse
 
 
 class TaskCreate(BaseModel):
@@ -87,6 +88,7 @@ class TaskResponse(TimestampedResponse):
     status: TaskStatus
     source: TaskSource
     steps: list[TaskStepResponse] = Field(default_factory=list)
+    goal_progress_feedback: GoalProgressFeedbackItemResponse | None = None
 
 
 class TaskTodayImpactResponse(BaseModel):

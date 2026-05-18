@@ -38,6 +38,7 @@ from app.models.mixins import utc_now
 from app.services.activity_event_service import activity_event_service
 from app.services.ai_job_service import ai_job_service
 from app.services.errors import InvalidStateError, NotFoundError, ValidationDomainError
+from app.services.goal_progress_feedback_service import goal_progress_feedback_service
 from app.services.task_planning_signal_service import task_planning_signal_service
 
 
@@ -288,10 +289,20 @@ class TaskService:
             action="completed",
         )
 
+        previous_progress = Decimal(task.progress or 0)
         task.status = TaskStatus.COMPLETED
         task.progress = Decimal("1.00")
         if actual_duration_min_delta:
             task.actual_duration_min += actual_duration_min_delta
+        progress_delta = max(Decimal("0.00"), Decimal("1.00") - previous_progress)
+        goal_progress_feedback = goal_progress_feedback_service.build_task_feedback(
+            db,
+            user_id=user_id,
+            task_id=task.id,
+            impact_type="completed_task",
+            task_progress_delta=progress_delta,
+            focus_minutes=actual_duration_min_delta,
+        )
         activity_event_service.add_event(
             db,
             user_id=user_id,
@@ -301,12 +312,18 @@ class TaskService:
             related_task_id=task.id,
             related_daily_plan_id=related_daily_plan_id,
             related_focus_session_id=related_focus_session_id,
-            payload={"actual_duration_min_delta": actual_duration_min_delta},
+            payload={
+                "actual_duration_min_delta": actual_duration_min_delta,
+                **goal_progress_feedback_service.event_payload(goal_progress_feedback),
+            },
         )
+        task.goal_progress_feedback = goal_progress_feedback
         if commit:
             db.commit()
             db.refresh(task)
-            return self.get_task(db, task_id=task.id, user_id=user_id)
+            refreshed_task = self.get_task(db, task_id=task.id, user_id=user_id)
+            refreshed_task.goal_progress_feedback = goal_progress_feedback
+            return refreshed_task
         db.flush()
         return task
 
@@ -335,6 +352,15 @@ class TaskService:
         task.status = TaskStatus.ACTIVE
         if actual_duration_min_delta:
             task.actual_duration_min += actual_duration_min_delta
+        actual_progress_delta = max(Decimal("0.00"), Decimal(task.progress or 0) - previous_progress)
+        goal_progress_feedback = goal_progress_feedback_service.build_task_feedback(
+            db,
+            user_id=user_id,
+            task_id=task.id,
+            impact_type="partial_progress",
+            task_progress_delta=actual_progress_delta,
+            focus_minutes=actual_duration_min_delta,
+        )
         activity_event_service.add_event(
             db,
             user_id=user_id,
@@ -345,16 +371,20 @@ class TaskService:
             related_daily_plan_id=related_daily_plan_id,
             related_focus_session_id=related_focus_session_id,
             payload={
-                "progress_delta": float(normalized_delta),
+                "progress_delta": float(actual_progress_delta),
                 "previous_progress": float(previous_progress),
                 "current_progress": float(task.progress),
                 "actual_duration_min_delta": actual_duration_min_delta,
+                **goal_progress_feedback_service.event_payload(goal_progress_feedback),
             },
         )
+        task.goal_progress_feedback = goal_progress_feedback
         if commit:
             db.commit()
             db.refresh(task)
-            return self.get_task(db, task_id=task.id, user_id=user_id)
+            refreshed_task = self.get_task(db, task_id=task.id, user_id=user_id)
+            refreshed_task.goal_progress_feedback = goal_progress_feedback
+            return refreshed_task
         db.flush()
         return task
 

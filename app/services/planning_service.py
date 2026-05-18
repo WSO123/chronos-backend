@@ -441,7 +441,7 @@ class PlanningService:
         if item.status == status:
             return self._item_response(item)
 
-        self._apply_item_status(db, item=item, plan=plan, status=status, user_id=user_id)
+        goal_progress_feedback = self._apply_item_status(db, item=item, plan=plan, status=status, user_id=user_id)
         self._refresh_plan_stats(db, plan=plan, revision_id=plan.current_revision_id)
         activity_event_service.add_event(
             db,
@@ -456,7 +456,7 @@ class PlanningService:
         )
         db.commit()
         db.refresh(item)
-        return self._item_response(item)
+        return self._item_response(item, goal_progress_feedback=goal_progress_feedback)
 
     def apply_focus_result(
         self,
@@ -2738,7 +2738,7 @@ class PlanningService:
             sections[section_keys[item.section]].append(self._item_response(item))
         return sections
 
-    def _item_response(self, item: DailyPlanItem) -> dict:
+    def _item_response(self, item: DailyPlanItem, *, goal_progress_feedback: dict | None = None) -> dict:
         return {
             "daily_plan_item_id": item.id,
             "task_id": item.task_id,
@@ -2754,6 +2754,7 @@ class PlanningService:
             "value_level": item.task.value_level,
             "deadline": item.task.deadline,
             "score_breakdown": item.score_breakdown or {},
+            "goal_progress_feedback": goal_progress_feedback,
         }
 
     def _strategy_task_rationale_response(self, item: DailyPlanItem) -> dict:
@@ -3277,12 +3278,13 @@ class PlanningService:
         plan: DailyPlan,
         status: DailyPlanItemStatus,
         user_id: uuid.UUID,
-    ) -> None:
+    ) -> dict | None:
         if status == DailyPlanItemStatus.COMPLETED:
+            goal_progress_feedback = None
             if item.task.status != TaskStatus.COMPLETED:
                 progress_delta = self.minimum_viable_progress_delta_for_item(item)
                 if progress_delta is None:
-                    task_service.complete_task(
+                    updated_task = task_service.complete_task(
                         db,
                         task_id=item.task_id,
                         user_id=user_id,
@@ -3290,7 +3292,7 @@ class PlanningService:
                         commit=False,
                     )
                 else:
-                    task_service.record_partial_progress(
+                    updated_task = task_service.record_partial_progress(
                         db,
                         task_id=item.task_id,
                         user_id=user_id,
@@ -3298,8 +3300,9 @@ class PlanningService:
                         progress_delta=progress_delta,
                         commit=False,
                     )
+                goal_progress_feedback = getattr(updated_task, "goal_progress_feedback", None)
             item.status = DailyPlanItemStatus.COMPLETED
-            return
+            return goal_progress_feedback
 
         if status == DailyPlanItemStatus.POSTPONED:
             if item.task.status == TaskStatus.COMPLETED:
@@ -3313,7 +3316,7 @@ class PlanningService:
                     commit=False,
                 )
             item.status = DailyPlanItemStatus.POSTPONED
-            return
+            return None
 
         if status == DailyPlanItemStatus.PLANNED:
             if item.task.status == TaskStatus.COMPLETED:
@@ -3327,9 +3330,10 @@ class PlanningService:
                     commit=False,
                 )
             item.status = DailyPlanItemStatus.PLANNED
-            return
+            return None
 
         item.status = DailyPlanItemStatus.SKIPPED
+        return None
 
     def _get_active_plan(self, db: Session, *, user_id: uuid.UUID, plan_date: date) -> DailyPlan | None:
         stmt = select(DailyPlan).where(

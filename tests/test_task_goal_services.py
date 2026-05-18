@@ -329,6 +329,10 @@ class TaskGoalServiceTests(unittest.TestCase):
         self.assertEqual(len(detail["dependency_map"]["nodes"]), 3)
         self.assertEqual(detail["dependency_map"]["edges"], [])
         self.assertEqual(detail["ai_suggestion"]["next_action_task_id"], next_task.id)
+        self.assertIsNotNone(detail["today_feedback"])
+        self.assertEqual(detail["today_feedback"]["goal_id"], goal.id)
+        self.assertEqual(detail["today_feedback"]["progress_delta"], 0.33)
+        self.assertEqual(detail["today_feedback"]["completed_task_count"], 1)
         self.assertFalse(detail["actions"]["can_mark_complete"])
 
     def test_goal_progress_counts_partial_task_progress(self):

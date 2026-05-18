@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import FocusSessionStatus
 from app.schemas.common import TimestampedResponse
+from app.schemas.goal_feedback import GoalProgressFeedbackItemResponse
 
 
 class FocusSessionCreate(BaseModel):
@@ -33,3 +34,4 @@ class FocusSessionResponse(TimestampedResponse):
     actual_duration_min: int
     status: FocusSessionStatus
     interruption_reason: str | None
+    goal_progress_feedback: GoalProgressFeedbackItemResponse | None = None

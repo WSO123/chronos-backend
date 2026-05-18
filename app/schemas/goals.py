@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import GoalHomeFilter, GoalStatus, TaskStatus, ValueLevel
 from app.schemas.common import TimestampedResponse
+from app.schemas.goal_feedback import GoalProgressFeedbackItemResponse
 
 
 class GoalCreate(BaseModel):
@@ -107,6 +108,7 @@ class GoalDetailResponse(BaseModel):
     task_list: GoalTaskListResponse
     dependency_map: GoalDependencyMapResponse
     ai_suggestion: GoalAISuggestionResponse
+    today_feedback: GoalProgressFeedbackItemResponse | None = None
     actions: GoalActionsResponse
 
 

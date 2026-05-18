@@ -38,6 +38,7 @@ from app.models.user import User
 from app.services.activity_event_service import activity_event_service
 from app.services.ai_job_service import ai_job_service
 from app.services.errors import NotFoundError
+from app.services.goal_progress_feedback_service import goal_progress_feedback_service
 
 
 @dataclass(frozen=True)
@@ -142,7 +143,7 @@ class ReportService:
             return self.generate_daily_report(db, user_id=user_id, report_date=resolved_date)
         metrics = self.daily_metrics(db, user_id=user_id, report_date=resolved_date)
         if self._report_matches_metrics(report, metrics):
-            return report
+            return self._attach_goal_progress_feedback(db, report=report)
         return self.generate_daily_report(db, user_id=user_id, report_date=resolved_date)
 
     def generate_daily_report(
@@ -209,10 +210,10 @@ class ReportService:
             if self._is_daily_report_unique_violation(exc):
                 existing_report = self._get_daily_report(db, user_id=user_id, report_date=metrics.report_date)
                 if existing_report is not None:
-                    return existing_report
+                    return self._attach_goal_progress_feedback(db, report=existing_report)
             raise
         db.refresh(report)
-        return report
+        return self._attach_goal_progress_feedback(db, report=report)
 
     def daily_metrics(
         self,
@@ -258,6 +259,14 @@ class ReportService:
             completion_rate=completion_rate,
             planned_task_count=planned_task_count,
         )
+
+    def _attach_goal_progress_feedback(self, db: Session, *, report: DailyReport) -> DailyReport:
+        report.goal_progress_feedback = goal_progress_feedback_service.daily_feedback(
+            db,
+            user_id=report.user_id,
+            report_date=report.report_date,
+        )
+        return report
 
     def _get_daily_report(self, db: Session, *, user_id: uuid.UUID, report_date: date) -> DailyReport | None:
         stmt = select(DailyReport).where(

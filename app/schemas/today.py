@@ -11,6 +11,7 @@ from app.models.enums import (
     TaskStatus,
     ValueLevel,
 )
+from app.schemas.goal_feedback import GoalProgressFeedbackItemResponse
 
 
 class TodayStrategyResponse(BaseModel):
@@ -42,6 +43,7 @@ class TodayTaskResponse(BaseModel):
     value_level: ValueLevel
     deadline: date | None
     score_breakdown: dict = Field(default_factory=dict)
+    goal_progress_feedback: GoalProgressFeedbackItemResponse | None = None
 
 
 class TodaySectionsResponse(BaseModel):

@@ -16,6 +16,7 @@ from app.models.mixins import utc_now
 from app.models.user import User
 from app.services.activity_event_service import activity_event_service
 from app.services.errors import NotFoundError
+from app.services.goal_progress_feedback_service import goal_progress_feedback_service
 
 
 class GoalService:
@@ -124,6 +125,12 @@ class GoalService:
                 tasks=visible_tasks,
                 recommended_next_task=recommended_next_task,
                 today=today,
+            ),
+            "today_feedback": goal_progress_feedback_service.goal_feedback_for_date(
+                db,
+                user_id=user_id,
+                goal_id=goal.id,
+                target_date=today,
             ),
             "actions": {
                 "can_add_task": goal.status == GoalStatus.ACTIVE,

@@ -27,6 +27,7 @@ P2 的原则仍然是：增强目标和洞察，但不让 Today 变成复杂驾�
 | Goals Home | `GET /api/v1/goals/home` | Ready |
 | Goal Detail | `GET /api/v1/goals/{goal_id}/detail` | Ready |
 | Goal Progress Timeline | `GET /api/v1/goals/{goal_id}/progress-timeline` | Ready |
+| Goal Progress Feedback | Focus / Today / Daily Report / Goal Detail 中的 `goal_progress_feedback` | Ready |
 | Weekly Report | `GET /api/v1/reports/weekly` | Ready |
 | Monthly Report | `GET /api/v1/reports/monthly` | Ready |
 | Insight Detail | `GET /api/v1/insights/detail` | Ready |
@@ -62,6 +63,7 @@ P2 新增字段：
 - 用户需要解释排序时进入 Strategy Detail。
 - Today 排序由 Planning Engine v1 生成，已读取任务价值、优先级、截止时间、依赖、用户优先级修正、行为反馈、可用容量和任务语义规划信号；前端仍只按分区和 `sort_order` 渲染，不需要自己重排。
 - `score_breakdown` 可用于调试或 Strategy Detail，不建议在 Today 首屏展开。
+- 用户通过 `PATCH /api/v1/today/items/{item_id}` 完成目标任务时，单个 Today item response 会返回 `goal_progress_feedback`，用于轻量提示“本次完成让哪个 Goal 前进了多少”。普通 Today 列表不需要常驻展示该字段。
 
 ### GET `/api/v1/today/strategy`
 
@@ -447,6 +449,7 @@ prerequisite_task -> dependent_task
 - `task_list`
 - `dependency_map`
 - `ai_suggestion`
+- `today_feedback`
 - `actions`
 
 Dependency Map 已返回真实依赖边，方向为：
@@ -456,6 +459,8 @@ from_task_id -> to_task_id
 ```
 
 `task_list.recommended_next_task` 与 Goals 首页保持一致：优先推荐未被依赖阻塞的下一步，避免把用户直接带到暂时不能执行的后续任务。
+
+`today_feedback` 表示今天该 Goal 是否被执行推进，来自 `TASK_COMPLETED` / `TASK_PARTIAL_PROGRESS_RECORDED` 事件的确定性聚合。前端建议放在 Goal Progress 区块附近，以一句话提示为主，不做复杂仪表盘。
 
 ### GET `/api/v1/goals/{goal_id}/progress-timeline`
 
@@ -473,6 +478,50 @@ from_task_id -> to_task_id
 - 默认展示 5-8 个 milestones。
 
 ## 6. Reports
+
+### GET `/api/v1/reports/daily`
+
+Daily Report 返回 `goal_progress_feedback`：
+
+```json
+{
+  "goal_progress_feedback": {
+    "report_date": "2026-05-18",
+    "touched_goal_count": 1,
+    "advanced_goal_count": 1,
+    "high_value_goal_count": 1,
+    "total_progress_delta": 0.25,
+    "items": [
+      {
+        "goal_id": "uuid",
+        "goal_title": "完成论文初稿",
+        "goal_value_level": "high",
+        "task_id": null,
+        "task_title": null,
+        "impact_type": "daily_goal_progress",
+        "progress_before": 0.25,
+        "progress_after": 0.5,
+        "progress_delta": 0.25,
+        "task_progress_delta": 0.25,
+        "completed_task_count": 2,
+        "total_task_count": 4,
+        "unfinished_task_count": 2,
+        "focus_minutes": 35,
+        "message": "今天让「完成论文初稿」前进约 25%，当前完成度约 50%。",
+        "signal": "positive",
+        "source": "goal-progress-feedback-v1"
+      }
+    ],
+    "source": "goal-progress-feedback-v1"
+  }
+}
+```
+
+前端约束：
+
+- Daily Report 可以展示目标推进汇总，但不要替代 Today 的下一步执行入口。
+- `total_progress_delta` 是按当天被触碰 Goal 的完成率变化累加，用于反馈感，不用于重新排序。
+- 没有推进时 `items=[]`，前端应保持安静，不制造压力。
 
 ### GET `/api/v1/reports/weekly`
 
